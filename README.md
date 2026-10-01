@@ -23,7 +23,7 @@
 xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 ```
 
-要求 macOS 15+，Apple 芯片。
+要求 macOS 15+。通用包，Apple 芯片与 Intel 均可直接运行，无需安装任何依赖。
 
 ## 使用
 
@@ -44,10 +44,10 @@ xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 ## 从源码构建
 
 ```bash
-brew install opus
-./build.sh            # 产物在 build/VoiceKey.app
+./build.sh            # 产物在 build/VoiceKey.app（arm64 + x86_64 通用包）
 ```
 
+- 只需 Xcode 命令行工具；Opus 由 `Scripts/opus.sh` 从官方源码编译为通用静态库，首次构建自动下载并校验
 - 本地有 Apple Development 证书时自动用它签名，重建后系统权限不会丢失；可用 `SIGN_IDENTITY` 指定证书，`-` 为 ad-hoc
 - `VERSION` / `BUILD` 环境变量设置版本号
 - 调试识别链路：`build/VoiceKey.app/Contents/MacOS/VoiceKey --test doubao|wetype file.wav`

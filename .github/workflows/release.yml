@@ -14,9 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install libopus
-        run: brew list opus >/dev/null 2>&1 || brew install opus
-
       - name: Build
         run: |
           VER="${GITHUB_REF_NAME#v}"

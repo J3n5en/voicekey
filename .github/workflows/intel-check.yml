@@ -1,0 +1,21 @@
+name: Intel check
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: SIGN_IDENTITY=- ./build.sh && ditto -c -k --keepParent build/VoiceKey.app vk.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: vk, path: vk.zip }
+  run-intel:
+    needs: build
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: vk }
+      - run: |
+          ditto -x -k vk.zip . && uname -m && lipo -info VoiceKey.app/Contents/MacOS/VoiceKey
+          say -v Tingting -o t.aiff "今天天气怎么样，我们下午三点在公司门口集合" || say -o t.aiff "hello world, this is a test"
+          afconvert -f WAVE -d LEI16@16000 -c 1 t.aiff t.wav
+          for ch in wetype doubao; do VoiceKey.app/Contents/MacOS/VoiceKey --test $ch t.wav 2>&1 | tail -3 || true; done

@@ -7,7 +7,7 @@ let package = Package(
     targets: [
         .target(
             name: "COpus",
-            linkerSettings: [.unsafeFlags(["/opt/homebrew/lib/libopus.a"])]
+            linkerSettings: [.unsafeFlags([Context.packageDirectory + "/build/opus/libopus.a"])]
         ),
         .executableTarget(name: "VoiceKey", dependencies: ["COpus"]),
     ],

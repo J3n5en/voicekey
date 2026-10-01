@@ -3,7 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-xcrun swift build -c release
+./Scripts/opus.sh
+# 通用包：Apple 芯片与 Intel 共用一个 App
+xcrun swift build -c release --arch arm64 --arch x86_64
+BIN="$(xcrun swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/VoiceKey"
 
 # 图标由 Scripts/icon.swift 生成，脚本未改动则复用
 ICNS=build/AppIcon.icns
@@ -22,7 +25,7 @@ fi
 APP=build/VoiceKey.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/VoiceKey "$APP/Contents/MacOS/"
+cp "$BIN" "$APP/Contents/MacOS/"
 cp "$ICNS" "$APP/Contents/Resources/"
 VERSION="${VERSION:-0.1}"
 BUILD="${BUILD:-1}"
