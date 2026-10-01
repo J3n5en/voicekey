@@ -191,13 +191,7 @@ struct DoubaoDevice: Codable {
         if let data = try? Data(contentsOf: file), let d = try? JSONDecoder().decode(DoubaoDevice.self, from: data) {
             return d
         }
-        let d: DoubaoDevice
-        do {
-            d = try await register()
-        } catch {
-            // 注册域名常被广告拦截规则屏蔽（snssdk），退回内置已注册设备，下次再试注册
-            return DoubaoDevice(did: "1008713758675435", token: "RTIHIRzbwS")
-        }
+        let d = try await register()
         try? JSONEncoder().encode(d).write(to: file)
         return d
     }
