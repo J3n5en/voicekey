@@ -98,6 +98,8 @@ final class Recorder {
     private var queue: AudioQueueRef?
     private var pending: [Int16] = []
     private var continuation: AsyncStream<[Int16]>.Continuation?
+    /// 每 20ms 帧的音量（0...1），在采集队列回调
+    var onLevel: ((Float) -> Void)?
 
     func start() throws -> AsyncStream<[Int16]> {
         let (stream, cont) = AsyncStream<[Int16]>.makeStream()
@@ -112,7 +114,9 @@ final class Recorder {
             let count = Int(buffer.pointee.mAudioDataByteSize) / 2
             self.pending += UnsafeBufferPointer(start: buffer.pointee.mAudioData.assumingMemoryBound(to: Int16.self), count: count)
             while self.pending.count >= FrameConverter.frame {
-                continuation.yield(Array(self.pending.prefix(FrameConverter.frame)))
+                let frame = Array(self.pending.prefix(FrameConverter.frame))
+                continuation.yield(frame)
+                self.onLevel?(Recorder.level(frame))
                 self.pending.removeFirst(FrameConverter.frame)
             }
             AudioQueueEnqueueBuffer(q, buffer, 0, nil)
@@ -140,6 +144,14 @@ final class Recorder {
         }
         queue = q
         return stream
+    }
+
+    /// RMS → dBFS，-50dB 以下视为静音，-10dB 封顶
+    static func level(_ frame: [Int16]) -> Float {
+        let sum = frame.reduce(Float(0)) { $0 + Float($1) * Float($1) }
+        let rms = (sum / Float(frame.count)).squareRoot() / 32768
+        let db = 20 * log10(max(rms, 1e-6))
+        return min(max((db + 50) / 40, 0), 1)
     }
 
     func stop() {

@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         setIcon(recording: false)
+        recorder.onLevel = { [weak self] v in DispatchQueue.main.async { self?.hud.level(v) } }
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -51,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         recording = true
         setIcon(recording: true)
-        hud.show("正在聆听…", listening: true)
+        hud.show("", listening: true)
         let typer: StreamTyper? = (UserDefaults.standard.object(forKey: "streaming") as? Bool ?? true) ? StreamTyper() : nil
         session = Task { @MainActor [weak self] in
             guard let self else { return }

@@ -138,6 +138,46 @@ final class StreamTyper {
 final class HUDModel: ObservableObject {
     @Published var text = ""
     @Published var listening = false
+    @Published var level: CGFloat = 0
+
+    /// 起音快、释放慢，避免波形抖动
+    func push(_ raw: Float) {
+        let v = CGFloat(raw)
+        level = v > level ? level * 0.3 + v * 0.7 : level * 0.85 + v * 0.15
+    }
+}
+
+/// 多层正弦叠加，振幅随音量变化，两端收敛
+private struct VoiceWave: View {
+    var level: CGFloat
+    private let layers: [(freq: CGFloat, speed: CGFloat, scale: CGFloat, opacity: Double)] = [
+        (1.5, 5.0, 1.0, 0.95), (2.2, -3.6, 0.7, 0.55), (1.0, 2.4, 0.5, 0.35),
+    ]
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
+            Canvas { ctx, size in
+                let mid = size.height / 2
+                let amp = (0.06 + level * 0.94) * (mid - 1)
+                for layer in layers {
+                    ctx.opacity = layer.opacity
+                    var path = Path()
+                    stride(from: CGFloat(0), through: size.width, by: 1).forEach { x in
+                        let p = x / size.width
+                        let envelope = pow(sin(.pi * p), 2)
+                        let y = mid + sin(p * .pi * 2 * layer.freq + t * layer.speed) * amp * layer.scale * envelope
+                        x == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                    ctx.stroke(path, with: .linearGradient(
+                        Gradient(colors: [.cyan, .blue, .purple, .pink]),
+                        startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
+            }
+        }
+        .frame(width: 140, height: 34)
+    }
 }
 
 private struct HUDView: View {
@@ -145,18 +185,22 @@ private struct HUDView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: model.listening ? "mic.fill" : "waveform")
-                .foregroundStyle(model.listening ? .red : .secondary)
-                .symbolEffect(.pulse, isActive: model.listening)
-            Text(model.text)
-                .lineLimit(3)
-                .truncationMode(.head)
-                .frame(maxWidth: 480, alignment: .leading)
+            if model.listening {
+                VoiceWave(level: model.level)
+            } else {
+                Image(systemName: "waveform").foregroundStyle(.secondary)
+            }
+            if !model.text.isEmpty {
+                Text(model.text)
+                    .lineLimit(3)
+                    .truncationMode(.head)
+                    .frame(maxWidth: 480, alignment: .leading)
+            }
         }
         .font(.system(size: 14))
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
         .fixedSize()
     }
 }
@@ -182,8 +226,14 @@ final class HUD {
         hideWork?.cancel()
         model.text = text
         model.listening = listening
+        model.level = 0
         layout()
         panel.orderFrontRegardless()
+    }
+
+    func level(_ value: Float) {
+        guard model.listening else { return }
+        model.push(value)
     }
 
     func update(_ text: String) {
