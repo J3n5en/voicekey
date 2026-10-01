@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libopus
+        run: brew list opus >/dev/null 2>&1 || brew install opus
+
+      - name: Build
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || VER="0.0.0-dev"
+          VERSION="$VER" BUILD="$GITHUB_RUN_NUMBER" SIGN_IDENTITY=- ./build.sh
+          ditto -c -k --keepParent build/VoiceKey.app "VoiceKey-$VER.zip"
+          echo "ZIP=VoiceKey-$VER.zip" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceKey
+          path: ${{ env.ZIP }}
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" --title "VoiceKey $GITHUB_REF_NAME" --generate-notes \
+            --notes "未经 Apple 公证（ad-hoc 签名）。解压后首次运行前执行：\`xattr -dr com.apple.quarantine VoiceKey.app\`"
