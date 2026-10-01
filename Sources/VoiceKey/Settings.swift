@@ -46,6 +46,8 @@ struct SettingsView: View {
     @AppStorage("channel") private var channel = Channel.doubao.rawValue
     @AppStorage("hotkey") private var hotkey = Hotkey.rightOption.rawValue
     @AppStorage("streaming") private var streaming = true
+    @AppStorage("micUID") private var micUID = ""
+    @State private var microphones = Microphone.all()
     @State private var axTrusted = AXIsProcessTrusted()
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -61,6 +63,13 @@ struct SettingsView: View {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Toggle("边说边上屏", isOn: $streaming)
+                Picker("麦克风", selection: $micUID) {
+                    Text("系统默认").tag("")
+                    ForEach(microphones) { Text($0.name).tag($0.id) }
+                    if !micUID.isEmpty, !microphones.contains(where: { $0.id == micUID }) {
+                        Text("已断开（暂用系统默认）").tag(micUID)
+                    }
+                }
             } footer: {
                 Text(streaming ? "在任意输入框中长按快捷键说话，识别结果实时打到光标处，松开后按定稿修正。"
                                : "在任意输入框中长按快捷键说话，松开后识别结果粘贴到光标处。")
@@ -89,6 +98,8 @@ struct SettingsView: View {
         .onReceive(timer) { _ in
             axTrusted = AXIsProcessTrusted()
             micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+            let now = Microphone.all()
+            if now != microphones { microphones = now }
         }
     }
 

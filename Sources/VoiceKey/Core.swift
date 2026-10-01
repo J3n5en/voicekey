@@ -172,3 +172,4 @@ func appSupportFile(_ name: String) -> URL {
 extension Data {
     var hexUpper: String { map { String(format: "%02X", $0) }.joined() }
 }
+

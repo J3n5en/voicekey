@@ -1,4 +1,54 @@
 import AVFoundation
+import AudioToolbox
+import CoreAudio
+
+/// CoreAudio 输入设备；UID 存设置里，拔掉后自动回退系统默认
+struct Microphone: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let deviceID: AudioDeviceID
+
+    static var selectedUID: String { UserDefaults.standard.string(forKey: "micUID") ?? "" }
+
+    static func all() -> [Microphone] {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                              mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids.compactMap { id in
+            guard inputChannels(id) > 0,
+                  let uid = string(id, kAudioDevicePropertyDeviceUID), !uid.hasPrefix("CADefaultDeviceAggregate"),
+                  let name = string(id, kAudioObjectPropertyName) else { return nil }
+            return Microphone(id: uid, name: name, deviceID: id)
+        }
+    }
+
+    private static func inputChannels(_ id: AudioDeviceID) -> Int {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration,
+                                              mScope: kAudioDevicePropertyScopeInput,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr, size > 0 else { return 0 }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, raw) == noErr else { return 0 }
+        let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
+    private static func string(_ id: AudioDeviceID, _ selector: AudioObjectPropertySelector) -> String? {
+        var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value?.takeRetainedValue() as String?
+    }
+}
 
 /// 任意输入格式 → 16kHz/mono/Int16，按 20ms（320 样本）切帧
 final class FrameConverter {
@@ -42,48 +92,69 @@ final class FrameConverter {
     }
 }
 
+/// AudioQueue 直接按 16kHz/mono/Int16 采集（系统负责重采样），按 UID 指定输入设备
 final class Recorder {
-    private let engine = AVAudioEngine()
-    private let lock = NSLock()
-    private var converter: FrameConverter?
+    private let callbackQueue = DispatchQueue(label: "voicekey.recorder")
+    private var queue: AudioQueueRef?
+    private var pending: [Int16] = []
     private var continuation: AsyncStream<[Int16]>.Continuation?
 
     func start() throws -> AsyncStream<[Int16]> {
         let (stream, cont) = AsyncStream<[Int16]>.makeStream()
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { throw ASRError("没有可用的麦克风") }
-        let conv = try FrameConverter(from: format)
-        lock.withLock {
-            converter = conv
+        var format = AudioStreamBasicDescription(
+            mSampleRate: 16000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0)
+        var q: AudioQueueRef?
+        let status = AudioQueueNewInputWithDispatchQueue(&q, &format, 0, callbackQueue) { [weak self] q, buffer, _, _, _ in
+            guard let self, let continuation = self.continuation else { return }
+            let count = Int(buffer.pointee.mAudioDataByteSize) / 2
+            self.pending += UnsafeBufferPointer(start: buffer.pointee.mAudioData.assumingMemoryBound(to: Int16.self), count: count)
+            while self.pending.count >= FrameConverter.frame {
+                continuation.yield(Array(self.pending.prefix(FrameConverter.frame)))
+                self.pending.removeFirst(FrameConverter.frame)
+            }
+            AudioQueueEnqueueBuffer(q, buffer, 0, nil)
+        }
+        guard status == noErr, let q else { throw ASRError("麦克风打开失败 \(status)") }
+        let uid = Microphone.selectedUID
+        if !uid.isEmpty, Microphone.all().contains(where: { $0.id == uid }) {
+            var cf = uid as CFString
+            AudioQueueSetProperty(q, kAudioQueueProperty_CurrentDevice, &cf, UInt32(MemoryLayout<CFString>.size))
+        }
+        for _ in 0..<4 {
+            var buffer: AudioQueueBufferRef?
+            AudioQueueAllocateBuffer(q, UInt32(FrameConverter.frame * 2 * 2), &buffer)
+            if let buffer { AudioQueueEnqueueBuffer(q, buffer, 0, nil) }
+        }
+        callbackQueue.sync {
+            pending = []
             continuation = cont
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self else { return }
-            self.lock.withLock {
-                guard let converter = self.converter, let continuation = self.continuation else { return }
-                for f in converter.push(buffer) { continuation.yield(f) }
-            }
+        let started = AudioQueueStart(q, nil)
+        guard started == noErr else {
+            AudioQueueDispose(q, true)
+            callbackQueue.sync { continuation = nil }
+            throw ASRError("麦克风启动失败 \(started)")
         }
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            throw error
-        }
+        queue = q
         return stream
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        lock.withLock {
-            if let tail = converter?.flush() { continuation?.yield(tail) }
+        guard let q = queue else { return }
+        queue = nil
+        AudioQueueStop(q, true)
+        callbackQueue.sync {
+            if !pending.isEmpty {
+                continuation?.yield(pending + [Int16](repeating: 0, count: FrameConverter.frame - pending.count))
+            }
+            pending = []
             continuation?.finish()
             continuation = nil
-            converter = nil
         }
+        AudioQueueDispose(q, true)
     }
 }
 

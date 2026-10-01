@@ -33,6 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkey.start()
     }
 
+    /// 菜单栏图标可能被刘海/菜单栏管理器藏起来，再次打开 App 即弹出设置
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettings()
+        return false
+    }
+
     private func begin() {
         guard session == nil else { return }
         let engine: ASREngine = Channel.current == .wetype ? wetype : doubao
