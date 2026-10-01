@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>VoiceKey 设计稿</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  --g1:#22c3ff;--g2:#7b5cff;--g3:#ff3d8b;
+  --grad:linear-gradient(90deg,var(--g1),var(--g2) 55%,var(--g3));
+  --accent:#6a5cff;--ok:#1fb57a;--warn:#f0a020;--err:#ef4a5a;
+  --bg:#eef0f5;--win:rgba(250,250,253,.86);--side:rgba(236,237,243,.7);--card:#fff;--card2:#f6f6fa;
+  --line:rgba(20,20,40,.09);--fg:#16161f;--fg2:#5c5f6e;--fg3:#9a9cab;
+  --pop:rgba(252,252,255,.82);--shadow:0 24px 60px rgba(20,20,50,.22),0 2px 8px rgba(20,20,50,.08);
+  --r:12px;--rs:8px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif;
+}
+.dark{
+  --bg:#0e0f17;--win:rgba(28,29,40,.86);--side:rgba(22,23,33,.72);--card:#23243200;--card:#232433;--card2:#1b1c28;
+  --line:rgba(255,255,255,.08);--fg:#ececf3;--fg2:#a3a5b5;--fg3:#6c6e80;
+  --pop:rgba(30,31,44,.82);--shadow:0 24px 60px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3);--accent:#8b80ff;
+}
+.win{--r:8px;--rs:4px;--font:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.5 var(--font);color:var(--fg);background:var(--bg);min-height:100vh;transition:background .3s}
+button,input,select{font:inherit;color:inherit}
+
+/* 顶部控制条（设计稿工具，不属于产品界面） */
+.toolbar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 20px;
+  background:rgba(10,10,20,.92);color:#ddd;font-size:12px;backdrop-filter:blur(10px)}
+.toolbar b{color:#fff;font-size:13px;margin-right:6px;white-space:nowrap}
+.seg{display:inline-flex;background:rgba(255,255,255,.08);border-radius:7px;padding:2px}
+.seg button{border:0;background:none;padding:4px 11px;border-radius:5px;cursor:pointer;color:#bbb;white-space:nowrap}
+.seg button.on{background:#fff;color:#111}
+.toolbar .sp{flex:1}
+
+/* 桌面舞台 */
+.stage{position:relative;height:calc(100vh - var(--tb,46px));min-height:420px;overflow:hidden;
+  background:radial-gradient(1200px 600px at 15% 10%,#c9d6ff 0,transparent 60%),radial-gradient(900px 600px at 90% 90%,#ffd0e6 0,transparent 55%),#e6e9f2}
+.dark .stage{background:radial-gradient(1200px 600px at 15% 10%,#1f2a55 0,transparent 60%),radial-gradient(900px 600px at 90% 90%,#4a1838 0,transparent 55%),#0b0c14}
+.screen{display:none;position:absolute;inset:0}
+#vp{position:absolute;left:50%;top:50%;width:1100px;height:760px;transform:translate(-50%,-50%) scale(var(--k,1))}
+.screen.on{display:block}
+.center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+/* 窗口外壳 */
+.window{background:var(--win);backdrop-filter:blur(40px) saturate(1.6);border-radius:var(--r);box-shadow:var(--shadow);
+  border:1px solid var(--line);overflow:hidden;display:flex;flex-direction:column}
+.titlebar{height:38px;display:flex;align-items:center;padding:0 14px;gap:8px;flex:none;-webkit-user-select:none;user-select:none}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57}
+.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.wincaps{display:none;margin-left:auto}.wincaps span{width:46px;height:38px;display:grid;place-items:center;color:var(--fg2);font-size:11px}
+.win .lights{display:none}.win .wincaps{display:flex;margin-right:-14px}
+.win .titlebar .ttl{margin-left:4px}
+.ttl{font-size:12px;color:var(--fg2);display:flex;align-items:center;gap:8px}
+.mac .titlebar .ttl{position:absolute;left:50%;transform:translateX(-50%)}
+.logo{width:16px;height:16px;border-radius:4px;background:#171a2e;display:grid;place-items:center}
+.logo svg{width:12px;height:12px}
+
+/* 设置窗口 */
+#settings .window{width:860px;height:600px;position:relative}
+.body{flex:1;display:flex;min-height:0}
+.side{width:196px;background:var(--side);padding:6px 10px 12px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
+.brand .app{width:34px;height:34px;border-radius:9px;background:#171a2e;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.brand .app svg{width:26px;height:26px}
+.brand b{font-size:14px;display:block}.brand small{color:var(--fg3);font-size:11px}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:var(--rs);cursor:pointer;color:var(--fg2);border:0;background:none;text-align:left;width:100%}
+.nav svg{width:16px;height:16px;flex:none}
+.nav:hover{background:var(--line)}
+.nav.on{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.win .nav.on{position:relative}.win .nav.on:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--accent)}
+.side .foot{margin-top:auto;padding:10px;border-radius:var(--rs);background:var(--card);font-size:11px;color:var(--fg2);display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.main{flex:1;overflow:auto;padding:8px 28px 28px}
+.page{display:none}.page.on{display:block}
+h2{font-size:20px;font-weight:650;margin:6px 0 4px}
+.sub{color:var(--fg2);margin-bottom:18px}
+h3{font-size:12px;font-weight:600;color:var(--fg2);margin:20px 0 8px;letter-spacing:.02em}
+.group{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:50px}
+.row+.row{border-top:1px solid var(--line)}
+.row .lbl{flex:1}.row .lbl small{display:block;color:var(--fg3);font-size:11.5px}
+.sel{appearance:none;border:1px solid var(--line);background:var(--card2);border-radius:var(--rs);padding:5px 28px 5px 10px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--fg2) 50%),linear-gradient(135deg,var(--fg2) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 50%,calc(100% - 10px) 50%;background-size:4px 4px;background-repeat:no-repeat;min-width:160px}
+.sw{width:38px;height:22px;border-radius:11px;background:var(--line);position:relative;cursor:pointer;border:0;flex:none;transition:.2s}
+.sw:after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:.2s}
+.sw.on{background:var(--accent)}.sw.on:after{left:18px}
+.sw:disabled{opacity:.4;cursor:not-allowed}
+.win .sw{border:1px solid var(--fg2);background:none}.win .sw:after{background:var(--fg2);width:12px;height:12px;left:4px;top:4px;box-shadow:none}
+.win .sw.on{background:var(--accent);border-color:var(--accent)}.win .sw.on:after{background:#fff;left:21px}
+.btn{border:1px solid var(--line);background:var(--card2);padding:6px 14px;border-radius:var(--rs);cursor:pointer}
+.btn:hover{filter:brightness(.97)}
+.btn.pri{background:var(--accent);color:#fff;border-color:transparent}
+.btn.grad{background:var(--accent);color:#fff;border-color:transparent}
+.segc{display:inline-flex;background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:2px}
+.segc button{border:0;background:none;padding:4px 12px;border-radius:calc(var(--rs) - 2px);cursor:pointer;color:var(--fg2)}
+.segc button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:1px 7px;border-radius:20px;background:var(--card2);color:var(--fg2);border:1px solid var(--line)}
+.ok{color:var(--ok)}.err{color:var(--err)}
+
+/* 渠道卡片 */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ch{position:relative;background:var(--card);border:1.5px solid var(--line);border-radius:var(--r);padding:14px;cursor:pointer;transition:.15s;text-align:left}
+.ch:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.ch.on{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.ch .hd{display:flex;align-items:center;gap:10px}
+.ch .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px}
+.ch b{font-size:13.5px}.ch p{color:var(--fg2);font-size:12px;margin:8px 0 10px;min-height:36px}
+.ch .tags{display:flex;gap:5px;flex-wrap:wrap}
+.ch .radio{margin-left:auto;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--fg3)}
+.ch.on .radio{border:5px solid var(--accent)}
+.ch.wide{grid-column:span 2;display:flex;align-items:center;gap:12px}
+.ch.wide p{margin:0;min-height:0;flex:1}
+.dl{margin-top:10px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg2)}
+.bar{flex:1;height:5px;border-radius:3px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;background:var(--grad);border-radius:3px}
+.c-doubao{background:#fff url(logos/doubao.png) center/cover}.c-wetype{background:#fff url(logos/wetype.png) center/cover}
+.c-doubao,.c-wetype,.c-qwen,.c-offline{box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.ic.mini{width:16px;height:16px;border-radius:4px;flex:none;display:inline-grid;place-items:center;color:#fff;font-size:9px;font-weight:700}
+.c-qwen{background:#fff url(logos/qwen.png) center/cover}.c-offline{background:#fff url(logos/doubao.png) center/cover}
+.c-all{background:#171a2e url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20x2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%2322c3ff%22/%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%237b5cff%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23ff3d8b%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath%20d%3D%22M6%2032c8%200%2010-1%2014%208s6%2010%209%200%204-18%209-18%206%2012%2010%2012%206-2%2010-2%22%20fill%3D%22none%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%225%22%20stroke-linecap%3D%22round%22/%3E%3C/svg%3E") center/78% no-repeat}
+.note{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--fg2);background:var(--card2);border:1px dashed var(--line);border-radius:var(--rs);padding:8px 12px;margin-top:10px}
+
+/* 对比区 */
+.cmp{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.cmp-hero{display:flex;align-items:center;gap:14px;padding:4px 4px 14px}
+.mic{position:relative;width:46px;height:46px;border-radius:50%;border:0;background:var(--accent);color:#fff;display:grid;place-items:center;cursor:pointer;flex:none;
+  box-shadow:0 2px 6px rgba(0,0,0,.15);transition:transform .15s}
+.mic:hover{transform:scale(1.05)}.mic svg{width:20px;height:20px}
+.mic.on{background:var(--err)}
+.mic.on:before,.mic.on:after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--err);opacity:0;animation:ring 1.6s infinite}
+.mic.on:after{animation-delay:.8s}
+@keyframes ring{0%{transform:scale(.85);opacity:.6}100%{transform:scale(1.35);opacity:0}}
+.cmp-info{flex:none;min-width:170px;white-space:nowrap}.cmp-info b{display:block;font-size:13.5px}.cmp-info small{color:var(--fg3);font-size:11.5px}
+.cmp-hero canvas{flex:1;height:36px;min-width:0}
+.cmp-time{font-variant-numeric:tabular-nums;color:var(--fg2);font-size:12px;width:34px;text-align:right}
+.cmp-grid{display:grid;grid-template-columns:repeat(var(--n,2),minmax(0,1fr));gap:10px}
+.cc{position:relative;display:flex;flex-direction:column;border-radius:calc(var(--r) - 2px);background:var(--card2);border:1px solid var(--line);padding:11px 12px 10px;min-height:128px;transition:border-color .2s,box-shadow .2s}
+.cc.best{border-color:color-mix(in srgb,var(--ok) 55%,var(--line))}
+.cc.dim{opacity:.55}
+.cc-hd{display:flex;align-items:center;gap:8px}
+.cc-hd .ic{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;flex:none}
+.cc-hd b{font-size:12.5px;white-space:nowrap}
+.chip{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--fg2);white-space:nowrap}
+.badge{font-size:10.5px;padding:0 6px;border-radius:10px;line-height:17px;white-space:nowrap}
+.badge.cur{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.badge.fast{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.cc-tx{flex:1;margin:9px 0 10px;font-size:13.5px;line-height:1.6;word-break:break-all}
+.cc-tx .cur{display:inline-block;width:1.5px;height:14px;background:var(--accent);vertical-align:-2px;margin-left:1px;animation:blink 1s steps(1) infinite}
+.cc-tx .chg{background:color-mix(in srgb,var(--warn) 35%,transparent);border-radius:2px;animation:fade 1.6s forwards}
+.sk{display:block;height:9px;border-radius:5px;background:var(--line);margin:6px 0}
+.cc-ft{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg3);min-height:24px}
+.lat{flex:1;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.lat i{display:block;height:100%;border-radius:2px;background:var(--fg3);transition:width .4s}
+.cc.best .lat i{background:var(--ok)}
+.lat i.ind{width:30%;background:var(--accent);animation:ind 1s ease-in-out infinite}
+@keyframes ind{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+.cc-ft .t{font-variant-numeric:tabular-nums;width:38px;text-align:right}
+.use{border:0;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px;white-space:nowrap}
+.use:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.cc.error .cc-tx{color:var(--err);font-size:12.5px}
+
+/* 快捷键 */
+.keys{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.kcard .art{height:86px;border-radius:var(--rs);background:var(--card2);display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px;position:relative;overflow:hidden}
+.kbd{min-width:44px;height:36px;padding:0 10px;border-radius:7px;background:var(--card);border:1px solid var(--line);border-bottom-width:3px;display:grid;place-items:center;font-weight:600;font-size:13px}
+.kbd.press{animation:press 2.4s infinite}
+@keyframes press{0%,10%{transform:translateY(0);border-bottom-width:3px}15%,70%{transform:translateY(2px);border-bottom-width:1px;background:color-mix(in srgb,var(--accent) 18%,var(--card))}75%,100%{transform:none;border-bottom-width:3px}}
+.kbd.tap{animation:tap 2.4s infinite}
+@keyframes tap{0%,8%{transform:none}10%,16%{transform:translateY(2px);background:color-mix(in srgb,var(--accent) 18%,var(--card))}18%,100%{transform:none}}
+.kcard h4{font-size:14px;margin-bottom:2px}.kcard small{color:var(--fg2);font-size:12px;display:block;margin-bottom:12px}
+.rec{display:flex;align-items:center;gap:6px;border:1.5px dashed var(--accent);border-radius:var(--rs);padding:6px 10px;color:var(--fg2);cursor:pointer}
+.slider{display:flex;align-items:center;gap:10px}
+input[type=range]{accent-color:var(--accent);width:180px}
+
+/* 音频电平 */
+.meter{display:flex;gap:3px;align-items:flex-end;height:22px;width:180px}
+.meter i{flex:1;background:var(--line);border-radius:2px;height:100%}
+.meter i.lit{background:var(--ok)}.meter i.hi{background:var(--warn)}
+
+/* 引导 */
+#onboard .window{width:600px}
+.ob{padding:8px 40px 32px;text-align:center}
+.steps{display:flex;justify-content:center;gap:8px;margin:4px 0 22px}
+.steps i{width:28px;height:4px;border-radius:2px;background:var(--line)}.steps i.on{background:var(--grad)}
+.hero{width:72px;height:72px;border-radius:18px;background:#171a2e;display:grid;place-items:center;margin:0 auto 16px;box-shadow:0 10px 30px rgba(80,60,200,.35)}
+.hero svg{width:52px;height:52px}
+.ob h2{font-size:22px}.ob .sub{max-width:420px;margin:6px auto 22px}
+.perm{display:flex;align-items:center;gap:14px;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:10px}
+.perm .pi{width:36px;height:36px;border-radius:9px;background:var(--card2);display:grid;place-items:center;font-size:18px}
+.perm div{flex:1}.perm small{display:block;color:var(--fg2);font-size:12px}
+.obnav{display:flex;justify-content:space-between;align-items:center;margin-top:22px}
+.try{border:1px solid var(--line);background:var(--card);border-radius:var(--rs);padding:12px 14px;min-height:48px;text-align:left;font-size:14px}
+.try .caret{display:inline-block;width:1.5px;height:17px;background:var(--accent);vertical-align:-3px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.bigmeter{height:64px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);margin-bottom:12px;overflow:hidden}
+.bigmeter canvas{width:100%;height:100%}
+
+/* 胶囊浮层 */
+.capsule{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;
+  height:48px;padding:0 18px 0 8px;border-radius:24px;background:rgba(18,19,30,.82);backdrop-filter:blur(30px) saturate(1.8);
+  color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.35),inset 0 0 0 1px rgba(255,255,255,.08);transition:width .25s}
+.light-hud .capsule{background:rgba(255,255,255,.82);color:#16161f;box-shadow:0 12px 40px rgba(20,20,60,.2),inset 0 0 0 1px rgba(0,0,0,.06)}
+.capsule .ic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;flex:none}
+.capsule canvas{width:120px;height:32px;flex:none}
+.capsule .live{max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;direction:rtl;text-align:left}
+.capsule .live span{direction:ltr;unicode-bidi:plaintext}
+.capsule .st{font-size:12px;opacity:.7;white-space:nowrap}
+.capsule.err .ic{background:var(--err)!important}
+.spinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* 假的前台应用（用于浮层定位） */
+.app-doc{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);width:720px;height:420px}
+.doc{flex:1;padding:24px 32px;font-size:15px;line-height:1.8;background:var(--card)}
+.doc .muted{color:var(--fg3)}
+.doc .caret{display:inline-block;width:2px;height:20px;background:var(--fg);vertical-align:-4px;animation:blink 1s steps(1) infinite}
+.doc .ins{background:color-mix(in srgb,var(--accent) 22%,transparent);border-radius:3px;transition:background 1.2s}
+
+/* 候选面板 */
+.pick{position:absolute;width:480px;border-radius:14px;background:var(--pop);backdrop-filter:blur(36px) saturate(1.8);
+  box-shadow:var(--shadow);border:1px solid var(--line);overflow:hidden;transition:opacity .18s,transform .18s}
+.win .pick{border-radius:8px}
+.pick.hide{opacity:0;transform:translateY(6px);pointer-events:none}
+.pk-hd{display:flex;align-items:center;gap:10px;padding:10px 12px 8px 14px}
+.pk-hd canvas{flex:1;height:28px}
+.pk-hd .state{font-size:11.5px;color:var(--fg2);white-space:nowrap;display:flex;align-items:center;gap:6px}
+.rec-dot{width:8px;height:8px;border-radius:50%;background:var(--err);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.pk-row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px 9px 14px;cursor:pointer;position:relative;border-top:1px solid var(--line)}
+.pk-row.sel{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.pk-row.sel:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 2px 2px 0;background:var(--accent)}
+.pk-num{width:18px;height:18px;border-radius:5px;border:1px solid var(--line);font-size:11px;display:grid;place-items:center;color:var(--fg2);flex:none;margin-top:2px}
+.pk-row.sel .pk-num{background:var(--accent);color:#fff;border-color:transparent}
+.pk-name{width:90px;flex:none;font-size:12px;color:var(--fg2);margin-top:2px;display:flex;align-items:center;gap:6px}
+.sdot{width:7px;height:7px;border-radius:50%;flex:none}
+.s-listen{background:var(--g1);animation:pulse 1.2s infinite}.s-wait{background:var(--warn);animation:pulse .8s infinite}
+.s-final{background:var(--ok)}.s-error{background:var(--err)}.s-skip{background:var(--fg3)}
+.pk-text{flex:1;font-size:14px;line-height:1.55;min-height:22px;word-break:break-all}
+.pk-text .cur{display:inline-block;width:1.5px;height:15px;background:var(--accent);vertical-align:-2px;margin-left:1px;animation:blink 1s steps(1) infinite}
+.pk-text .chg{background:color-mix(in srgb,var(--warn) 35%,transparent);border-radius:2px;animation:fade 1.6s forwards}
+@keyframes fade{to{background:transparent}}
+.pk-text.muted{color:var(--fg3);font-size:13px}
+.pk-meta{font-size:11px;color:var(--fg3);white-space:nowrap;margin-top:3px;min-width:44px;text-align:right}
+.pk-row.shake{animation:shake .3s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.pk-ft{display:flex;gap:14px;padding:7px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--fg3)}
+.pk-ft kbd{font:inherit;padding:0 4px;border-radius:4px;border:1px solid var(--line);color:var(--fg2);margin-right:3px}
+.demo-ctl{position:absolute;right:24px;top:24px;display:flex;flex-direction:column;gap:8px;background:var(--pop);backdrop-filter:blur(20px);
+  border:1px solid var(--line);border-radius:12px;padding:12px;width:220px;font-size:12px;box-shadow:var(--shadow)}
+.demo-ctl b{font-size:12px}.demo-ctl label{display:flex;align-items:center;justify-content:space-between;color:var(--fg2)}
+.demo-ctl p{color:var(--fg3);font-size:11px}
+
+/* 托盘 */
+.menubar{position:absolute;top:0;left:0;right:0;height:26px;background:rgba(255,255,255,.45);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:0 14px;font-size:12.5px}
+.dark .menubar{background:rgba(0,0,0,.35)}
+.taskbar{position:absolute;bottom:0;left:0;right:0;height:46px;background:rgba(240,242,248,.82);backdrop-filter:blur(30px);display:none;align-items:center;justify-content:flex-end;gap:14px;padding:0 14px;font-size:12px;border-top:1px solid var(--line)}
+.dark .taskbar{background:rgba(28,28,36,.85)}
+.win .menubar{display:none}.win .taskbar{display:flex}
+.trayic{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;background:color-mix(in srgb,var(--fg) 12%,transparent)}
+.trayic svg{width:16px;height:16px}
+.menu{position:absolute;width:260px;background:var(--pop);backdrop-filter:blur(40px) saturate(1.8);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:5px;font-size:13px}
+.mac .menu{top:30px;right:120px}.win .menu{bottom:54px;right:90px;border-radius:8px}
+.mi{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:5px;cursor:default}
+.mi:hover{background:var(--accent);color:#fff}.mi:hover small{color:#ddd}
+.mi small{margin-left:auto;color:var(--fg3);font-size:12px}
+.mi.head{display:block;padding:8px 10px}.mi.head:hover{background:none;color:inherit}
+.mi.head b{display:flex;align-items:center;gap:6px}.mi.head small{display:block;margin:2px 0 0;font-size:11.5px}
+.msep{height:1px;background:var(--line);margin:4px 6px}
+.mcap{font-size:11px;color:var(--fg3);padding:4px 10px 2px}
+.chk{width:14px;text-align:center;color:var(--accent)}
+.mi:hover .chk{color:#fff}
+.cap-label{position:absolute;color:var(--fg2);font-size:12px;background:var(--pop);padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+</style>
+</head>
+<body class="mac">
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="wg" x1="0" x2="1"><stop offset="0" stop-color="#22c3ff"/><stop offset=".55" stop-color="#7b5cff"/><stop offset="1" stop-color="#ff3d8b"/></linearGradient></defs></svg>
+<div class="toolbar">
+  <b>VoiceKey 设计稿</b>
+  <div class="seg" id="scr">
+    <button data-s="settings" class="on">设置窗口</button><button data-s="onboard">首次引导</button>
+    <button data-s="capsule">胶囊浮层</button><button data-s="pick">候选面板</button><button data-s="tray">托盘菜单</button>
+  </div>
+  <span class="sp"></span>
+  <div class="seg" id="plat"><button data-p="mac" class="on">macOS</button><button data-p="win">Windows</button></div>
+  <div class="seg" id="theme"><button data-t="light" class="on">浅色</button><button data-t="dark">深色</button></div>
+</div>
+
+<div class="stage">
+<div id="vp">
+
+<!-- ============ 设置窗口 ============ -->
+<section class="screen on" id="settings">
+  <div class="window center">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="ttl"><span class="logo">LOGO</span>VoiceKey 设置</div>
+      <div class="wincaps"><span>—</span><span>☐</span><span>✕</span></div></div>
+    <div class="body">
+      <nav class="side">
+        <div class="brand"><div class="app">WAVE</div><div><b>VoiceKey</b><small>v1.0.0</small></div></div>
+        <button class="nav on" data-p="recog">ICON:recog 识别</button>
+        <button class="nav" data-p="keys">ICON:keys 快捷键</button>
+        <button class="nav" data-p="audio">ICON:audio 音频</button>
+        <button class="nav" data-p="output">ICON:output 输出</button>
+        <button class="nav" data-p="about">ICON:about 通用</button>
+        <div class="foot"><span class="dot"></span><span>就绪 · 长按 <b>右 ⌥</b> 说话</span></div>
+      </nav>
+      <main class="main">
+        <!-- 识别 -->
+        <div class="page on" id="p-recog">
+          <h2>识别渠道</h2><div class="sub">选择语音转文字的服务，随时可以在托盘菜单里切换。</div>
+          <div class="cards" id="cards"></div>
+          <div id="offnote"></div>
+          <div id="qwenopt"></div>
+          <h3>渠道对比</h3>
+          <div class="cmp">
+            <div class="cmp-hero"><button class="mic" id="cmpBtn"></button>
+              <div class="cmp-info"><b id="cmpTitle"></b><small id="cmpSub"></small></div>
+              <canvas id="cmpWave"></canvas><span class="cmp-time" id="cmpTime">0:00</span></div>
+            <div class="cmp-grid" id="cmpRows"></div>
+          </div>
+        </div>
+        <!-- 快捷键 -->
+        <div class="page" id="p-keys">
+          <h2>快捷键</h2><div class="sub">两种方式可同时使用；同一个修饰键也可以既长按又点按。</div>
+          <div class="keys">
+            <div class="kcard"><div class="art"><span class="kbd press" id="holdKey">右 ⌥</span><span style="color:var(--fg3)">按住说话 · 松开结束</span></div>
+              <h4>长按说话</h4><small>适合短句，松手即识别完成</small>
+              <select class="sel" id="holdSel"></select></div>
+            <div class="kcard"><div class="art"><span class="kbd tap" id="tapKey">右 ⌘</span><span style="color:var(--fg3)">点一下开始 · 停顿自动结束</span></div>
+              <h4>点按说话</h4><small>适合长段口述，再点一次可提前结束</small>
+              <div class="rec" id="tapRec"><span class="kbd" style="height:24px;min-width:0;font-size:12px" id="tapKey2">右 ⌘</span><span>点击后按下新的快捷键</span></div></div>
+          </div>
+          <h3>点按模式</h3>
+          <div class="group">
+            <div class="row"><div class="lbl">静音自动结束<small>停顿超过该时长视为说完</small></div>
+              <div class="slider"><input type="range" min="1" max="5" step=".5" value="1.5" id="sil"><b id="silv" style="width:44px">1.5 秒</b></div></div>
+            <div class="row"><div class="lbl">拦截组合键<small>设为组合键时，不再传给前台应用</small></div><button class="sw on"></button></div>
+          </div>
+        </div>
+        <!-- 音频 -->
+        <div class="page" id="p-audio">
+          <h2>音频</h2><div class="sub">选择用于识别的麦克风。</div>
+          <div class="group">
+            <div class="row"><div class="lbl">麦克风<small>设备断开时自动回落到系统默认</small></div>
+              <select class="sel"><option>系统默认（MacBook Pro 麦克风）</option><option>AirPods Pro</option><option>Shure MV7</option></select></div>
+            <div class="row"><div class="lbl">输入电平<small>对着麦克风说话测试</small></div><div class="meter" id="meter"></div></div>
+            <div class="row"><div class="lbl">开始/结束提示音</div><button class="sw"></button></div>
+          </div>
+        </div>
+        <!-- 输出 -->
+        <div class="page" id="p-output">
+          <h2>输出</h2><div class="sub">识别结果如何进入输入框。</div>
+          <div class="group">
+            <div class="row"><div class="lbl">边说边上屏<small id="stmNote">识别中的文字实时打到光标处，结束后按定稿修正</small></div><button class="sw on" id="stmSw"></button></div>
+            <div class="row"><div class="lbl">胶囊显示实时文字<small>在屏幕底部胶囊中预览识别内容</small></div><button class="sw on"></button></div>
+            <div class="row"><div class="lbl">上屏后恢复剪贴板<small>一次性粘贴模式下生效</small></div><button class="sw on"></button></div>
+          </div>
+        </div>
+        <!-- 通用 -->
+        <div class="page" id="p-about">
+          <h2>通用</h2><div class="sub">启动、权限与更新。</div>
+          <div class="group">
+            <div class="row"><div class="lbl">开机自动启动</div><button class="sw on"></button></div>
+            <div class="row"><div class="lbl">界面外观</div><div class="segc"><button class="on">跟随系统</button><button>浅色</button><button>深色</button></div></div>
+          </div>
+          <div class="mac-only">
+            <h3>权限</h3>
+            <div class="group">
+              <div class="row"><div class="lbl">辅助功能<small>监听快捷键、把文字打到光标处</small></div><span class="ok">● 已授权</span></div>
+              <div class="row"><div class="lbl">麦克风</div><button class="btn pri">去授权</button></div>
+            </div>
+          </div>
+          <h3>关于</h3>
+          <div class="group">
+            <div class="row"><div class="lbl">VoiceKey 1.0.0<small id="buildInfo">macOS · Apple 芯片</small></div><button class="btn">检查更新</button></div>
+            <div class="row"><div class="lbl">重新运行首次引导</div><button class="btn" onclick="go('onboard')">打开</button></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 首次引导 ============ -->
+<section class="screen" id="onboard">
+  <div class="window center">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="wincaps"><span>✕</span></div></div>
+    <div class="ob">
+      <div class="steps" id="obSteps"></div>
+      <div id="obBody"></div>
+      <div class="obnav"><button class="btn" id="obPrev">上一步</button><button class="btn pri" id="obNext">继续</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 胶囊浮层 ============ -->
+<section class="screen" id="capsule">
+  <div class="window app-doc"><div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="ttl">备忘录</div><div class="wincaps"><span>—</span><span>☐</span><span>✕</span></div></div>
+    <div class="doc">周会纪要<br><span id="capDoc"></span><span class="caret"></span></div></div>
+  <div class="capsule" id="cap"><div class="ic c-doubao"></div><canvas id="capWave"></canvas><div class="live"><span id="capText"></span></div><div class="st" id="capSt"></div></div>
+  <div class="demo-ctl">
+    <b>胶囊状态</b>
+    <div class="segc" id="capMode"><button data-m="listen" class="on">聆听</button><button data-m="wait">识别中</button><button data-m="error">出错</button></div>
+    <label>显示实时文字 <button class="sw on" id="capLive"></button></label>
+    <label>深色胶囊 <button class="sw on" id="capDark"></button></label>
+    <p>单渠道模式使用胶囊；「全部」模式不显示胶囊，改用候选面板。</p>
+  </div>
+</section>
+
+<!-- ============ 候选面板 ============ -->
+<section class="screen" id="pick">
+  <div class="window app-doc" id="pickDoc"><div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="ttl">邮件 · 新邮件</div><div class="wincaps"><span>—</span><span>☐</span><span>✕</span></div></div>
+    <div class="doc"><span class="muted">收件人：项目组<br>主题：本周项目评审安排</span><br><br>大家好，<br>本周进度已同步到看板，评审安排如下：<br><span id="pkDocText"></span><span class="caret" id="pkCaret"></span></div></div>
+  <div class="pick" id="pk">
+    <div class="pk-hd"><span class="rec-dot" id="pkDot"></span><canvas id="pkWave"></canvas><span class="state" id="pkState">聆听中</span></div>
+    <div id="pkRows"></div>
+    <div class="pk-ft"><span><kbd id="pkNum">1-4</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span><span style="margin-left:auto" id="pkHint"></span></div>
+  </div>
+  <div class="demo-ctl">
+    <b>演示</b>
+    <button class="btn grad" id="pkPlay">重新说一遍</button>
+    <button class="btn" id="pkRelease">松开快捷键</button>
+    <label>模拟微信渠道出错 <button class="sw" id="pkErr"></button></label>
+    <p>说话时面板即出现，各渠道逐字流式出字；松开后依次定稿，与中间结果不同的字会短暂高亮，右侧显示定稿耗时。可直接用键盘 1-4 / ↑↓ / 回车 / Esc 操作。</p>
+  </div>
+</section>
+
+<!-- ============ 托盘 ============ -->
+<section class="screen" id="tray">
+  <div class="menubar"><span>Wi-Fi</span><span class="trayic">WAVE</span><span>100%</span><span>周三 15:02</span></div>
+  <div class="taskbar"><span>^</span><span class="trayic">WAVE</span><span>中</span><span>15:02<br>2025/6/4</span></div>
+  <div class="menu">
+    <div class="mi head"><b><span class="dot"></span>就绪</b><small>长按 右 ⌥ 或点按 右 ⌘ 说话</small></div>
+    <div class="msep"></div>
+    <div class="mcap">识别渠道</div>
+    <div id="trayCh"></div>
+    <div class="msep"></div>
+    <div class="mi"><span class="chk"></span>暂停监听<small id="pauseKey">⌥⌘P</small></div>
+    <div class="mi"><span class="chk"></span>设置…<small id="setKey">⌘,</small></div>
+    <div class="msep"></div>
+    <div class="mi"><span class="chk"></span>退出 VoiceKey<small id="quitKey">⌘Q</small></div>
+  </div>
+</section>
+
+</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const WAVE=`<svg viewBox="0 0 64 64"><path d="M6 32c8 0 10-1 14 8s6 10 9 0 4-18 9-18 6 12 10 12 6-2 10-2" fill="none" stroke="url(#wg)" stroke-width="5" stroke-linecap="round"/></svg>`;
+const ICONS={
+  recog:'<path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  keys:'<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>',
+  audio:'<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>',
+  output:'<path d="M4 6h16M4 12h10M4 18h7M17 15l3 3-3 3"/>',
+  about:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'};
+document.body.innerHTML=document.body.innerHTML
+  .replace(/WAVE/g,WAVE).replace(/LOGO/g,WAVE)
+  .replace(/ICON:(\w+)/g,(_,k)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`);
+
+const S={plat:'mac',theme:'light',channel:'doubao',qwenOut:'polish'};
+const isMac=()=>S.plat==='mac';
+const CH=[
+  {id:'doubao',name:'豆包输入法',short:'',desc:'响应快、中英混说准确，适合日常输入。',tags:['在线','流式','推荐']},
+  {id:'wetype',name:'微信输入法',short:'',desc:'口语化表达识别稳定，数字自动规整。',tags:['在线','流式']},
+  {id:'qwen',name:'千问输入法',short:'',desc:'支持原文、润色、译成英文三种输出。',tags:['在线','润色','翻译']},
+  {id:'offline',name:'离线（本地模型）',short:'',desc:'完全在本机运行，断网可用，不上传音频。',tags:['离线','约 190MB'],macArm:true},
+];
+const engines=()=>CH.filter(c=>!c.macArm||isMac());
+const KEYS={mac:['右 ⌥','右 ⌘','右 ⌃','Fn'],win:['右 Alt','右 Ctrl','右 Win','CapsLock']};
+
+/* ---------- 全局切换 ---------- */
+function go(s){$$('#scr button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));$$('.screen').forEach(x=>x.classList.toggle('on',x.id===s));
+  if(s==='pick')pickPlay();if(s==='onboard'){ob=0;renderOb()}}
+$('#scr').onclick=e=>e.target.dataset.s&&go(e.target.dataset.s);
+$('#plat').onclick=e=>{const p=e.target.dataset.p;if(!p)return;S.plat=p;$$('#plat button').forEach(b=>b.classList.toggle('on',b===e.target));
+  document.body.classList.toggle('mac',p==='mac');document.body.classList.toggle('win',p==='win');
+  if(!isMac()&&S.channel==='offline')S.channel='doubao';renderAll()};
+$('#theme').onclick=e=>{const t=e.target.dataset.t;if(!t)return;$$('#theme button').forEach(b=>b.classList.toggle('on',b===e.target));document.body.classList.toggle('dark',t==='dark')};
+
+function renderAll(){renderCards();renderKeys();renderTray();renderOb();
+  $$('.mac-only').forEach(x=>x.style.display=isMac()?'':'none');
+  $('#buildInfo').textContent=isMac()?'macOS · Apple 芯片':'Windows 11 · x64';
+  $('#pauseKey').textContent=isMac()?'⌥⌘P':'Ctrl+Alt+P';$('#setKey').textContent=isMac()?'⌘,':'Ctrl+,';$('#quitKey').textContent=isMac()?'⌘Q':'';
+  $('.side .foot b').textContent=KEYS[S.plat][0];
+  if($('#pick').classList.contains('on'))pickPlay()}
+
+/* ---------- 设置：导航 ---------- */
+$('.side').onclick=e=>{const b=e.target.closest('.nav');if(!b)return;$$('.nav').forEach(n=>n.classList.toggle('on',n===b));$$('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.p))};
+document.addEventListener('click',e=>{if(e.target.classList.contains('sw')&&!e.target.disabled&&!e.target.id.startsWith('pk'))e.target.classList.toggle('on')});
+$$('.segc').forEach(s=>s.addEventListener('click',e=>{if(e.target.tagName==='BUTTON'){s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target))}}));
+
+function renderCards(){
+  const dlState=isMac()?`<div class="dl">模型 <div class="bar"><i style="width:64%"></i></div>64% · 121/190MB</div>`:'';
+  $('#cards').innerHTML=engines().map(c=>`<div class="ch ${S.channel===c.id?'on':''}" data-c="${c.id}">
+    <div class="hd"><span class="ic c-${c.id}">${c.short}</span><b>${c.name}</b><span class="radio"></span></div>
+    <p>${c.desc}</p><div class="tags">${c.tags.map(t=>`<span class="pill">${t}</span>`).join('')}</div>
+    ${c.id==='offline'&&S.channel==='offline'?dlState:''}</div>`).join('')+
+    (engines().length%2
+      ?`<div class="ch ${S.channel==='all'?'on':''}" data-c="all"><div class="hd"><span class="ic c-all"></span><b>全部渠道</b><span class="radio"></span></div>
+        <p>说话时各渠道同时出字，在光标上方挑选最满意的一条上屏。</p><div class="tags"><span class="pill">并行</span><span class="pill">流式候选</span></div></div>`
+      :`<div class="ch wide ${S.channel==='all'?'on':''}" data-c="all"><span class="ic c-all"></span>
+        <div style="flex:1"><b>全部渠道</b><p>说话时各渠道同时出字，在光标上方挑选最满意的一条上屏。</p></div><span class="radio"></span></div>`);
+  $('#offnote').innerHTML=isMac()?'':`<div class="note">ⓘ 离线识别仅支持 Apple 芯片的 Mac，Windows 版暂不提供。</div>`;
+  const showQ=S.channel==='qwen'||S.channel==='all';
+  $('#qwenopt').innerHTML=showQ?`<h3>千问输出</h3><div class="group"><div class="row"><div class="lbl">输出方式<small>润色会去除口头语并补全标点</small></div>
+    <div class="segc">${[['asr','原文'],['polish','润色'],['translate','译成英文']].map(([k,v])=>`<button class="${S.qwenOut===k?'on':''}" data-q="${k}">${v}</button>`).join('')}</div></div></div>`:'';
+  $$('#qwenopt [data-q]').forEach(b=>b.onclick=()=>{S.qwenOut=b.dataset.q;renderCards()});
+  const all=S.channel==='all';$('#stmSw').disabled=all;$('#stmNote').textContent=all?'「全部」模式下需先挑选结果，此项不可用':'识别中的文字实时打到光标处，结束后按定稿修正';
+  renderCmpRows();
+}
+$('#cards').onclick=e=>{const c=e.target.closest('.ch');if(c){S.channel=c.dataset.c;renderCards();renderTray()}};
+
+function renderKeys(){const k=KEYS[S.plat];$('#holdSel').innerHTML=k.map(x=>`<option>${x}</option>`).join('');$('#holdKey').textContent=k[0];
+  $('#tapKey').textContent=$('#tapKey2').textContent=k[1]}
+$('#sil').oninput=e=>$('#silv').textContent=e.target.value+' 秒';
+$('#tapRec').onclick=()=>{$('#tapRec span:last-child').textContent='请按下快捷键…';setTimeout(()=>{const v=isMac()?'⌃⇧Space':'Ctrl+Shift+Space';$('#tapKey2').textContent=$('#tapKey').textContent=v;$('#tapRec span:last-child').textContent='点击后按下新的快捷键'},1200)};
+
+/* ---------- 波形 ---------- */
+let level=0,levelT=0;
+function drawWave(cv,lv,opt={}){
+  const r=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w)return;
+  if(cv.width!==w*r){cv.width=w*r;cv.height=h*r}
+  const x=cv.getContext('2d');x.setTransform(r,0,0,r,0,0);x.clearRect(0,0,w,h);
+  const g=x.createLinearGradient(0,0,w,0);g.addColorStop(0,'#22c3ff');g.addColorStop(.55,'#7b5cff');g.addColorStop(1,'#ff3d8b');
+  const t=performance.now()/1000;
+  [[1,2.2,1],[.6,3.1,.5],[.35,1.6,.35]].forEach(([a,f,al],i)=>{
+    x.beginPath();x.globalAlpha=al;x.lineWidth=i?1.4:2.2;x.strokeStyle=g;
+    for(let px=0;px<=w;px+=2){const n=px/w,env=Math.sin(Math.PI*n)**2;
+      const y=h/2+Math.sin(n*f*Math.PI*2+t*(4+i)+i)*env*(h/2-2)*(opt.idle?.08:Math.max(.06,lv))*a;
+      px?x.lineTo(px,y):x.moveTo(px,y)}x.stroke()});
+  x.globalAlpha=1}
+function tick(){
+  const t=performance.now()/1000;level=.25+.55*Math.abs(Math.sin(t*2.3)*Math.sin(t*5.1+1))+.1*Math.random();
+  drawWave($('#capWave'),capMode==='listen'?level:0,{idle:capMode!=='listen'});
+  drawWave($('#pkWave'),pk.recording?level:0,{idle:!pk.recording});
+  drawWave($('#cmpWave'),cmp.recording?level:0,{idle:!cmp.recording});
+  const m=$('#meter');if(m.offsetParent){const n=Math.round(level*20);m.innerHTML=Array.from({length:20},(_,i)=>`<i class="${i<n?(i>15?'hi':'lit'):''}"></i>`).join('')}
+  const bm=$('#obWave');if(bm)drawWave(bm,level);
+  requestAnimationFrame(tick)}
+
+/* ---------- 流式模拟（候选面板 / 渠道对比共用） ---------- */
+const SCRIPT={
+  doubao:{draft:'明天下午三点在会议是开项目评审会记得带上周报',final:'明天下午三点在会议室开项目评审会，记得带上周报。',rate:7.5,lat:180},
+  wetype:{draft:'明天下午3点在会议室开项目评审会记得带上周保',final:'明天下午 3 点在会议室开项目评审会，记得带上周报。',rate:6.5,lat:260},
+  qwen:{draft:'明天下午三点在会议室开项目评审会记得带上周报',final:'明天下午 3 点在会议室召开项目评审会，请记得带上周报。',rate:6,lat:900},
+  offline:{draft:'明天下午三点在会议室开项目评审会记得带上周报',final:'明天下午三点在会议室开项目评审会记得带上周报',rate:5,lat:420},
+};
+function lcsMark(a,b){ // 返回 b 中不属于 a 的 LCS 的字符位置
+  const n=a.length,m=b.length,d=Array.from({length:n+1},()=>new Uint16Array(m+1));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)d[i][j]=a[i]===b[j]?d[i+1][j+1]+1:Math.max(d[i+1][j],d[i][j+1]);
+  const keep=new Set();let i=0,j=0;while(i<n&&j<m){if(a[i]===b[j]){keep.add(j);i++;j++}else if(d[i+1][j]>=d[i][j+1])i++;else j++}
+  return[...b].map((c,k)=>keep.has(k)||/[，。、 ]/.test(c)?esc(c):`<span class="chg">${esc(c)}</span>`).join('')}
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function makeSession(onUpdate,opts={}){
+  const s={recording:true,rows:[],timers:[],t0:performance.now(),release:null};
+  s.rows=engines().map(c=>{
+    const r={ch:c,text:'',state:'listen',meta:''};
+    if(c.id==='offline'&&opts.offlineMissing){r.state='skip';r.text='未下载模型，已跳过'}
+    return r});
+  s.timers.push(setInterval(()=>{if(!s.recording)return;const el=(performance.now()-s.t0)/1000;
+    s.rows.forEach(r=>{if(r.state!=='listen')return;const sc=SCRIPT[r.ch.id];r.text=sc.draft.slice(0,Math.min(sc.draft.length,Math.floor(el*sc.rate)))});onUpdate()},90));
+  s.stop=()=>{if(!s.recording)return;s.recording=false;const tr=performance.now();
+    s.rows.forEach(r=>{if(r.state!=='listen')return;r.state='wait';r.text=SCRIPT[r.ch.id].draft;
+      const sc=SCRIPT[r.ch.id];
+      s.timers.push(setTimeout(()=>{
+        if(opts.err&&r.ch.id==='wetype'){r.state='error';r.html=null;r.text='网络超时，点击重试';r.meta=''}
+        else{r.html=lcsMark(r.text,sc.final);r.text=sc.final;r.state='final';r.meta=((performance.now()-tr)/1000).toFixed(2)+'s'}
+        onUpdate(r)},sc.lat))});onUpdate()};
+  s.timers.push(setTimeout(()=>s.stop(),opts.dur||4200));
+  s.kill=()=>{s.timers.forEach(t=>{clearInterval(t);clearTimeout(t)})};
+  return s}
+
+function rowHTML(r,i,sel){
+  const st={listen:'s-listen',wait:'s-wait',final:'s-final',error:'s-error',skip:'s-skip'}[r.state];
+  const tip={listen:'聆听中',wait:'定稿中',final:'已定稿',error:'出错',skip:'跳过'}[r.state];
+  const body=r.state==='final'?(r.html||esc(r.text)):esc(r.text)+(r.state==='listen'||r.state==='wait'?'<span class="cur"></span>':'');
+  const muted=r.state==='skip'||r.state==='error'||!r.text;
+  return `<div class="pk-row ${sel?'sel':''}" data-i="${i}"><span class="pk-num">${i+1}</span>
+    <span class="pk-name" title="${tip}"><span class="sdot ${st}"></span><span class="ic mini c-${r.ch.id}">${r.ch.short}</span>${r.ch.name.replace('输入法','').replace('（本地模型）','')}</span>
+    <div class="pk-text ${muted?'muted':''}" style="${r.state==='error'?'color:var(--err)':''}">${body||'<span class="cur"></span>'}</div>
+    <span class="pk-meta">${r.state==='wait'?'<span class="spinner" style="border-color:var(--line);border-top-color:var(--accent);display:inline-block;width:12px;height:12px"></span>':r.meta}</span></div>`}
+
+/* 候选面板 */
+const pk={s:null,sel:0,userPicked:false,recording:false,open:false};
+function pickPlay(){
+  pk.s&&pk.s.kill();pk.sel=0;pk.userPicked=false;pk.open=true;
+  $('#pkDocText').innerHTML='';$('#pk').classList.remove('hide');
+  pk.s=makeSession(r=>{
+    if(r&&r.state==='final'&&!pk.userPicked){const cur=pk.s.rows[pk.sel];if(!cur||cur.state!=='final')pk.sel=pk.s.rows.indexOf(r)}
+    renderPick()},{err:$('#pkErr').classList.contains('on'),dur:4600});
+  pk.recording=true;renderPick();requestAnimationFrame(placePick)}
+function renderPick(){
+  if(!pk.s)return;pk.recording=pk.s.recording;
+  $('#pkRows').innerHTML=pk.s.rows.map((r,i)=>rowHTML(r,i,i===pk.sel)).join('');
+  const done=pk.s.rows.filter(r=>r.state==='final').length,wait=pk.s.rows.some(r=>r.state==='wait');
+  $('#pkDot').style.display=pk.recording?'':'none';
+  $('#pkNum').textContent='1-'+pk.s.rows.length;
+  $('#pkState').innerHTML=pk.recording?'聆听中 · 松开结束':wait?`<span class="spinner" style="border-color:var(--line);border-top-color:var(--accent)"></span>定稿中 ${done}/${pk.s.rows.length}`:'<span class="ok">● 全部完成</span>';
+  $('#pkHint').textContent=pk.recording?'可提前预选':'';$('#pkRelease').disabled=!pk.recording}
+function placePick(){const c=$('#pkCaret').getBoundingClientRect(),st=$('#vp').getBoundingClientRect(),p=$('#pk'),k=st.width/1100;
+  const x=(c.left-st.left)/k-28,top=(c.top-st.top)/k;
+  p.style.left=Math.max(8,Math.min(x,1100-p.offsetWidth-8))+'px';
+  if(top>260){p.style.top='auto';p.style.bottom=(760-top+14)+'px'}else{p.style.bottom='auto';p.style.top=((c.bottom-st.top)/k+14)+'px'}}
+function fit(){const tb=$('.toolbar').offsetHeight;document.body.style.setProperty('--tb',tb+'px');
+  const st=$('.stage');document.body.style.setProperty('--k',Math.min(1,st.clientWidth/1100,st.clientHeight/760));pk.open&&placePick()}
+function pickChoose(i){
+  if(!pk.open||!pk.s)return;const r=pk.s.rows[i];if(!r)return;pk.sel=i;pk.userPicked=true;
+  if(r.state!=='final'){renderPick();const el=$(`.pk-row[data-i="${i}"]`);if(r.state==='error'){}else{el.classList.add('shake')}return false}
+  return true}
+function pickCommit(){const r=pk.s.rows[pk.sel];if(!pickChoose(pk.sel))return;
+  pk.s.kill();pk.open=false;pk.recording=false;$('#pk').classList.add('hide');
+  $('#pkDocText').innerHTML=`<span class="ins">${esc(r.text)}</span>`;setTimeout(()=>{const i=$('#pkDocText .ins');i&&(i.style.background='transparent')},50)}
+function pickCancel(){pk.s&&pk.s.kill();pk.open=false;pk.recording=false;$('#pk').classList.add('hide')}
+$('#pkRows').onclick=e=>{const r=e.target.closest('.pk-row');if(!r)return;const i=+r.dataset.i;
+  if(pk.s.rows[i].state==='error'){pk.s.rows[i].state='wait';pk.s.rows[i].text=SCRIPT.wetype.draft;renderPick();setTimeout(()=>{const x=pk.s.rows[i];x.html=lcsMark(x.text,SCRIPT.wetype.final);x.text=SCRIPT.wetype.final;x.state='final';x.meta='0.31s';renderPick()},600);return}
+  if(pk.sel===i&&pk.s.rows[i].state==='final')pickCommit();else{pickChoose(i)}};
+$('#pkPlay').onclick=pickPlay;$('#pkRelease').onclick=()=>pk.s&&pk.s.stop();
+$('#pkErr').onclick=e=>{e.target.classList.toggle('on');pickPlay()};
+document.addEventListener('keydown',e=>{
+  if(!$('#pick').classList.contains('on')||!pk.open)return;const n=pk.s.rows.length;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){pk.sel=(pk.sel+(e.key==='ArrowDown'?1:-1)+n)%n;pk.userPicked=true;renderPick();e.preventDefault()}
+  else if(/^[1-9]$/.test(e.key)&&+e.key<=n){const i=+e.key-1;if(pk.sel===i)pickCommit();else pickChoose(i)}
+  else if(e.key==='Enter')pickCommit();else if(e.key==='Escape')pickCancel()});
+window.addEventListener('resize',fit);
+
+/* 设置页渠道对比 */
+const cmp={s:null,recording:false,timer:null};
+const MIC='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const STOP='<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg>';
+function renderCmpRows(){
+  const s=cmp.s,rows=s?s.rows:engines().map(c=>({ch:c,text:'',state:'idle',meta:''}));
+  cmp.recording=!!(s&&s.recording);
+  const fin=rows.filter(r=>r.state==='final'),waiting=rows.some(r=>r.state==='wait'||r.state==='listen');
+  const lat=r=>parseFloat(r.meta)||0,max=Math.max(...fin.map(lat),.001);
+  const best=!waiting&&fin.length?fin.reduce((a,b)=>lat(a)<=lat(b)?a:b):null;
+  $('#cmpRows').style.setProperty('--n',rows.length%2&&rows.length>1?3:2);
+  $('#cmpRows').innerHTML=rows.map(r=>{
+    const name=r.ch.name.replace('（本地模型）','');
+    const chip={idle:'',listen:'<span class="sdot s-listen"></span>聆听',wait:'<span class="sdot s-wait"></span>定稿中',final:'',error:'<span class="sdot s-error"></span>出错',skip:'未下载'}[r.state];
+    const badges=(S.channel===r.ch.id?'<span class="badge cur">当前</span>':'')+(r===best?'<span class="badge fast">最快</span>':'');
+    let tx;
+    if(r.state==='idle')tx='<span class="sk" style="width:92%"></span><span class="sk" style="width:64%"></span>';
+    else if(r.state==='skip')tx='<span style="color:var(--fg3);font-size:12.5px">离线模型未下载，本次跳过</span>';
+    else if(r.state==='final')tx=r.html||esc(r.text);
+    else tx=esc(r.text)+'<span class="cur"></span>';
+    let ft;
+    if(r.state==='final')ft=`<span class="lat"><i style="width:${Math.max(6,lat(r)/max*100)}%"></i></span><span class="t">${r.meta}</span>${S.channel===r.ch.id?'':`<button class="use" data-use="${r.ch.id}">设为默认</button>`}`;
+    else if(r.state==='skip')ft=`<span style="flex:1"></span><button class="use" data-dl>下载模型</button>`;
+    else if(r.state==='error')ft=`<span style="flex:1"></span><button class="use" data-retry>重试</button>`;
+    else ft=r.state==='wait'?`<span class="lat"><i class="ind"></i></span>`:'';
+    return `<div class="cc ${r===best?'best':''} ${r.state==='skip'?'dim':''} ${r.state==='error'?'error':''}">
+      <div class="cc-hd"><span class="ic c-${r.ch.id}">${r.ch.short}</span><b>${name}</b>${badges}<span class="chip">${chip}</span></div>
+      <div class="cc-tx">${tx}</div><div class="cc-ft">${ft}</div></div>`}).join('');
+  $('#cmpBtn').innerHTML=cmp.recording?STOP:MIC;$('#cmpBtn').classList.toggle('on',cmp.recording);
+  $('#cmpTitle').textContent=!s?'说一句话试试':cmp.recording?'正在聆听…':waiting?'各渠道定稿中…':'对比完成';
+  $('#cmpSub').textContent=!s?'各渠道同时识别，录音不会保存':cmp.recording?'点击红色按钮结束':waiting?'条形长度表示定稿耗时':best?`${best.ch.name.replace('（本地模型）','')} 最快，可设为默认`:'可重新录一句'}
+function cmpClock(){clearInterval(cmp.timer);const t0=performance.now();
+  cmp.timer=setInterval(()=>{if(!cmp.s||!cmp.s.recording){clearInterval(cmp.timer);return}const t=Math.floor((performance.now()-t0)/1000);$('#cmpTime').textContent=`0:${String(t).padStart(2,'0')}`},250)}
+$('#cmpBtn').onclick=()=>{if(cmp.recording){cmp.s.stop();return}cmp.s&&cmp.s.kill();$('#cmpTime').textContent='0:00';
+  cmp.s=makeSession(renderCmpRows,{dur:5000,offlineMissing:S.channel!=='offline'});cmpClock();renderCmpRows()};
+$('#cmpRows').onclick=e=>{const u=e.target.dataset.use;if(u){S.channel=u;renderCards();renderTray()}
+  if(e.target.dataset.dl){S.channel='offline';renderCards();renderTray()}
+  if(e.target.dataset.retry){const r=cmp.s.rows.find(x=>x.state==='error');r.state='wait';r.text=SCRIPT[r.ch.id].draft;renderCmpRows();
+    setTimeout(()=>{r.html=lcsMark(r.text,SCRIPT[r.ch.id].final);r.text=SCRIPT[r.ch.id].final;r.state='final';r.meta='0.34s';renderCmpRows()},600)}};
+
+/* ---------- 胶囊 ---------- */
+let capMode='listen',capTimer=null;
+function renderCap(){
+  clearInterval(capTimer);const live=$('#capLive').classList.contains('on'),cap=$('#cap'),txt=$('#capText'),st=$('#capSt');
+  cap.classList.toggle('err',capMode==='error');$('#capture')||0;
+  $('#capsule').classList.toggle('light-hud',!$('#capDark').classList.contains('on'));
+  $('#capWave').style.display=capMode==='listen'?'':'none';
+  txt.parentElement.style.display=live||capMode!=='listen'?'':'none';
+  if(capMode==='listen'){st.textContent=live?'':'聆听中';const full=SCRIPT.doubao.final.slice(0,-1);let i=0;
+    capTimer=setInterval(()=>{i=(i+1)%(full.length+12);const t=full.slice(0,Math.min(i,full.length));txt.textContent=t;$('#capDoc').textContent=t},140)}
+  else if(capMode==='wait'){txt.textContent='明天下午三点在会议室开项目评审会…';st.innerHTML='<span class="spinner"></span>';$('#capDoc').textContent=SCRIPT.doubao.final.slice(0,-1)}
+  else{txt.textContent='豆包识别失败：网络不可用';st.textContent='已切换到微信输入法重试'}}
+$('#capMode').onclick=e=>{if(e.target.dataset.m){capMode=e.target.dataset.m;renderCap()}};
+$('#capLive').onclick=e=>{e.target.classList.toggle('on');renderCap()};$('#capDark').onclick=e=>{e.target.classList.toggle('on');renderCap()};
+
+/* ---------- 托盘 ---------- */
+function renderTray(){
+  const list=[...engines(),{id:'all',name:'全部渠道（说完挑选）',short:''}];
+  $('#trayCh').innerHTML=list.map(c=>`<div class="mi"><span class="chk">${S.channel===c.id?'✓':''}</span><span class="ic mini c-${c.id}">${c.short||''}</span>${c.name}</div>`).join('');
+  const k=KEYS[S.plat];$('.mi.head small').textContent=`长按 ${k[0]} 或点按 ${k[1]} 说话`}
+
+/* ---------- 首次引导 ---------- */
+let ob=0;
+function obSteps(){
+  const k=KEYS[S.plat];
+  const st=[];
+  if(isMac())st.push({h:'授予两项权限',d:'VoiceKey 需要监听快捷键并把文字打到光标处。授权后会自动进入下一步。',b:`
+    <div class="perm"><span class="pi">⌨️</span><div><b>辅助功能</b><small>监听快捷键、上屏文字</small></div><span class="ok">● 已授权</span></div>
+    <div class="perm"><span class="pi">🎙</span><div><b>麦克风</b><small>录制语音用于识别</small></div><button class="btn pri">授权</button></div>`});
+  st.push({h:'试试麦克风',d:'说几句话，看看声波是否跟着起伏。',b:`<div class="bigmeter"><canvas id="obWave"></canvas></div>
+    <div class="group" style="text-align:left"><div class="row"><div class="lbl">输入设备</div><select class="sel"><option>系统默认</option><option>AirPods Pro</option></select></div></div>`});
+  st.push({h:'按住快捷键说一句',d:`点一下下面的输入框，按住 <b>${k[0]}</b> 说「你好 VoiceKey」，松开即上屏。`,b:`
+    <div class="try" id="tryBox"><span id="tryText" style="color:var(--fg3)">在这里试一试</span><span class="caret"></span></div>
+    <div style="margin-top:12px;color:var(--fg2);font-size:12px">也可以点按 <b>${k[1]}</b>，停顿后自动结束</div>`});
+  return st}
+function renderOb(){const st=obSteps();ob=Math.min(ob,st.length-1);
+  $('#obSteps').innerHTML=st.map((_,i)=>`<i class="${i<=ob?'on':''}"></i>`).join('');
+  const s=st[ob];$('#obBody').innerHTML=`${ob===0?`<div class="hero">${WAVE}</div>`:''}<h2>${s.h}</h2><div class="sub">${s.d}</div>${s.b}`;
+  $('#obPrev').style.visibility=ob?'visible':'hidden';$('#obNext').textContent=ob===st.length-1?'开始使用':'继续';
+  const tb=$('#tryBox');if(tb)tb.onclick=()=>{const t=$('#tryText');t.style.color='';let i=0,s='你好 VoiceKey';const iv=setInterval(()=>{t.textContent=s.slice(0,++i);if(i>=s.length){clearInterval(iv);t.innerHTML+=' <span class="ok">✓ 一切就绪</span>'}},110)}}
+$('#obPrev').onclick=()=>{ob--;renderOb()};$('#obNext').onclick=()=>{if(ob<obSteps().length-1){ob++;renderOb()}else go('settings')};
+
+renderAll();renderCap();fit();tick();
+</script>
+</body>
+</html>
