@@ -1,13 +1,15 @@
 #!/bin/bash
-# 打包 DMG：VoiceKey.app + 指向「应用程序」的快捷方式，用户拖拽安装。用法：Scripts/dmg.sh <out.dmg>
+# 打包 DMG：VoiceKey.app + 指向「应用程序」的快捷方式，用户拖拽安装。用法：Scripts/dmg.sh <out.dmg> [VoiceKey.app] [icon.icns]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="$1"
+APP="${2:-build/VoiceKey.app}"
+ICNS="${3:-build/AppIcon.icns}"
 STAGE=build/dmg
 rm -rf "$STAGE" "$OUT" && mkdir -p "$STAGE"
-cp -R build/VoiceKey.app "$STAGE/"
+cp -R "$APP" "$STAGE/VoiceKey.app"
 ln -s /Applications "$STAGE/Applications"
-cp build/AppIcon.icns "$STAGE/.VolumeIcon.icns"
+cp "$ICNS" "$STAGE/.VolumeIcon.icns"
 # 窗口布局与背景（DS_Store 依赖卷名 VoiceKey 与 .background/background.png 路径）
 mkdir "$STAGE/.background"
 cp Scripts/dmg/background.png "$STAGE/.background/"

@@ -1,0 +1,5 @@
+[env]
+# libopus 一律从源码静态编译（不依赖系统 pkg-config），兼容 CMake 4
+LIBOPUS_NO_PKG = "1"
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+MACOSX_DEPLOYMENT_TARGET = "13.0"

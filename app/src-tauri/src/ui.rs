@@ -71,7 +71,8 @@ fn cursor_area<R: Runtime>(app: &AppHandle<R>) -> Option<Area> {
 }
 
 fn overlay<R: Runtime>(app: &AppHandle<R>, label: &str, w: f64, h: f64) -> tauri::Result<WebviewWindow<R>> {
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App(format!("index.html#{label}").into()))
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .initialization_script(format!("window.__VK_VIEW = {label:?};"))
         .title(label)
         .transparent(true)
         .decorations(false)
@@ -100,7 +101,8 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) {
         let _ = w.set_focus();
         return;
     }
-    let b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html#settings".into()))
+    let b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .initialization_script("window.__VK_VIEW = \"settings\";")
         .title("VoiceKey 设置")
         .inner_size(860.0, 600.0)
         .resizable(false)
