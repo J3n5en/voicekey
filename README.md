@@ -15,7 +15,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载 `VoiceKey-x.y.z.zip` 并解压，拖到「应用程序」。
+从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载 `VoiceKey-x.y.z.dmg`，打开后将 VoiceKey 拖到「应用程序」。
 
 发布包为 ad-hoc 签名、未经 Apple 公证，首次运行前需解除隔离：
 
@@ -50,6 +50,7 @@ xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 - 只需 Xcode 命令行工具；Opus 由 `Scripts/opus.sh` 从官方源码编译为通用静态库，首次构建自动下载并校验
 - 本地有 Apple Development 证书时自动用它签名，重建后系统权限不会丢失；可用 `SIGN_IDENTITY` 指定证书，`-` 为 ad-hoc
 - `VERSION` / `BUILD` 环境变量设置版本号
+- 打包 DMG：`./Scripts/dmg.sh build/VoiceKey.dmg`（窗口布局与背景见 `Scripts/dmg/`）
 - 调试识别链路：`build/VoiceKey.app/Contents/MacOS/VoiceKey --test doubao|wetype file.wav`
 
 ## 发布
