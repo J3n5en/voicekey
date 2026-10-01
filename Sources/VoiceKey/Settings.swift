@@ -13,6 +13,10 @@ enum Hotkey: String, CaseIterable, Identifiable {
     case rightOption, rightCommand, rightControl, fn
     var id: String { rawValue }
     static var current: Hotkey { Hotkey(rawValue: UserDefaults.standard.string(forKey: "hotkey") ?? "") ?? .rightOption }
+    /// 点按开关聆听的键，"off" 关闭
+    static var tap: Hotkey? { Hotkey(rawValue: UserDefaults.standard.string(forKey: "tapHotkey") ?? Hotkey.rightCommand.rawValue) }
+    /// 点按模式下静音多久自动结束
+    static var silence: Double { UserDefaults.standard.object(forKey: "silence") as? Double ?? 1.5 }
 
     var title: String {
         switch self {
@@ -45,6 +49,8 @@ enum Hotkey: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @AppStorage("channel") private var channel = Channel.doubao.rawValue
     @AppStorage("hotkey") private var hotkey = Hotkey.rightOption.rawValue
+    @AppStorage("tapHotkey") private var tapHotkey = Hotkey.rightCommand.rawValue
+    @AppStorage("silence") private var silence = 1.5
     @AppStorage("streaming") private var streaming = true
     @AppStorage("micUID") private var micUID = ""
     @State private var microphones = Microphone.all()
@@ -62,6 +68,15 @@ struct SettingsView: View {
                 Picker("长按快捷键", selection: $hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Picker("点按快捷键", selection: $tapHotkey) {
+                    Text("关闭").tag("off")
+                    ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                if tapHotkey != "off" {
+                    Picker("静音自动结束", selection: $silence) {
+                        ForEach([1.0, 1.5, 2.0, 3.0, 5.0], id: \.self) { Text("\($0, specifier: "%g") 秒").tag($0) }
+                    }
+                }
                 Toggle("边说边上屏", isOn: $streaming)
                 Picker("麦克风", selection: $micUID) {
                     Text("系统默认").tag("")
@@ -71,8 +86,9 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text(streaming ? "在任意输入框中长按快捷键说话，识别结果实时打到光标处，松开后按定稿修正。"
-                               : "在任意输入框中长按快捷键说话，松开后识别结果粘贴到光标处。")
+                Text((streaming ? "在任意输入框中长按快捷键说话，识别结果实时打到光标处，松开后按定稿修正。"
+                                : "在任意输入框中长按快捷键说话，松开后识别结果粘贴到光标处。")
+                     + (tapHotkey == "off" ? "" : "\n或点按一下点按快捷键开始聆听，停顿 \(String(format: "%g", silence)) 秒自动结束，再点一下可提前结束。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("权限") {

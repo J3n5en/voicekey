@@ -1,14 +1,17 @@
 import AppKit
 import SwiftUI
 
-/// 监听修饰键：按下超过阈值才算长按开始；阈值内按了别的键视为组合键，放弃
+/// 监听修饰键：长按键按住超过阈值算长按；点按键在阈值内松开算点按；期间按了别的键视为组合键，放弃
 final class HotkeyMonitor {
     var onPress: () -> Void = {}
     var onLongPress: () -> Void = {}
     var onRelease: () -> Void = {}
+    var onTap: () -> Void = {}
     private static let threshold: TimeInterval = 0.3
     private var tap: CFMachPort?
-    private var down = false
+    private var downKey: Hotkey?
+    private var pressedAt = Date.distantPast
+    private var cancelled = false
     private var active = false
     private var timer: Timer?
 
@@ -41,28 +44,35 @@ final class HotkeyMonitor {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         case .keyDown:
-            if down, !active { cancelPending() }
+            if downKey != nil, !active { cancelPending() }
         case .flagsChanged:
-            let key = Hotkey.current
-            guard event.getIntegerValueField(.keyboardEventKeycode) == key.keyCode else {
-                if down, !active { cancelPending() }
+            let code = event.getIntegerValueField(.keyboardEventKeycode)
+            let hold = Hotkey.current, tapKey = Hotkey.tap
+            let key = downKey ?? [hold, tapKey].compactMap { $0 }.first { $0.keyCode == code }
+            guard let key, key.keyCode == code else {
+                if downKey != nil, !active { cancelPending() }
                 return
             }
             let pressed = event.flags.contains(key.flag)
-            if pressed, !down {
-                down = true
+            if pressed, downKey == nil {
+                downKey = key
+                pressedAt = Date()
+                cancelled = false
                 onPress()
+                guard key == hold else { return }
                 timer = Timer.scheduledTimer(withTimeInterval: Self.threshold, repeats: false) { [weak self] _ in
-                    guard let self, self.down else { return }
+                    guard let self, self.downKey != nil, !self.cancelled else { return }
                     self.active = true
                     self.onLongPress()
                 }
-            } else if !pressed, down {
-                down = false
+            } else if !pressed, downKey != nil {
+                downKey = nil
                 timer?.invalidate()
                 if active {
                     active = false
                     onRelease()
+                } else if key == tapKey, !cancelled, Date().timeIntervalSince(pressedAt) < Self.threshold {
+                    onTap()
                 }
             }
         default: break
@@ -70,6 +80,7 @@ final class HotkeyMonitor {
     }
 
     private func cancelPending() {
+        cancelled = true
         timer?.invalidate()
         timer = nil
     }

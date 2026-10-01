@@ -12,11 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var session: Task<Void, Never>?
     private var recording = false
+    /// 点按开启的会话：静音超时自动结束
+    private var autoStop = false
+    private var heardVoice = false
+    private var lastVoice = Date()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         setIcon(recording: false)
-        recorder.onLevel = { [weak self] v in DispatchQueue.main.async { self?.hud.level(v) } }
+        recorder.onLevel = { [weak self] v in
+            DispatchQueue.main.async {
+                self?.hud.level(v)
+                self?.checkSilence(v)
+            }
+        }
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -30,7 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if Channel.current == .wetype, self?.session == nil { self?.wetype.prewarm() }
         }
         hotkey.onLongPress = { [weak self] in self?.begin() }
-        hotkey.onRelease = { [weak self] in self?.end() }
+        hotkey.onRelease = { [weak self] in
+            if self?.autoStop == false { self?.end() }
+        }
+        hotkey.onTap = { [weak self] in
+            guard let self else { return }
+            if self.recording { self.end() } else { self.begin(autoStop: true) }
+        }
         hotkey.start()
     }
 
@@ -40,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    private func begin() {
+    private func begin(autoStop: Bool = false) {
         guard session == nil else { return }
         let engine: ASREngine = Channel.current == .wetype ? wetype : doubao
         let audio: AsyncStream<[Int16]>
@@ -51,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         recording = true
+        self.autoStop = autoStop
+        heardVoice = false
+        lastVoice = Date()
         setIcon(recording: true)
         hud.show("", listening: true)
         let typer: StreamTyper? = (UserDefaults.standard.object(forKey: "streaming") as? Bool ?? true) ? StreamTyper() : nil
@@ -84,6 +102,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 说过话后静音超过设定时长即结束；一直没开口则 8 秒后放弃
+    private func checkSilence(_ level: Float) {
+        guard recording, autoStop else { return }
+        if level > 0.3 {
+            heardVoice = true
+            lastVoice = Date()
+        } else if Date().timeIntervalSince(lastVoice) > (heardVoice ? Hotkey.silence : 8) {
+            end()
+        }
+    }
+
     private func end() {
         guard recording else { return }
         stopRecording()
@@ -93,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func stopRecording() {
         guard recording else { return }
         recording = false
+        autoStop = false
         recorder.stop()
         setIcon(recording: false)
     }
