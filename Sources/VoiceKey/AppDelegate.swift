@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let hud = HUD()
     private let doubao = DoubaoEngine()
     private let wetype = WeTypeEngine()
+    private let offline = OfflineEngine()
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var session: Task<Void, Never>?
@@ -36,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         hotkey.onPress = { [weak self] in
-            if Channel.current == .wetype, self?.session == nil { self?.wetype.prewarm() }
+            guard self?.session == nil else { return }
+            switch Channel.current {
+            case .wetype: self?.wetype.prewarm()
+            case .offline where OfflineAssets.installed: OfflineWorker.shared.prewarm()
+            default: break
+            }
         }
         hotkey.onLongPress = { [weak self] in self?.begin() }
         hotkey.onRelease = { [weak self] in
@@ -57,7 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func begin(autoStop: Bool = false) {
         guard session == nil else { return }
-        let engine: ASREngine = Channel.current == .wetype ? wetype : doubao
+        let engine: ASREngine = switch Channel.current {
+        case .doubao: doubao
+        case .wetype: wetype
+        case .offline: offline
+        }
         let audio: AsyncStream<[Int16]>
         do {
             audio = try recorder.start()
@@ -144,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
-        for c in Channel.allCases {
+        for c in Channel.available {
             let item = NSMenuItem(title: c.title, action: #selector(selectChannel(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = c.rawValue
@@ -165,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func selectChannel(_ sender: NSMenuItem) {
         UserDefaults.standard.set(sender.representedObject as? String, forKey: "channel")
+        if Channel.current == .offline { MainActor.assumeIsolated { OfflineAssets.shared.download() } }
     }
 
     @objc private func openSettings() {

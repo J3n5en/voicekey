@@ -9,7 +9,9 @@ let package = Package(
             name: "COpus",
             linkerSettings: [.unsafeFlags([Context.packageDirectory + "/build/opus/libopus.a"])]
         ),
-        .executableTarget(name: "VoiceKey", dependencies: ["COpus"]),
+        // 离线识别：在本进程内加载安卓 ELF so（仅 arm64 生效，x86_64 编译为空桩）
+        .target(name: "CHanbao", cSettings: [.unsafeFlags(["-O2", "-Wno-unused-function"])]),
+        .executableTarget(name: "VoiceKey", dependencies: ["COpus", "CHanbao"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -6,7 +6,7 @@
 
 ## 功能
 
-- **两个识别渠道**：豆包输入法、微信输入法云端识别，可在设置中切换
+- **三个识别渠道**：豆包输入法、微信输入法云端识别，以及完全本地运行的离线识别（仅 Apple 芯片），可在设置中切换
 - **长按说话**：按住右 ⌥ / 右 ⌘ / 右 ⌃ / Fn 开始，松开结束
 - **点按说话**：自定义快捷键（单个修饰键或任意组合键），点一下开始，停顿 1–5 秒自动结束，再点一下可提前结束
 - **边说边上屏**：识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴
@@ -39,6 +39,8 @@ xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 | 静音自动结束 | 1.5 秒 |
 | 边说边上屏 | 开 |
 
+**离线识别**：首次选择「离线」渠道时自动下载引擎库（约 8MB，来自本仓库 [offline-libs](https://github.com/J3n5en/voicekey/releases/tag/offline-libs) Release）和模型（约 177MB，来自字节 CDN），保存在 `~/Library/Application Support/VoiceKey/offline/`。之后断网也能用；识别时会在后台进程中占用约 1GB 内存，空闲 5 分钟后自动释放。
+
 单个修饰键可同时作为长按键和点按键：快速点一下为点按，按住超过 0.3 秒为长按。设为组合键的点按快捷键会被 VoiceKey 拦截，不再传给前台应用。
 
 ## 从源码构建
@@ -67,6 +69,8 @@ git tag v0.2.0 && git push origin v0.2.0
 |---|---|
 | `Doubao.swift` | 豆包：设备注册、WebSocket + protobuf 流式识别 |
 | `WeType.swift` | 微信：secp128r1 ECDH、AES-256-ECB、snappy、protobuf 流式识别 |
+| `Offline.swift` | 离线：资源下载与校验、识别子进程管理 |
+| `CHanbao/` | 在 macOS 进程内加载安卓 ELF 引擎库（ELF 加载器 + bionic 兼容层） |
 | `Audio.swift` | AudioQueue 采集 16kHz 单声道、音量计算、设备枚举 |
 | `System.swift` | 全局快捷键（CGEventTap）、上屏、HUD |
 | `Core.swift` | Opus 编码、protobuf 编解码、WebSocket 封装 |

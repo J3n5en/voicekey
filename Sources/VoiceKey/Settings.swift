@@ -3,10 +3,21 @@ import AVFoundation
 import SwiftUI
 
 enum Channel: String, CaseIterable, Identifiable {
-    case doubao, wetype
+    case doubao, wetype, offline
     var id: String { rawValue }
-    var title: String { self == .doubao ? "豆包输入法" : "微信输入法" }
-    static var current: Channel { Channel(rawValue: UserDefaults.standard.string(forKey: "channel") ?? "") ?? .doubao }
+    var title: String {
+        switch self {
+        case .doubao: "豆包输入法"
+        case .wetype: "微信输入法"
+        case .offline: "离线（本地模型）"
+        }
+    }
+    /// 离线渠道仅 Apple 芯片可用
+    static var available: [Channel] { OfflineAssets.supported ? allCases : [.doubao, .wetype] }
+    static var current: Channel {
+        let c = Channel(rawValue: UserDefaults.standard.string(forKey: "channel") ?? "") ?? .doubao
+        return available.contains(c) ? c : .doubao
+    }
 }
 
 enum Hotkey: String, CaseIterable, Identifiable {
@@ -178,6 +189,7 @@ struct SettingsView: View {
     @AppStorage("streaming") private var streaming = true
     @AppStorage("micUID") private var micUID = ""
     @State private var microphones = Microphone.all()
+    @ObservedObject private var offline = OfflineAssets.shared
     @State private var axTrusted = AXIsProcessTrusted()
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -186,9 +198,11 @@ struct SettingsView: View {
         Form {
             Section {
                 Picker("识别渠道", selection: $channel) {
-                    ForEach(Channel.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(Channel.available) { Text($0.title).tag($0.rawValue) }
                 }
                 .pickerStyle(.radioGroup)
+                .onChange(of: channel) { if $1 == Channel.offline.rawValue { offline.download() } }
+                if channel == Channel.offline.rawValue { OfflineStatus(offline: offline) }
                 Picker("长按快捷键", selection: $hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -242,5 +256,26 @@ struct SettingsView: View {
 
     private func openPrivacy(_ anchor: String) {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!)
+    }
+}
+
+/// 离线模型下载状态
+struct OfflineStatus: View {
+    @ObservedObject var offline: OfflineAssets
+
+    var body: some View {
+        LabeledContent("离线模型（约 190MB）") {
+            switch offline.state {
+            case .ready: Text("已就绪").foregroundStyle(.green)
+            case .downloading(let p):
+                HStack { ProgressView(value: p).frame(width: 120); Text("\(Int(p * 100))%").monospacedDigit() }
+            case .missing: Button("下载") { offline.download() }
+            case .failed(let msg):
+                HStack {
+                    Text(msg).foregroundStyle(.red).lineLimit(1)
+                    Button("重试") { offline.download() }
+                }
+            }
+        }
     }
 }
