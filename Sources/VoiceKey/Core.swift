@@ -138,6 +138,7 @@ final class WebSocket {
     var alive: Bool { task.state == .running && task.closeCode == .invalid }
 
     func send(_ data: Data) async throws { try await task.send(.data(data)) }
+    func send(text: String) async throws { try await task.send(.string(text)) }
 
     func receive(timeout: TimeInterval) async throws -> Data {
         let task = self.task

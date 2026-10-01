@@ -7,6 +7,9 @@ final class HotkeyMonitor {
     var onLongPress: () -> Void = {}
     var onRelease: () -> Void = {}
     var onTap: () -> Void = {}
+    var onEscape: () -> Void = {}
+    /// 挑选浮层打开时吞掉方向键/回车/Esc；返回 true 表示已处理
+    var onPickKey: ((PickKey) -> Bool)?
     /// 设置里录制快捷键时暂停
     static var paused = false
     private static let threshold: TimeInterval = 0.3
@@ -48,11 +51,24 @@ final class HotkeyMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return false
         }
-        guard !Self.paused else { return false }
         let code = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyDown {
+            let pick: PickKey? = switch code {
+            case 126: .up
+            case 125: .down
+            case 36, 76: .enter
+            case 53: .escape
+            default: nil
+            }
+            if let pick, onPickKey?(pick) == true { return true }
+        }
+        guard !Self.paused else { return false }
         let shortcut = Shortcut.tap
         switch type {
         case .keyDown:
+            if code == 53, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                onEscape()
+            }
             if let s = shortcut, !s.isModifier, code == s.keyCode,
                event.flags.intersection(Shortcut.mask).rawValue == s.modifiers {
                 swallowedCode = code
@@ -182,6 +198,7 @@ final class HUDModel: ObservableObject {
 /// 多层正弦叠加，振幅随音量变化，两端收敛
 private struct VoiceWave: View {
     var level: CGFloat
+    var idle = false
     private let layers: [(freq: CGFloat, speed: CGFloat, scale: CGFloat, opacity: Double)] = [
         (1.5, 5.0, 1.0, 0.95), (2.2, -3.6, 0.7, 0.55), (1.0, 2.4, 0.5, 0.35),
     ]
@@ -191,14 +208,17 @@ private struct VoiceWave: View {
             let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
             Canvas { ctx, size in
                 let mid = size.height / 2
-                let amp = (0.06 + level * 0.94) * (mid - 1)
+                let live = 0.06 + level * 0.94
+                let idleAmp = 0.16 + 0.10 * (sin(t * 2.1) * 0.5 + 0.5)
+                let amp = (idle ? idleAmp : live) * (mid - 1)
+                let speed: CGFloat = idle ? 0.42 : 1
                 for layer in layers {
                     ctx.opacity = layer.opacity
                     var path = Path()
                     stride(from: CGFloat(0), through: size.width, by: 1).forEach { x in
                         let p = x / size.width
                         let envelope = pow(sin(.pi * p), 2)
-                        let y = mid + sin(p * .pi * 2 * layer.freq + t * layer.speed) * amp * layer.scale * envelope
+                        let y = mid + sin(p * .pi * 2 * layer.freq + t * layer.speed * speed) * amp * layer.scale * envelope
                         x == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
                     }
                     ctx.stroke(path, with: .linearGradient(
@@ -217,12 +237,8 @@ private struct HUDView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if model.listening {
-                VoiceWave(level: model.level)
-            } else {
-                Image(systemName: "waveform").foregroundStyle(.secondary)
-            }
-            if !model.text.isEmpty {
+            VoiceWave(level: model.listening ? model.level : 0, idle: !model.listening)
+            if !model.text.isEmpty, model.text != "识别中…" {
                 Text(model.text)
                     .lineLimit(3)
                     .truncationMode(.head)
@@ -288,5 +304,214 @@ final class HUD {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         guard let frame = screen?.visibleFrame else { return }
         panel.setFrame(NSRect(x: frame.midX - size.width / 2, y: frame.minY + 80, width: size.width, height: size.height), display: true)
+    }
+}
+
+enum PickKey { case up, down, enter, escape }
+
+/// 当前输入焦点的选区/控件屏幕坐标（Cocoa，原点在左下）
+enum Caret {
+    static func bounds() -> NSRect? {
+        let system = AXUIElementCreateSystemWide()
+        var focused: AnyObject?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let el = focused else { return nil }
+        let element = el as! AXUIElement
+        var rangeRef: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+           let range = rangeRef {
+            var boundsRef: AnyObject?
+            if AXUIElementCopyParameterizedAttributeValue(
+                element, kAXBoundsForRangeParameterizedAttribute as CFString, range, &boundsRef
+            ) == .success, let val = boundsRef {
+                var r = CGRect.zero
+                if AXValueGetValue(val as! AXValue, .cgRect, &r), r.width + r.height > 0 {
+                    return cocoa(r)
+                }
+            }
+        }
+        var pos: AnyObject?
+        var size: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &pos) == .success,
+           AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+           let p = pos, let s = size {
+            var pt = CGPoint.zero
+            var sz = CGSize.zero
+            if AXValueGetValue(p as! AXValue, .cgPoint, &pt), AXValueGetValue(s as! AXValue, .cgSize, &sz) {
+                return cocoa(CGRect(origin: pt, size: sz))
+            }
+        }
+        return nil
+    }
+
+    private static func cocoa(_ ax: CGRect) -> NSRect {
+        let h = NSScreen.screens.map(\.frame.maxY).max() ?? 0
+        return NSRect(x: ax.origin.x, y: h - ax.origin.y - ax.height, width: max(ax.width, 1), height: max(ax.height, 1))
+    }
+}
+
+struct PickItem: Identifiable {
+    var id: String { channel.rawValue }
+    let channel: Channel
+    var text = ""
+    var status = ""
+}
+
+final class PickModel: ObservableObject {
+    @Published var items: [PickItem] = []
+    @Published var selected = 0
+    var onChoose: (Int) -> Void = { _ in }
+}
+
+private struct PickView: View {
+    @ObservedObject var model: PickModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("选择识别结果  ↑↓ 回车")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+            ForEach(Array(model.items.enumerated()), id: \.element.id) { i, item in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(item.channel.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 92, alignment: .leading)
+                    Text(item.text.isEmpty ? item.status : item.text)
+                        .font(.system(size: 13))
+                        .foregroundStyle(item.text.isEmpty ? .secondary : .primary)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    Rectangle().fill(i == model.selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.001))
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.selected = i
+                    model.onChoose(i)
+                }
+            }
+        }
+        .padding(.bottom, 8)
+        .frame(width: 420, alignment: .topLeading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private final class PickHost: NSHostingView<PickView> {
+    var onKey: ((PickKey) -> Void)?
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 126: onKey?(.up)
+        case 125: onKey?(.down)
+        case 36, 76: onKey?(.enter)
+        case 53: onKey?(.escape)
+        default: super.keyDown(with: event)
+        }
+    }
+}
+
+/// 输入框上方的结果挑选浮层
+final class PickHUD {
+    private let model = PickModel()
+    private let panel: NSPanel
+    private let host: PickHost
+    private var anchor = NSRect.zero
+
+    var onChoose: (String) -> Void = { _ in }
+    var onCancel: () -> Void = {}
+
+    init() {
+        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.ignoresMouseEvents = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        host = PickHost(rootView: PickView(model: model))
+        host.autoresizingMask = [.width, .height]
+        panel.contentView = host
+        model.onChoose = { [weak self] i in self?.confirm(i) }
+        host.onKey = { [weak self] key in
+            guard let self else { return }
+            switch key {
+            case .up: self.move(-1)
+            case .down: self.move(1)
+            case .enter: self.confirm()
+            case .escape: self.onCancel()
+            }
+        }
+    }
+
+    var isVisible: Bool { panel.isVisible }
+
+    func show(_ items: [PickItem], anchor: NSRect?) {
+        self.anchor = anchor ?? .zero
+        model.items = items
+        model.selected = 0
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.layout()
+            self.panel.makeKeyAndOrderFront(nil)
+            self.panel.makeFirstResponder(self.host)
+        }
+    }
+
+    func update(_ channel: Channel, text: String? = nil, status: String? = nil) {
+        guard let i = model.items.firstIndex(where: { $0.channel == channel }) else { return }
+        if let text { model.items[i].text = text }
+        if let status { model.items[i].status = status }
+        if model.items.indices.contains(model.selected),
+           model.items[model.selected].text.isEmpty, !(text ?? "").isEmpty {
+            model.selected = i
+        }
+    }
+
+    func move(_ delta: Int) {
+        let n = model.items.count
+        guard n > 0 else { return }
+        model.selected = (model.selected + delta + n) % n
+    }
+
+    func confirm() { confirm(model.selected) }
+
+    func hide() { panel.orderOut(nil) }
+
+    private func confirm(_ i: Int) {
+        guard model.items.indices.contains(i) else { return }
+        let text = model.items[i].text
+        guard !text.isEmpty else { NSSound.beep(); return }
+        onChoose(text)
+    }
+
+    private func layout() {
+        let n = CGFloat(max(model.items.count, 1))
+        let size = NSSize(width: 420, height: 36 + n * 48)
+        var x: CGFloat
+        var y: CGFloat
+        let screen = NSScreen.screens.first { $0.frame.contains(anchor.origin) }
+            ?? NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
+            ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+        if anchor.width + anchor.height > 0 {
+            x = anchor.midX - size.width / 2
+            y = anchor.maxY + 10
+            if y + size.height > visible.maxY { y = anchor.minY - size.height - 10 }
+        } else {
+            x = visible.midX - size.width / 2
+            y = visible.minY + 120
+        }
+        x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
+        y = min(max(y, visible.minY + 8), visible.maxY - size.height - 8)
+        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        host.frame = NSRect(origin: .zero, size: size)
     }
 }

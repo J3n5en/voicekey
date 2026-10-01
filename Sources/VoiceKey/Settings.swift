@@ -3,20 +3,43 @@ import AVFoundation
 import SwiftUI
 
 enum Channel: String, CaseIterable, Identifiable {
-    case doubao, wetype, offline
+    case doubao, wetype, qwen, offline, all
     var id: String { rawValue }
     var title: String {
         switch self {
         case .doubao: "豆包输入法"
         case .wetype: "微信输入法"
+        case .qwen: "千问输入法"
         case .offline: "离线（本地模型）"
+        case .all: "全部"
         }
     }
     /// 离线渠道仅 Apple 芯片可用
-    static var available: [Channel] { OfflineAssets.supported ? allCases : [.doubao, .wetype] }
+    static var engines: [Channel] {
+        OfflineAssets.supported ? [.doubao, .wetype, .qwen, .offline] : [.doubao, .wetype, .qwen]
+    }
+    static var available: [Channel] { engines + [.all] }
     static var current: Channel {
         let c = Channel(rawValue: UserDefaults.standard.string(forKey: "channel") ?? "") ?? .doubao
         return available.contains(c) ? c : .doubao
+    }
+}
+
+enum QwenOutput: String, CaseIterable, Identifiable {
+    case asr, polish, translate
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .asr: "原文"
+        case .polish: "润色"
+        case .translate: "译成英文"
+        }
+    }
+    static var current: QwenOutput {
+        let raw = ProcessInfo.processInfo.environment["QWEN_OUTPUT"]
+            ?? UserDefaults.standard.string(forKey: "qwenOutput")
+            ?? ""
+        return QwenOutput(rawValue: raw) ?? .polish
     }
 }
 
@@ -188,21 +211,36 @@ struct SettingsView: View {
     @AppStorage("silence") private var silence = 1.5
     @AppStorage("streaming") private var streaming = true
     @AppStorage("micUID") private var micUID = ""
+    @AppStorage("qwenOutput") private var qwenOutput = QwenOutput.polish.rawValue
     @State private var microphones = Microphone.all()
     @ObservedObject private var offline = OfflineAssets.shared
     @State private var axTrusted = AXIsProcessTrusted()
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @StateObject private var compare = ChannelCompare()
+    @State private var showCompare = false
 
     var body: some View {
         Form {
             Section {
-                Picker("识别渠道", selection: $channel) {
+                HStack {
+                    Text("识别渠道")
+                    Spacer()
+                    Button("对比") { showCompare = true }
+                        .buttonStyle(.borderless)
+                }
+                Picker("", selection: $channel) {
                     ForEach(Channel.available) { Text($0.title).tag($0.rawValue) }
                 }
                 .pickerStyle(.radioGroup)
+                .labelsHidden()
                 .onChange(of: channel) { if $1 == Channel.offline.rawValue { offline.download() } }
                 if channel == Channel.offline.rawValue { OfflineStatus(offline: offline) }
+                if channel == Channel.qwen.rawValue || channel == Channel.all.rawValue {
+                    Picker("千问输出", selection: $qwenOutput) {
+                        ForEach(QwenOutput.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                }
                 Picker("长按快捷键", selection: $hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -213,6 +251,7 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("边说边上屏", isOn: $streaming)
+                    .disabled(channel == Channel.all.rawValue)
                 Picker("麦克风", selection: $micUID) {
                     Text("系统默认").tag("")
                     ForEach(microphones) { Text($0.name).tag($0.id) }
@@ -223,7 +262,8 @@ struct SettingsView: View {
             } footer: {
                 Text((streaming ? "在任意输入框中长按快捷键说话，识别结果实时打到光标处，松开后按定稿修正。"
                                 : "在任意输入框中长按快捷键说话，松开后识别结果粘贴到光标处。")
-                     + (tapShortcut == "off" ? "" : "\n或点按一下点按快捷键开始聆听，停顿 \(String(format: "%g", silence)) 秒自动结束，再点一下可提前结束。"))
+                     + (tapShortcut == "off" ? "" : "\n或点按一下点按快捷键开始聆听，停顿 \(String(format: "%g", silence)) 秒自动结束，再点一下可提前结束。")
+                     + (channel == Channel.all.rawValue ? "\n说完后在输入框上方列出各渠道结果，点击或 ↑↓ 回车上屏。" : ""))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("权限") {
@@ -252,6 +292,10 @@ struct SettingsView: View {
             let now = Microphone.all()
             if now != microphones { microphones = now }
         }
+        .onDisappear { compare.cancel() }
+        .sheet(isPresented: $showCompare) {
+            ChannelCompareSheet(channel: $channel, compare: compare)
+        }
     }
 
     private func openPrivacy(_ anchor: String) {
@@ -277,5 +321,183 @@ struct OfflineStatus: View {
                 }
             }
         }
+    }
+}
+
+struct ChannelCompareSheet: View {
+    @Binding var channel: String
+    @ObservedObject var compare: ChannelCompare
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("渠道对比").font(.headline)
+                Spacer()
+                Button("关闭") { dismiss() }
+                    .buttonStyle(.borderless)
+            }
+            Button(compare.phase == .recording ? "说完了" : compare.phase == .recognizing ? "取消识别" : "开始说话") {
+                compare.toggle()
+            }
+            if compare.phase == .recording {
+                Text("正在录音，说完再点一次").font(.caption).foregroundStyle(.secondary)
+            } else if compare.phase == .recognizing {
+                Text("识别中…").font(.caption).foregroundStyle(.secondary)
+            }
+            if let err = compare.error {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+            ForEach(compare.rows) { row in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.channel.title)
+                        if !row.text.isEmpty {
+                            Text(row.text).font(.caption).textSelection(.enabled)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Text(row.status).foregroundStyle(.secondary).font(.caption)
+                    if compare.phase == .idle {
+                        Button("选择") {
+                            channel = row.channel.rawValue
+                            dismiss()
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(width: 460, height: 360)
+        .onDisappear { compare.cancel() }
+    }
+}
+
+/// 设置里录音一次，各渠道并行识别并实时出字
+@MainActor
+final class ChannelCompare: ObservableObject {
+    enum Phase { case idle, recording, recognizing }
+    struct Row: Identifiable {
+        var id: String { channel.rawValue }
+        let channel: Channel
+        var text = ""
+        var status = ""
+    }
+
+    @Published var phase = Phase.idle
+    @Published var rows: [Row] = []
+    @Published var error: String?
+
+    private let recorder = Recorder()
+    private let doubao = DoubaoEngine()
+    private let wetype = WeTypeEngine()
+    private let qwen = QwenEngine()
+    private let offline = OfflineEngine()
+    private var work: Task<Void, Never>?
+
+    func toggle() {
+        switch phase {
+        case .idle: start()
+        case .recording: stopRecord()
+        case .recognizing: cancel()
+        }
+    }
+
+    func cancel() {
+        if phase == .recording { recorder.stop() }
+        work?.cancel()
+        work = nil
+        HotkeyMonitor.paused = false
+        phase = .idle
+    }
+
+    private func start() {
+        error = nil
+        rows = Channel.engines.map { ch in
+            if ch == .offline, !OfflineAssets.installed {
+                return Row(channel: ch, status: "跳过（未下载）")
+            }
+            return Row(channel: ch, status: "识别中")
+        }
+        let active = rows.filter { $0.status == "识别中" }.map(\.channel)
+        HotkeyMonitor.paused = true
+        do {
+            let source = try recorder.start()
+            phase = .recording
+            wetype.prewarm()
+            qwen.prewarm()
+            if active.contains(.offline) { OfflineWorker.shared.prewarm() }
+            let streams = Self.fanout(source, n: active.count)
+            work = Task { await run(active, streams) }
+        } catch {
+            HotkeyMonitor.paused = false
+            phase = .idle
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func stopRecord() {
+        guard phase == .recording else { return }
+        recorder.stop()
+        phase = .recognizing
+    }
+
+    private func run(_ channels: [Channel], _ streams: [AsyncStream<[Int16]>]) async {
+        await withTaskGroup(of: Void.self) { g in
+            for (i, ch) in channels.enumerated() {
+                let stream = streams[i]
+                g.addTask { await self.recognize(ch, stream) }
+            }
+        }
+        HotkeyMonitor.paused = false
+        phase = .idle
+        work = nil
+    }
+
+    private func recognize(_ ch: Channel, _ stream: AsyncStream<[Int16]>) async {
+        let engine: ASREngine = switch ch {
+        case .doubao: doubao
+        case .wetype: wetype
+        case .qwen: qwen
+        case .offline: offline
+        case .all: doubao
+        }
+        let t0 = Date()
+        do {
+            let text = try await engine.run(audio: stream) { [weak self] p in
+                Task { @MainActor in self?.set(ch, text: p) }
+            }
+            let sec = String(format: "%.2fs", Date().timeIntervalSince(t0))
+            set(ch, text: text, status: sec)
+        } catch is CancellationError {
+            set(ch, status: "已取消")
+        } catch {
+            set(ch, status: error.localizedDescription)
+        }
+    }
+
+    private func set(_ ch: Channel, text: String? = nil, status: String? = nil) {
+        guard let i = rows.firstIndex(where: { $0.channel == ch }) else { return }
+        if let text { rows[i].text = text }
+        if let status { rows[i].status = status }
+    }
+
+    nonisolated static func fanout(_ source: AsyncStream<[Int16]>, n: Int) -> [AsyncStream<[Int16]>] {
+        var conts: [AsyncStream<[Int16]>.Continuation] = []
+        var streams: [AsyncStream<[Int16]>] = []
+        for _ in 0..<n {
+            let (s, c) = AsyncStream<[Int16]>.makeStream()
+            streams.append(s)
+            conts.append(c)
+        }
+        Task {
+            for await frame in source {
+                for c in conts { c.yield(frame) }
+            }
+            for c in conts { c.finish() }
+        }
+        return streams
     }
 }

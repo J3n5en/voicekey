@@ -14,6 +14,7 @@ if let i = args.firstIndex(of: "--test"), i + 2 < args.count {
     let engine: ASREngine = switch args[i + 1] {
     case "wetype": WeTypeEngine()
     case "offline": OfflineEngine()
+    case "qwen": QwenEngine()
     default: DoubaoEngine()
     }
     let url = URL(fileURLWithPath: args[i + 2])
