@@ -45,6 +45,7 @@ enum Hotkey: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @AppStorage("channel") private var channel = Channel.doubao.rawValue
     @AppStorage("hotkey") private var hotkey = Hotkey.rightOption.rawValue
+    @AppStorage("streaming") private var streaming = true
     @State private var axTrusted = AXIsProcessTrusted()
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -59,8 +60,10 @@ struct SettingsView: View {
                 Picker("长按快捷键", selection: $hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Toggle("边说边上屏", isOn: $streaming)
             } footer: {
-                Text("在任意输入框中长按快捷键说话，松开后识别结果自动粘贴到光标处。")
+                Text(streaming ? "在任意输入框中长按快捷键说话，识别结果实时打到光标处，松开后按定稿修正。"
+                               : "在任意输入框中长按快捷键说话，松开后识别结果粘贴到光标处。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("权限") {

@@ -46,14 +46,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recording = true
         setIcon(recording: true)
         hud.show("正在聆听…", listening: true)
+        let typer: StreamTyper? = (UserDefaults.standard.object(forKey: "streaming") as? Bool ?? true) ? StreamTyper() : nil
         session = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let text = try await engine.run(audio: audio) { partial in
-                    DispatchQueue.main.async { self.hud.update(partial) }
+                    DispatchQueue.main.async {
+                        if let typer { typer.update(partial) } else { self.hud.update(partial) }
+                    }
                 }
                 self.stopRecording()
-                if text.isEmpty {
+                if let typer {
+                    // 定稿可能与流式结果不同（数字/标点整理），按差异修正；之后到达的迟到片段丢弃
+                    if !text.isEmpty { typer.update(text) }
+                    typer.finish()
+                    self.hud.hide()
+                } else if text.isEmpty {
                     self.hud.show("没有识别到内容", listening: false)
                     self.hud.hide(after: 1)
                 } else {
@@ -61,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     TextInserter.insert(text)
                 }
             } catch {
+                typer?.finish()
                 self.stopRecording()
                 self.fail("识别失败：\(error.localizedDescription)")
             }

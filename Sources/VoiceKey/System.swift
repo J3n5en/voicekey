@@ -102,6 +102,39 @@ enum TextInserter {
     }
 }
 
+/// 边说边上屏：与已打出的文本比对，退格删掉分歧部分再补打新内容（不经剪贴板）
+final class StreamTyper {
+    private var typed: [Character] = []
+    private var done = false
+    /// 私有事件源：不混入用户仍按着的修饰键
+    private let source = CGEventSource(stateID: .privateState)
+
+    func update(_ text: String) {
+        guard !done else { return }
+        let next = Array(text)
+        var common = 0
+        while common < typed.count, common < next.count, typed[common] == next[common] { common += 1 }
+        for _ in common..<typed.count { key(51, nil) }
+        let tail = String(next[common...])
+        if !tail.isEmpty {
+            let units = Array(tail.utf16)
+            for i in stride(from: 0, to: units.count, by: 20) { key(0, Array(units[i..<min(i + 20, units.count)])) }
+        }
+        typed = next
+    }
+
+    func finish() { done = true }
+
+    private func key(_ code: CGKeyCode, _ unicode: [UniChar]?) {
+        for isDown in [true, false] {
+            guard let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: isDown) else { continue }
+            e.flags = []
+            if let unicode { e.keyboardSetUnicodeString(stringLength: unicode.count, unicodeString: unicode) }
+            e.post(tap: .cghidEventTap)
+        }
+    }
+}
+
 final class HUDModel: ObservableObject {
     @Published var text = ""
     @Published var listening = false
