@@ -5175,14 +5175,22 @@ name = "voicekey"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "futures-util",
+ "hex",
+ "md-5",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-single-instance",
  "tokio",
  "voicekey-core",
+ "voicekey-hanbao",
  "voicekey-platform",
 ]
 
@@ -5214,6 +5222,13 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "voicekey-hanbao"
+version = "1.0.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, save } from "../lib/store.svelte";
-  import { CH, type Channel, type QwenOutput } from "../lib/api";
+  import { call, CH, type Channel, type QwenOutput } from "../lib/api";
   import ChIcon from "../lib/ChIcon.svelte";
   import Compare from "./Compare.svelte";
 
@@ -18,6 +18,19 @@
       <div class="hd"><ChIcon ch={c} /><b>{CH[c].name}</b><span class="radio"></span></div>
       <p>{CH[c].desc}</p>
       <div class="tags">{#each CH[c].tags as t}<span class="pill">{t}</span>{/each}</div>
+      {#if c === "offline" && (s.channel === "offline" || app.offline.state === "downloading" || app.offline.state === "failed")}
+        <div class="dl">
+          {#if app.offline.state === "ready"}<span class="ok">● 模型已就绪</span>
+          {:else if app.offline.state === "downloading"}
+            模型 <span class="bar"><i style="width:{(app.offline.progress ?? 0) * 100}%"></i></span>{Math.round((app.offline.progress ?? 0) * 100)}%
+          {:else if app.offline.state === "failed"}
+            <span class="err">{app.offline.error}</span>
+            <span class="link" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); call("offline_download"); }} onkeydown={() => {}}>重试</span>
+          {:else}
+            <span class="link" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); call("offline_download"); }} onkeydown={() => {}}>下载模型（约 190MB）</span>
+          {/if}
+        </div>
+      {/if}
     </button>
   {/each}
   <button class="ch" class:wide={engines.length % 2 === 0} class:on={s.channel === "all"} onclick={() => pick("all")}>
@@ -55,4 +68,9 @@
   .tags { display: flex; gap: 5px; flex-wrap: wrap; }
   .radio { margin-left: auto; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--fg3); }
   .on .radio { border: 5px solid var(--accent); }
+  .dl { margin-top: 10px; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg2); }
+  .bar { flex: 1; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .link { color: var(--accent); cursor: pointer; }
+  .err { flex: 1; color: var(--err); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

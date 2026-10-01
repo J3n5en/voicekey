@@ -1,0 +1,7 @@
+[package]
+name = "voicekey-hanbao"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+cc = "1"

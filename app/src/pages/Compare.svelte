@@ -4,7 +4,6 @@
   import ChIcon from "../lib/ChIcon.svelte";
   import Wave from "../lib/Wave.svelte";
 
-  let t0 = 0;
   let elapsed = $state(0);
   const drafts = new Map<string, string>();
   const finals = new Map<string, string>();
@@ -30,7 +29,8 @@
 
   $effect(() => {
     if (!recording) return;
-    t0 = performance.now();
+    const t0 = performance.now();
+    elapsed = 0;
     const iv = setInterval(() => (elapsed = Math.floor((performance.now() - t0) / 1000)), 250);
     return () => clearInterval(iv);
   });
@@ -39,7 +39,6 @@
     if (!recording) {
       drafts.clear();
       finals.clear();
-      elapsed = 0;
     }
     call("compare_toggle");
   }
@@ -59,7 +58,7 @@
       <small>{!m ? "各渠道同时识别，录音不会保存" : recording ? "点击红色按钮结束" : waiting ? "条形长度表示定稿耗时" : best ? `${CH[best.channel].short} 最快，可设为默认` : "可重新录一句"}</small>
     </div>
     <div class="wave"><Wave level={recording ? app.level : 0} idle={!recording} height={36} /></div>
-    <span class="time">0:{String(elapsed).padStart(2, "0")}</span>
+    <span class="time">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
   </div>
   <div class="grid" style="--n:{rows.length % 2 && rows.length > 1 ? 3 : 2}">
     {#each rows as r (r.channel)}

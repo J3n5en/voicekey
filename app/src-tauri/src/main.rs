@@ -50,6 +50,9 @@ pub fn update_settings<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut Setti
         g.clone()
     };
     apply(app, &s);
+    if s.channel == Channel::Offline {
+        offline::download(app);
+    }
     let _ = app.emit("settings", &s);
 }
 
@@ -96,7 +99,7 @@ fn get_state(app: AppHandle) -> serde_json::Value {
         "version": app.package_info().version.to_string(),
         "holdKeys": hold,
         "channels": Channel::available(),
-        "offline": { "supported": offline::SUPPORTED, "installed": offline::installed() },
+        "offline": { "supported": offline::SUPPORTED, "status": offline::status() },
         "perms": perms(),
     })
 }
@@ -122,6 +125,11 @@ fn perm_action(kind: String) {
         "mic" => perm::open_mic(),
         _ => {}
     }
+}
+
+#[tauri::command]
+fn offline_download(app: AppHandle) {
+    offline::download(&app);
 }
 
 #[tauri::command]
@@ -161,6 +169,9 @@ fn open_url(url: String) {
 }
 
 fn main() {
+    if let Some(code) = offline::worker_main() {
+        std::process::exit(code);
+    }
     let settings = Settings::load();
     let first_run = !settings.onboarded;
     tauri::Builder::default()
@@ -168,7 +179,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_resize, compare_toggle, meter, open_url
+            pick_choose, pick_resize, compare_toggle, meter, open_url, offline_download
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

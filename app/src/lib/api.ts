@@ -11,11 +11,12 @@ export interface Settings {
   channel: Channel; holdKey: string; tapShortcut: Shortcut | null; silence: number; streaming: boolean;
   liveText: boolean; mic: string; qwenOutput: QwenOutput; autostart: boolean; theme: string; onboarded: boolean;
 }
+export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
 export interface AppInfo {
   settings: Settings; platform: "mac" | "win"; arch: string; version: string;
   holdKeys: { id: string; name: string }[]; channels: Channel[];
-  offline: { supported: boolean; installed: boolean }; perms: Perms;
+  offline: { supported: boolean; status: OfflineStatus }; perms: Perms;
 }
 export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }
