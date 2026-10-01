@@ -1,15 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// 监听修饰键：长按键按住超过阈值算长按；点按键在阈值内松开算点按；期间按了别的键视为组合键，放弃
+/// 长按键：按住超过阈值开始、松开结束。点按快捷键：单个修饰键在阈值内松开，或 组合键按下（吞掉不传给前台 App）
 final class HotkeyMonitor {
     var onPress: () -> Void = {}
     var onLongPress: () -> Void = {}
     var onRelease: () -> Void = {}
     var onTap: () -> Void = {}
+    /// 设置里录制快捷键时暂停
+    static var paused = false
     private static let threshold: TimeInterval = 0.3
     private var tap: CFMachPort?
-    private var downKey: Hotkey?
+    private var downCode: Int64?
+    private var swallowedCode: Int64?
     private var pressedAt = Date.distantPast
     private var cancelled = false
     private var active = false
@@ -24,12 +27,12 @@ final class HotkeyMonitor {
     }
 
     private func install() -> Bool {
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue | 1 << CGEventType.keyUp.rawValue)
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask,
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask,
             callback: { _, type, event, refcon in
-                Unmanaged<HotkeyMonitor>.fromOpaque(refcon!).takeUnretainedValue().handle(type, event)
-                return Unmanaged.passUnretained(event)
+                let swallow = Unmanaged<HotkeyMonitor>.fromOpaque(refcon!).takeUnretainedValue().handle(type, event)
+                return swallow ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else { return false }
@@ -39,44 +42,62 @@ final class HotkeyMonitor {
         return true
     }
 
-    private func handle(_ type: CGEventType, _ event: CGEvent) {
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+    /// 返回 true 表示吞掉该事件
+    private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return false
+        }
+        guard !Self.paused else { return false }
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        let shortcut = Shortcut.tap
+        switch type {
         case .keyDown:
-            if downKey != nil, !active { cancelPending() }
-        case .flagsChanged:
-            let code = event.getIntegerValueField(.keyboardEventKeycode)
-            let hold = Hotkey.current, tapKey = Hotkey.tap
-            let key = downKey ?? [hold, tapKey].compactMap { $0 }.first { $0.keyCode == code }
-            guard let key, key.keyCode == code else {
-                if downKey != nil, !active { cancelPending() }
-                return
+            if let s = shortcut, !s.isModifier, code == s.keyCode,
+               event.flags.intersection(Shortcut.mask).rawValue == s.modifiers {
+                swallowedCode = code
+                if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onTap() }
+                return true
             }
-            let pressed = event.flags.contains(key.flag)
-            if pressed, downKey == nil {
-                downKey = key
+            if downCode != nil, !active { cancelPending() }
+        case .keyUp:
+            if code == swallowedCode {
+                swallowedCode = nil
+                return true
+            }
+        case .flagsChanged:
+            let hold = Hotkey.current
+            let tapCode = shortcut.flatMap { $0.isModifier ? $0.keyCode : nil }
+            guard code == downCode ?? code, code == hold.keyCode || code == tapCode,
+                  let flag = Shortcut.modifierFlag[code] else {
+                if downCode != nil, !active { cancelPending() }
+                return false
+            }
+            let pressed = event.flags.contains(flag)
+            if pressed, downCode == nil {
+                downCode = code
                 pressedAt = Date()
                 cancelled = false
                 onPress()
-                guard key == hold else { return }
+                guard code == hold.keyCode else { return false }
                 timer = Timer.scheduledTimer(withTimeInterval: Self.threshold, repeats: false) { [weak self] _ in
-                    guard let self, self.downKey != nil, !self.cancelled else { return }
+                    guard let self, self.downCode != nil, !self.cancelled else { return }
                     self.active = true
                     self.onLongPress()
                 }
-            } else if !pressed, downKey != nil {
-                downKey = nil
+            } else if !pressed, downCode != nil {
+                downCode = nil
                 timer?.invalidate()
                 if active {
                     active = false
                     onRelease()
-                } else if key == tapKey, !cancelled, Date().timeIntervalSince(pressedAt) < Self.threshold {
+                } else if code == tapCode, !cancelled, Date().timeIntervalSince(pressedAt) < Self.threshold {
                     onTap()
                 }
             }
         default: break
         }
+        return false
     }
 
     private func cancelPending() {
