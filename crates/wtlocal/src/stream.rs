@@ -1,5 +1,6 @@
-//! 分块流式解码：每块带前文/后文上下文重算，已定稿块不再变化；未定稿尾部只用于中间结果
-use crate::fbank::{Fbank, DIM};
+//! 分块流式解码：每块带前文/后文上下文重算；说话中按已有音频的统计量归一化出中间结果，
+//! 结束时按整段统计量重算一遍出定稿（录音越短统计越不准，整段重算错字率约降一半）
+use crate::fbank::{silence, Fbank, Norm, DIM};
 use crate::model::Model;
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ const PAD: usize = 50;
 pub struct Stream {
     m: Arc<Model>,
     fb: Fbank,
-    feats: Vec<[f32; DIM]>,
+    feats: Vec<[f64; DIM]>,
     ids: Vec<u32>,
     s: usize,
     fresh: usize,
@@ -26,10 +27,15 @@ impl Stream {
 
     pub fn push(&mut self, pcm: &[i16]) {
         let n = self.feats.len();
-        self.fb.push(pcm, &self.m.cms, &mut self.feats);
+        self.fb.push(pcm, &mut self.feats);
         self.fresh += self.feats.len() - n;
-        while self.feats.len() >= self.s + BLK + POST {
-            self.commit();
+        if self.feats.len() >= self.s + BLK + POST {
+            let nm = self.fb.norm(&self.m.cms);
+            while self.feats.len() >= self.s + BLK + POST {
+                let ids = self.block(self.s, &nm);
+                self.s += ids.len() * 5;
+                self.ids.extend(ids);
+            }
         }
     }
 
@@ -39,23 +45,23 @@ impl Stream {
     }
 
     /// 解码 [s - prev, end) 并补 pad 帧静音，返回 s 之后的输出帧
-    fn decode(&self, prev: usize, end: usize, pad: usize) -> Vec<u32> {
-        let a = self.s.saturating_sub(prev);
-        let mut x = self.feats[a..end].to_vec();
-        x.resize(x.len() + pad, self.fb.silence(&self.m.cms));
+    fn decode(&self, s: usize, prev: usize, end: usize, pad: usize, nm: &Norm) -> Vec<u32> {
+        let a = s.saturating_sub(prev);
+        let mut x: Vec<[f32; DIM]> = self.feats[a..end].iter().map(|f| nm.apply(f)).collect();
+        x.resize(x.len() + pad, nm.apply(&silence()));
         let out = self.m.forward(&x);
-        out.get((self.s - a) / 5..).unwrap_or_default().to_vec()
+        out.get((s - a) / 5..).unwrap_or_default().to_vec()
     }
 
-    fn commit(&mut self) {
-        let mut ids = self.decode(PREV, self.s + BLK + POST, PAD);
+    /// 从 s 起定稿一块
+    fn block(&self, s: usize, nm: &Norm) -> Vec<u32> {
+        let mut ids = self.decode(s, PREV, s + BLK + POST, PAD, nm);
         ids.truncate(BLK / 5);
         // 在块尾附近的连续 blank 处截断，避免字恰好落在块边界上被两边都丢掉
         if let Some(c) = (ids.len() / 2..ids.len()).rev().find(|&c| ids[c] == 0 && ids[c - 1] == 0) {
             ids.truncate(c);
         }
-        self.s += ids.len() * 5;
-        self.ids.extend(ids);
+        ids
     }
 
     /// 中间结果：已定稿部分 + 尾部临时解码（前文减半以省算力）；去掉末尾标点，避免边说边打时句号反复增删
@@ -63,23 +69,30 @@ impl Stream {
         self.fresh = 0;
         let mut ids = self.ids.clone();
         if self.feats.len() > self.s {
-            ids.extend(self.decode(PREV / 2, self.feats.len(), PAD));
+            ids.extend(self.decode(self.s, PREV / 2, self.feats.len(), PAD, &self.fb.norm(&self.m.cms)));
         }
         tidy(&self.m.text(&ids)).trim_end_matches(PUNCT).to_string()
     }
 
-    pub fn finish(mut self) -> String {
-        if self.feats.len() > self.s {
-            let tail = self.decode(PREV, self.feats.len(), POST);
-            self.ids.extend(tail);
+    pub fn finish(self) -> String {
+        let nm = self.fb.norm(&self.m.cms);
+        let (mut s, mut ids) = (0, Vec::new());
+        while self.feats.len() >= s + BLK + POST {
+            let b = self.block(s, &nm);
+            s += b.len() * 5;
+            ids.extend(b);
         }
-        tidy(&self.m.text(&self.ids)).to_string()
+        if self.feats.len() > s {
+            ids.extend(self.decode(s, PREV, self.feats.len(), POST, &nm));
+        }
+        tidy(&self.m.text(&ids))
     }
 }
 
 const PUNCT: &[char] = &['，', '。', '？', '！', '、', ',', '.', '?', '!'];
 
-/// 开口前的底噪偶尔被识别成一个逗号
-fn tidy(t: &str) -> &str {
-    t.trim_start_matches(PUNCT)
+/// 开口前的底噪偶尔被识别成一个逗号；块边界偶尔出现「，。」这样的连续标点，只留后一个
+fn tidy(t: &str) -> String {
+    let c: Vec<char> = t.trim_start_matches(PUNCT).chars().collect();
+    c.iter().enumerate().filter(|&(i, ch)| !(PUNCT.contains(ch) && c.get(i + 1).is_some_and(|n| PUNCT.contains(n)))).map(|(_, ch)| ch).collect()
 }
