@@ -43,7 +43,7 @@ fn start_pkt(sn: &str, cuid: &str) -> Result<Vec<u8>> {
         "ctl": "{\"s_wake\":true,\"s_sdk_vad_mode\":1,\"s_link_switch\":\"ws\"}",
         "cuid": cuid,
         "sdk_vad_mode": 0,
-        "pfm": format!("Android&L71061&12&32&1&{cuid}&1"),
+        "pfm": "",
         "ver": VER,
         "use_mapping": 0,
         "map_multi_info": "",
