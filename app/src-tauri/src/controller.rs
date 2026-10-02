@@ -22,6 +22,7 @@ pub enum Msg {
     Timeout { token: u64 },
     Flush,
     PickChoose(usize),
+    PickKey(Special),
     CompareToggle,
     CompareStop,
     Meter(bool),
@@ -151,9 +152,10 @@ impl Ctl {
                 self.emit_rows();
             }
             Msg::PickChoose(i) if self.mode == Mode::Pick => self.choose(i),
+            Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
             Msg::CompareToggle => match self.mode {
                 Mode::Compare if self.recording => self.end(),
-                Mode::Idle => self.begin_multi(Mode::Compare, false),
+                Mode::Idle => self.begin_multi(Mode::Compare, Channel::engines(), false),
                 _ => {}
             },
             Msg::CompareStop if self.mode == Mode::Compare => self.abort(None),
@@ -219,7 +221,7 @@ impl Ctl {
 
     fn prewarm(&self) {
         let ch = self.settings().channel;
-        let list = if ch == Channel::All { Channel::engines() } else { vec![ch] };
+        let list = if ch == Channel::All { self.settings().multi } else { vec![ch] };
         for c in list {
             if let Some(e) = self.engines.get(&c).cloned() {
                 tauri::async_runtime::spawn(async move { e.prewarm().await });
@@ -280,7 +282,7 @@ impl Ctl {
         }
         let s = self.settings();
         if s.channel == Channel::All {
-            return self.begin_multi(Mode::Pick, auto_stop);
+            return self.begin_multi(Mode::Pick, s.multi, auto_stop);
         }
         let Some(audio) = self.start_recorder() else { return };
         self.auto_stop = auto_stop;
@@ -291,7 +293,7 @@ impl Ctl {
         self.spawn_engine(s.channel, audio);
     }
 
-    fn begin_multi(&mut self, mode: Mode, auto_stop: bool) {
+    fn begin_multi(&mut self, mode: Mode, channels: Vec<Channel>, auto_stop: bool) {
         let Some(mut audio) = self.start_recorder() else { return };
         self.auto_stop = auto_stop;
         self.gen += 1;
@@ -299,7 +301,7 @@ impl Ctl {
         self.sel = 0;
         self.user_picked = false;
         self.released_at = None;
-        self.rows = Channel::engines()
+        self.rows = channels
             .into_iter()
             .map(|ch| {
                 let skip = ch == Channel::Offline && !offline::installed();
@@ -328,7 +330,8 @@ impl Ctl {
         if mode == Mode::Pick {
             self.front = pf::front_app();
             self.hk.picking.store(true, Ordering::Relaxed);
-            ui::pick_show(&self.app, pf::caret(), self.rows.len());
+            // 安全输入下钩子收不到方向键/数字：改为让面板取得焦点自己接收按键
+            ui::pick_show(&self.app, pf::caret(), self.rows.len(), pf::secure_input());
         }
         self.emit_rows();
     }
@@ -468,6 +471,11 @@ impl Ctl {
         }
         let mode = self.mode;
         self.cancel();
+        if mode == Mode::Pick {
+            if let Some(f) = self.front.take() {
+                f.activate();
+            }
+        }
         if mode == Mode::Compare {
             for r in &mut self.rows {
                 if matches!(r.state, RowState::Listen | RowState::Wait) {

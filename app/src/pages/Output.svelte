@@ -8,7 +8,7 @@
 <div class="sub">识别结果如何进入输入框。</div>
 <div class="group">
   <div class="row">
-    <div class="lbl">边说边上屏<small>{all ? "「全部」模式下需先挑选结果，此项不可用" : "识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴"}</small></div>
+    <div class="lbl">边说边上屏<small>{all ? "「多渠道」模式下需先挑选结果，此项不可用" : "识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴"}</small></div>
     <button class="sw" class:on={s.streaming} disabled={all} onclick={() => save({ streaming: !s.streaming })} aria-label="边说边上屏"></button>
   </div>
   <div class="row">

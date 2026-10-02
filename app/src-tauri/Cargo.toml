@@ -24,3 +24,6 @@ sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
 base64 = "0.22"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"

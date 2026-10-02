@@ -9,7 +9,7 @@ mod win;
 #[cfg(windows)]
 use win as imp;
 
-pub use imp::{caret, front_app, inject_key, paste, start_hook, FrontApp};
+pub use imp::{caret, front_app, inject_key, paste, secure_input, start_hook, FrontApp};
 
 pub const CTRL: u8 = 1;
 pub const ALT: u8 = 2;

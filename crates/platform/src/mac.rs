@@ -297,6 +297,16 @@ pub fn caret() -> Option<Rect> {
 #[derive(Clone, Copy, Debug)]
 pub struct FrontApp(i32);
 
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn IsSecureEventInputEnabled() -> u8;
+}
+
+/// 有 App 开启了安全输入：事件钩子收不到 keyDown（只剩修饰键）
+pub fn secure_input() -> bool {
+    unsafe { IsSecureEventInputEnabled() != 0 }
+}
+
 pub fn front_app() -> Option<FrontApp> {
     use objc2_app_kit::NSWorkspace;
     let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;

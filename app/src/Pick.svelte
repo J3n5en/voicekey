@@ -42,6 +42,13 @@
       platform = i.platform;
       applyLook(i.platform, i.settings.theme);
     });
+    // 面板仅在安全输入开启时取得焦点，此时由这里接收选择按键
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      call("pick_key", { key: e.key });
+    };
+    window.addEventListener("keydown", onKey);
     const un = [
       on<Model>("pick", receive),
       on<number>("level", (v) => (level = v)),
@@ -51,7 +58,10 @@
         tick().then(() => (shake = i));
       }),
     ];
-    return () => un.forEach((p) => p.then((f) => f()));
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      un.forEach((p) => p.then((f) => f()));
+    };
   });
 </script>
 
@@ -92,7 +102,7 @@
 <style>
   .pick {
     margin: 10px; width: 500px; border-radius: 14px; background: var(--pop); backdrop-filter: blur(36px) saturate(1.8);
-    -webkit-backdrop-filter: blur(36px) saturate(1.8); box-shadow: 0 8px 24px rgba(20, 20, 50, 0.22); border: 1px solid var(--line); overflow: hidden;
+    -webkit-backdrop-filter: blur(36px) saturate(1.8); box-shadow: 0 2px 8px rgba(20, 20, 50, 0.12); border: 1px solid var(--line); overflow: hidden;
   }
   :global(.win) .pick { border-radius: 8px; }
   .hd { display: flex; align-items: center; gap: 10px; padding: 9px 12px 7px 14px; }

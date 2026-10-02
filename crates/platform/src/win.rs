@@ -188,6 +188,10 @@ pub fn front_app() -> Option<FrontApp> {
     (!h.is_invalid()).then_some(FrontApp(h.0 as isize))
 }
 
+pub fn secure_input() -> bool {
+    false
+}
+
 impl FrontApp {
     pub fn activate(&self) {
         unsafe {

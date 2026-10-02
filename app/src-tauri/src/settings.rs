@@ -20,7 +20,7 @@ impl Channel {
             Channel::Wetype => "微信输入法",
             Channel::Qwen => "千问输入法",
             Channel::Offline => "离线（本地模型）",
-            Channel::All => "全部渠道（说完挑选）",
+            Channel::All => "多渠道（说完挑选）",
         }
     }
 
@@ -69,6 +69,8 @@ pub struct Settings {
     pub live_text: bool,
     pub mic: String,
     pub qwen_output: QwenOutput,
+    /// 多渠道模式下同时识别的渠道（至少 2 个）
+    pub multi: Vec<Channel>,
     pub autostart: bool,
     pub theme: String,
     pub onboarded: bool,
@@ -86,6 +88,7 @@ impl Default for Settings {
             live_text: true,
             mic: String::new(),
             qwen_output: QwenOutput::Polish,
+            multi: Channel::engines(),
             autostart: false,
             theme: "system".into(),
             onboarded: false,
@@ -118,6 +121,12 @@ impl Settings {
             self.hold_key = voicekey_platform::hold_keys()[0].id.into();
         }
         self.silence = self.silence.clamp(1.0, 5.0);
+        let engines = Channel::engines();
+        let mut multi: Vec<Channel> = engines.iter().copied().filter(|c| self.multi.contains(c)).collect();
+        if multi.len() < 2 {
+            multi = engines;
+        }
+        self.multi = multi;
     }
 
     pub fn hold_code(&self) -> u32 {

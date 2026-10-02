@@ -90,7 +90,11 @@ fn overlay<R: Runtime>(app: &AppHandle<R>, label: &str, w: f64, h: f64) -> tauri
 
 pub fn create_overlays<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     overlay(app, "hud", HUD_W, HUD_H)?.set_ignore_cursor_events(true)?;
-    overlay(app, "pick", PICK_W, 300.0)?;
+    let pick = overlay(app, "pick", PICK_W, 300.0)?;
+    #[cfg(target_os = "macos")]
+    panel::convert(&pick);
+    #[cfg(not(target_os = "macos"))]
+    let _ = pick;
     Ok(())
 }
 
@@ -186,7 +190,7 @@ fn place_pick<R: Runtime>(w: &WebviewWindow<R>, a: &Anchor) {
     set_pos(w, x, y);
 }
 
-pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform::Rect>, rows: usize) {
+pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform::Rect>, rows: usize, focus: bool) {
     let Some(w) = app.get_webview_window("pick") else { return };
     let (caret, area) = match caret.and_then(|r| caret_in_space(app, r)) {
         Some((c, a)) => (Some(c), a),
@@ -198,7 +202,13 @@ pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform
     let a = Anchor { caret, area, height: 92.0 + rows as f64 * 48.0 };
     *PICK_ANCHOR.lock().unwrap() = Some(a);
     place_pick(&w, &a);
+    #[cfg(target_os = "macos")]
+    panel::KEYABLE.store(focus, std::sync::atomic::Ordering::Relaxed);
     let _ = w.show();
+    #[cfg(not(target_os = "macos"))]
+    if focus {
+        let _ = w.set_focus();
+    }
 }
 
 /// 前端按内容高度回报，保持底边贴着光标
@@ -276,5 +286,56 @@ pub fn set_tray_active<R: Runtime>(app: &AppHandle<R>, active: bool) {
     if let Some(t) = app.tray_by_id("main") {
         let _ = t.set_icon(tray_icon(app, active));
         let _ = t.set_icon_as_template(true);
+    }
+}
+
+/// macOS：候选面板换成不激活应用的 NSPanel。需要接收按键时（安全输入）成为 key window，
+/// 键盘事件直达面板而前台应用保持激活；其余时候不抢键盘。
+#[cfg(target_os = "macos")]
+mod panel {
+    use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+    use objc2::{msg_send, sel};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tauri::{Runtime, WebviewWindow};
+
+    pub static KEYABLE: AtomicBool = AtomicBool::new(false);
+    const NONACTIVATING: usize = 1 << 7;
+
+    extern "C" {
+        fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
+    }
+
+    extern "C-unwind" fn can_key(_: &AnyObject, _: Sel) -> Bool {
+        Bool::new(KEYABLE.load(Ordering::Relaxed))
+    }
+
+    extern "C-unwind" fn no(_: &AnyObject, _: Sel) -> Bool {
+        Bool::NO
+    }
+
+    fn class() -> &'static AnyClass {
+        if let Some(c) = AnyClass::get(c"VKPanel") {
+            return c;
+        }
+        let mut b = ClassBuilder::new(c"VKPanel", AnyClass::get(c"NSPanel").unwrap()).unwrap();
+        unsafe {
+            b.add_method(sel!(canBecomeKeyWindow), can_key as extern "C-unwind" fn(_, _) -> _);
+            b.add_method(sel!(canBecomeMainWindow), no as extern "C-unwind" fn(_, _) -> _);
+        }
+        b.register()
+    }
+
+    pub fn convert<R: Runtime>(w: &WebviewWindow<R>) {
+        let Ok(ptr) = w.ns_window() else { return };
+        let ptr = ptr as usize;
+        let _ = w.run_on_main_thread(move || unsafe {
+            let obj = ptr as *mut AnyObject;
+            object_setClass(obj, class());
+            let o = &*obj;
+            let mask: usize = msg_send![o, styleMask];
+            let _: () = msg_send![o, setStyleMask: mask | NONACTIVATING];
+            let _: () = msg_send![o, setHidesOnDeactivate: Bool::NO];
+            let _: () = msg_send![o, setHasShadow: Bool::NO];
+        });
     }
 }

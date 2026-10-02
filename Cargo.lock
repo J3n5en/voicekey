@@ -5180,6 +5180,7 @@ dependencies = [
  "futures-util",
  "hex",
  "md-5",
+ "objc2",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

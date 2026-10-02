@@ -148,6 +148,22 @@ fn pick_choose(app: AppHandle, index: usize) {
 }
 
 #[tauri::command]
+fn pick_key(app: AppHandle, key: String) {
+    use voicekey_platform::Special;
+    let k = match key.as_str() {
+        "ArrowUp" => Special::Up,
+        "ArrowDown" => Special::Down,
+        "Enter" => Special::Enter,
+        "Escape" => Special::Escape,
+        d => match d.parse::<u8>() {
+            Ok(n @ 1..=9) => Special::Digit(n),
+            _ => return,
+        },
+    };
+    send(&app, Msg::PickKey(k));
+}
+
+#[tauri::command]
 fn pick_resize(app: AppHandle, height: f64) {
     ui::pick_resize(&app, height);
 }
@@ -179,7 +195,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_resize, compare_toggle, meter, open_url, offline_download
+            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, offline_download
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

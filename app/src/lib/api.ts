@@ -9,7 +9,7 @@ export type QwenOutput = "asr" | "polish" | "translate";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Settings {
   channel: Channel; holdKey: string; tapShortcut: Shortcut | null; silence: number; streaming: boolean;
-  liveText: boolean; mic: string; qwenOutput: QwenOutput; autostart: boolean; theme: string; onboarded: boolean;
+  liveText: boolean; mic: string; qwenOutput: QwenOutput; multi: Channel[]; autostart: boolean; theme: string; onboarded: boolean;
 }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
@@ -30,7 +30,7 @@ export const CH: Record<Channel, { name: string; short: string; desc: string; ta
   wetype: { name: "微信输入法", short: "微信", desc: "口语化表达识别稳定，数字自动规整。", tags: ["在线", "流式"], logo: wetype },
   qwen: { name: "千问输入法", short: "千问", desc: "支持原文、润色、译成英文三种输出。", tags: ["在线", "润色", "翻译"], logo: qwen },
   offline: { name: "离线（本地模型）", short: "离线", desc: "完全在本机运行，断网可用，不上传音频。", tags: ["离线", "约 190MB"], logo: doubao },
-  all: { name: "全部渠道", short: "全部", desc: "说话时各渠道同时出字，在光标上方挑选最满意的一条上屏。", tags: ["并行", "流式候选"], logo: "" },
+  all: { name: "多渠道", short: "多渠道", desc: "勾选的渠道同时识别、实时出字，说完在光标处挑选最满意的一条上屏。", tags: ["并行", "流式候选"], logo: "" },
 };
 
 /** 根据平台与主题设置 html class */
