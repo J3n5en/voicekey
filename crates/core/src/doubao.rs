@@ -12,8 +12,10 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const WS_URL: &str = "wss://frontier-audio-ime-ws.doubao.com/ocean/api/v1/ws";
-const UA: &str = "com.bytedance.android.doubaoime/100102018 (Linux; U; Android 16; en_US; Pixel 7 Pro; Build/BP2A.250605.031.A2; Cronet/TTNetVersion:94cf429a 2025-11-17 QuicVersion:1f89f732 2025-05-08)";
+const UA: &str = "com.bytedance.android.doubaoime/100406010 (Linux; U; Android 16; en_US; Pixel 7 Pro; Build/BP2A.250605.031.A2; Cronet/TTNetVersion:94cf429a 2025-11-17 QuicVersion:1f89f732 2025-05-08)";
 const OK: i64 = 20_000_000;
+/// 官方客户端内置 ASR app key（1.4.6 IAsr.b()）；settings 下发的 app_key 已被部分设备拒绝（service discovery failure）
+const APP_KEY: &str = "OrnqKvSSrs";
 const FIRST: u64 = 1;
 const MIDDLE: u64 = 3;
 const LAST: u64 = 9;
@@ -82,7 +84,15 @@ impl Transcript {
 
     fn update(&mut self, json: &str) -> Option<String> {
         let v: Value = serde_json::from_str(json).ok()?;
-        for r in v.get("results")?.as_array()? {
+        let results = v.get("results")?.as_array()?;
+        // 新后端：results[0] 为整段累计文本，其余为辅助候选（无 index）
+        if !results.iter().any(|r| r.get("index").is_some()) {
+            let text = results.first()?["text"].as_str().filter(|t| !t.is_empty())?;
+            self.sentences.clear();
+            self.current = text.to_string();
+            return Some(self.current.clone());
+        }
+        for r in results {
             let Some(t) = r["text"].as_str().filter(|t| !t.is_empty()) else { continue };
             let fin = r["extra"]["nonstream_result"].as_bool().unwrap_or(false)
                 || (r["is_interim"].as_bool() == Some(false) && r["is_vad_finished"].as_bool() == Some(true));
@@ -170,13 +180,13 @@ async fn session(mut audio: Audio, partial: Arc<Partial>) -> std::result::Result
             "enable_punctuation": true,
             "enable_speech_rejection": true,
             "extra": {"app_name": "oime", "cell_compress_rate": 8, "did": device.did,
-                      "enable_asr_threepass": true, "enable_asr_twopass": true, "input_mode": "stream"},
+                      "enable_asr_threepass": false, "enable_asr_twopass": true, "input_mode": "stream"},
         })
         .to_string();
         let handshake = async {
-            tx.send(request(&device.token, "StartTask", "", &[], &rid, 0)).await?;
+            tx.send(request(APP_KEY, "StartTask", "", &[], &rid, 0)).await?;
             expect(&mut rx, "TaskStarted").await?;
-            tx.send(request(&device.token, "StartSession", &session, &[], &rid, 0)).await?;
+            tx.send(request(APP_KEY, "StartSession", &session, &[], &rid, 0)).await?;
             expect(&mut rx, "SessionStarted").await
         };
         if let Err(e) = handshake.await {
@@ -216,7 +226,7 @@ async fn session(mut audio: Audio, partial: Arc<Partial>) -> std::result::Result
             index += 1;
         }
         tx.send(request("", "TaskRequest", &meta(index), &[], &rid, LAST)).await?;
-        tx.send(request(&device.token, "FinishSession", "", &[], &rid, 0)).await?;
+        tx.send(request(APP_KEY, "FinishSession", "", &[], &rid, 0)).await?;
 
         let limit = Duration::from_secs_f64(10.0 + index as f64 / 200.0);
         let mut receiver = receiver;
@@ -254,13 +264,12 @@ where
 #[derive(Serialize, Deserialize, Clone)]
 struct DoubaoDevice {
     did: String,
-    token: String,
 }
 
 const APP: &[(&str, &str)] = &[
     ("aid", "401734"), ("app_name", "oime"), ("channel", "official"),
-    ("version_code", "100102018"), ("version_name", "1.1.2"),
-    ("manifest_version_code", "100102018"), ("update_version_code", "100102018"),
+    ("version_code", "100406010"), ("version_name", "1.4.6"),
+    ("manifest_version_code", "100406010"), ("update_version_code", "100406010"),
     ("package", "com.bytedance.android.doubaoime"),
 ];
 const DEV: &[(&str, &str)] = &[
@@ -315,7 +324,7 @@ impl DoubaoDevice {
         }
         let extra = json!({
             "device_id": 0, "install_id": 0, "cdid": cdid,
-            "openudid": format!("{:08x}", rand::random::<u32>()),
+            "openudid": format!("{:016x}", rand::random::<u64>()),
             "clientudid": uuid::Uuid::new_v4().to_string(),
             "region": "CN", "tz_name": "Asia/Shanghai", "tz_offset": 28800,
             "sim_region": "cn", "carrier_region": "cn", "cpu_abi": "arm64-v8a", "build_serial": "unknown",
@@ -336,20 +345,6 @@ impl DoubaoDevice {
             bail!("豆包设备注册被拒绝");
         }
 
-        let mut q: Vec<(&str, String)> = APP.iter().map(|(k, v)| (*k, v.to_string())).collect();
-        q.extend([
-            ("device_platform", "android".into()), ("os", "android".into()), ("ssmix", "a".into()),
-            ("_rticket", now), ("cdid", cdid), ("device_id", did.clone()),
-        ]);
-        let settings = Self::post(
-            "https://is.snssdk.com/service/settings/v3/", &q, b"body=null".to_vec(),
-            "application/x-www-form-urlencoded", &[("x-ss-stub", "46c03b52742b3f2615a3abdf1636b754")],
-        )
-        .await?;
-        let token = settings["data"]["settings"]["asr_config"]["app_key"].as_str().unwrap_or_default().to_string();
-        if token.is_empty() {
-            bail!("豆包 settings 未返回 app_key");
-        }
-        Ok(Self { did, token })
+        Ok(Self { did })
     }
 }
