@@ -74,6 +74,9 @@
       {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
       {:else}<span class="ok">● 全部完成</span>{/if}
     </span>
+    <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
+      <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+    </button>
   </div>
   {#each model.rows as r, i (r.channel)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -109,6 +112,8 @@
   .wave { flex: 1; min-width: 0; }
   .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--err); animation: pulse 1.2s infinite; flex: none; }
   .state { font-size: 11.5px; color: var(--fg2); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .close { flex: none; width: 20px; height: 20px; margin-right: -4px; border: 0; border-radius: 6px; background: transparent; color: var(--fg3); display: grid; place-items: center; cursor: pointer; padding: 0; }
+  .close:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px 9px 14px; cursor: pointer; position: relative; border-top: 1px solid var(--line); }
   .row.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .row.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--accent); }
