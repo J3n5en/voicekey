@@ -4,6 +4,12 @@
 
 <p align="center">macOS / Windows 语音输入：在任意输入框里按住或点按快捷键说话，识别结果直接打到光标处。</p>
 
+<p align="center">
+  <img src="docs/screenshots/pick-live.png" width="420" alt="候选框：说话时各渠道实时出字">
+  <img src="docs/screenshots/pick-done.png" width="420" alt="候选框：定稿后选一条上屏">
+</p>
+<p align="center"><sub>多渠道候选框：说话时各渠道实时出字（左），松开后逐条定稿并显示耗时，数字键或回车选一条上屏（右）</sub></p>
+
 ## 功能
 
 - **多个识别渠道**：豆包输入法、微信输入法、千问输入法云端识别，以及完全本地运行的离线识别（仅 Apple 芯片 Mac）
@@ -14,6 +20,16 @@
 - **边说边上屏**：识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴
 - **千问输出**：原文、润色或译成英文
 - **麦克风选择**、开机启动、浅色 / 深色主题
+
+## 截图
+
+| 识别渠道 | 渠道对比 |
+|---|---|
+| <img src="docs/screenshots/settings.png" alt="识别渠道设置"> | <img src="docs/screenshots/compare.png" alt="渠道对比"> |
+
+单渠道模式下，屏幕底部显示声波浮层和实时文字：
+
+<p align="center"><img src="docs/screenshots/hud.png" width="420" alt="声波浮层"></p>
 
 ## 安装
 
