@@ -5226,7 +5226,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voicekey"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5252,7 +5252,7 @@ dependencies = [
 
 [[package]]
 name = "voicekey-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -5282,14 +5282,14 @@ dependencies = [
 
 [[package]]
 name = "voicekey-hanbao"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "voicekey-platform"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arboard",
  "block2",
@@ -5303,7 +5303,7 @@ dependencies = [
 
 [[package]]
 name = "voicekey-wtlocal"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
