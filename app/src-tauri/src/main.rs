@@ -34,7 +34,6 @@ fn apply<R: Runtime>(app: &AppHandle<R>, s: &Settings) {
         c.hold = s.hold_code();
         c.tap = s.tap_shortcut.clone();
     }
-    st.qwen.set_output(s.qwen_output);
     ui::refresh_tray(app, s, st.hk.paused.load(Ordering::Relaxed));
     let al = app.autolaunch();
     if al.is_enabled().unwrap_or(false) != s.autostart {

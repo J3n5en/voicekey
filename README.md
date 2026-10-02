@@ -12,13 +12,12 @@
 
 ## 功能
 
-- **多个识别渠道**：豆包输入法、微信输入法、千问输入法云端识别，以及完全本地运行的离线识别：微信离线（macOS / Windows）、豆包离线（仅 Apple 芯片 Mac）
+- **多个识别渠道**：豆包、微信、千问、百度、搜狗、讯飞输入法云端识别，以及完全本地运行的离线识别：微信离线（macOS / Windows）、豆包离线（仅 Apple 芯片 Mac）
 - **多渠道候选**：勾选 2 个以上渠道同时识别，光标旁弹出候选框实时显示各渠道结果，按数字键或 ↑↓ + 回车选一条上屏；默认选中上次用的渠道
 - **渠道对比**：在设置里录一段话，并排比较各渠道的结果和速度
 - **长按说话**：按住快捷键开始，松开结束
 - **点按说话**：自定义快捷键，点一下开始，停顿 1–5 秒自动结束，再点一下可提前结束
 - **边说边上屏**：识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴
-- **千问输出**：原文、润色或译成英文
 - **麦克风选择**、开机启动、浅色 / 深色主题、应用内自动更新
 
 ## 截图
@@ -85,7 +84,7 @@ npx tauri build                  # Windows：nsis / msi 安装包
 
 - Opus 由 `audiopus_sys` 从源码静态编译，相关环境变量见 `.cargo/config.toml`
 - 打包 DMG：`Scripts/dmg.sh out.dmg path/to/VoiceKey.app app/src-tauri/icons/icon.icns`
-- 命令行测试识别：`cargo run -p voicekey-core --bin vk-test -- doubao|wetype|qwen file.wav [asr|polish|translate]`（WAV 需 16kHz 单声道）
+- 命令行测试识别：`cargo run -p voicekey-core --bin vk-test -- doubao|wetype|qwen|baidu|sogou|iflytek file.wav`（WAV 需 16kHz 单声道）
 
 ## 发布
 

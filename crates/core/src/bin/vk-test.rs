@@ -1,26 +1,20 @@
-//! vk-test doubao|wetype|qwen|baidu file.wav [asr|polish|translate]
+//! vk-test doubao|wetype|qwen|baidu|sogou|iflytek file.wav
 use std::time::Instant;
-use voicekey_core::{audio, BaiduEngine, DoubaoEngine, Engine, QwenEngine, QwenOutput, WeTypeEngine};
+use voicekey_core::{audio, BaiduEngine, DoubaoEngine, Engine, IflyEngine, QwenEngine, SogouEngine, WeTypeEngine};
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: vk-test doubao|wetype|qwen|baidu file.wav [asr|polish|translate]");
+        eprintln!("usage: vk-test doubao|wetype|qwen|baidu|sogou|iflytek file.wav");
         std::process::exit(2);
     }
     let engine: Box<dyn Engine> = match args[1].as_str() {
         "wetype" => Box::new(WeTypeEngine::default()),
         "baidu" => Box::new(BaiduEngine),
-        "qwen" => {
-            let q = QwenEngine::default();
-            if let Some(o) = args.get(3) {
-                q.set_output(serde_json::from_value(serde_json::json!(o)).expect("bad output"));
-            } else {
-                q.set_output(QwenOutput::Polish);
-            }
-            Box::new(q)
-        }
+        "sogou" => Box::new(SogouEngine),
+        "iflytek" => Box::new(IflyEngine),
+        "qwen" => Box::new(QwenEngine::default()),
         _ => Box::new(DoubaoEngine),
     };
     let start = Instant::now();

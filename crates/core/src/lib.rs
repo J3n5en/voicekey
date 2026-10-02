@@ -5,7 +5,9 @@ pub mod opus;
 pub mod pb;
 pub mod qwen;
 pub mod util;
+pub mod sogou;
 pub mod wetype;
+pub mod ifly;
 pub mod ws;
 
 use anyhow::Result;
@@ -25,5 +27,7 @@ pub trait Engine: Send + Sync {
 
 pub use baidu::BaiduEngine;
 pub use doubao::DoubaoEngine;
-pub use qwen::{QwenEngine, QwenOutput};
+pub use qwen::QwenEngine;
+pub use sogou::SogouEngine;
 pub use wetype::WeTypeEngine;
+pub use ifly::IflyEngine;

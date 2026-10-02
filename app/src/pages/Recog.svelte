@@ -1,12 +1,11 @@
 <script lang="ts">
   import { app, save } from "../lib/store.svelte";
-  import { call, CH, LOCAL, type Channel, type QwenOutput } from "../lib/api";
+  import { call, CH, LOCAL, type Channel } from "../lib/api";
   import ChIcon from "../lib/ChIcon.svelte";
   import Compare from "./Compare.svelte";
 
   const s = $derived(app.s!);
   const engines = $derived(app.info!.channels.filter((c) => c !== "all"));
-  const QO: [QwenOutput, string][] = [["asr", "原文"], ["polish", "润色"], ["translate", "译成英文"]];
   const pick = (c: Channel) => save({ channel: c });
   const st = (c: Channel) => app.models[c] ?? { state: "missing" };
   const dl = (e: Event, c: Channel) => { e.stopPropagation(); call("model_download", { ch: c }); };
@@ -60,17 +59,6 @@
 </div>
 {#if !app.info!.offline.supported}
   <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
-{/if}
-{#if s.channel === "qwen" || (s.channel === "all" && s.multi.includes("qwen"))}
-  <h3>千问输出</h3>
-  <div class="group">
-    <div class="row">
-      <div class="lbl">输出方式<small>润色会去除口头语并补全标点</small></div>
-      <div class="segc">
-        {#each QO as [k, v]}<button class:on={s.qwenOutput === k} onclick={() => save({ qwenOutput: k })}>{v}</button>{/each}
-      </div>
-    </div>
-  </div>
 {/if}
 <h3>渠道对比</h3>
 <Compare />

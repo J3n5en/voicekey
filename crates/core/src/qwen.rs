@@ -21,15 +21,6 @@ const AES_KEY: &[u8] = b"a0a6237b2b735a54";
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 TONGYI_DESKTOP/0.1.0 QuarkPC/ime_voice";
 const CHUNK: usize = 3840;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum QwenOutput {
-    Asr,
-    #[default]
-    Polish,
-    Translate,
-}
-
 fn debug(tag: &str, d: &[u8]) {
     if std::env::var_os("QWEN_DEBUG").is_some() {
         let s = String::from_utf8_lossy(d);
@@ -41,18 +32,9 @@ fn debug(tag: &str, d: &[u8]) {
 #[derive(Default)]
 pub struct QwenEngine {
     session: Mutex<Option<Session>>,
-    output: std::sync::Mutex<QwenOutput>,
 }
 
 impl QwenEngine {
-    pub fn set_output(&self, o: QwenOutput) {
-        *self.output.lock().unwrap() = o;
-    }
-
-    fn output(&self) -> QwenOutput {
-        *self.output.lock().unwrap()
-    }
-
     async fn take(&self, fresh: bool) -> Result<(Session, bool)> {
         if !fresh {
             if let Some(s) = self.session.lock().await.take().filter(|s| !s.dead) {
@@ -79,20 +61,16 @@ impl Engine for QwenEngine {
     }
 
     async fn run(&self, mut audio: Audio, partial: Partial) -> Result<String> {
-        let output = self.output();
         let (mut s, reused) = self.take(false).await?;
-        if let Err(e) = s.ensure_attach(output).await {
+        if let Err(e) = s.ensure_attach().await {
             if !reused {
                 return Err(e);
             }
             (s, _) = self.take(true).await?;
-            s.ensure_attach(output).await?;
-        }
-        if output == QwenOutput::Translate {
-            s.update_translation().await?;
+            s.ensure_attach().await?;
         }
 
-        let mut t = Transcript { mode: output, partial, asr: String::new(), polish: String::new(), translate: String::new(), polish_done: false, asr_done: false };
+        let mut t = Transcript { partial, asr: String::new(), asr_done: false };
         let ws = s.ws.take().ok_or_else(|| anyhow!("千问连接缺失"))?;
         let (mut sink, mut stream) = ws.split();
         let result: Result<()> = async {
@@ -117,9 +95,8 @@ impl Engine for QwenEngine {
                 sink.send(bin(s.asr_send(&pcm))).await?;
             }
             sink.send(bin(s.asr_complete())).await?;
-            let rounds = if output == QwenOutput::Translate { 16 } else { 8 };
-            let deadline = Instant::now() + Duration::from_millis(250 * rounds);
-            while t.waiting() && Instant::now() < deadline {
+            let deadline = Instant::now() + Duration::from_millis(2000);
+            while !t.asr_done && Instant::now() < deadline {
                 if let Some(d) = ws::recv_opt(&mut stream, deadline - Instant::now()).await? {
                     s.handle(&d, &mut t);
                 }
@@ -144,31 +121,14 @@ fn bin(d: Vec<u8>) -> Message {
 }
 
 struct Transcript {
-    mode: QwenOutput,
     partial: Partial,
     asr: String,
-    polish: String,
-    translate: String,
-    polish_done: bool,
     asr_done: bool,
 }
 
 impl Transcript {
     fn result(&self) -> String {
-        let pick = |a: &String, b: &String| if a.is_empty() { b.clone() } else { a.clone() };
-        match self.mode {
-            QwenOutput::Asr => self.asr.clone(),
-            QwenOutput::Polish => pick(&self.polish, &self.asr),
-            QwenOutput::Translate => pick(&self.translate, &pick(&self.polish, &self.asr)),
-        }
-    }
-
-    fn waiting(&self) -> bool {
-        match self.mode {
-            QwenOutput::Asr => !self.asr_done,
-            QwenOutput::Polish => !self.polish_done,
-            QwenOutput::Translate => self.translate.is_empty(),
-        }
+        self.asr.clone()
     }
 
     fn walk(&mut self, v: &Value) {
@@ -181,17 +141,14 @@ impl Transcript {
                 if let Some(ms) = d.get("messages").and_then(Value::as_array) {
                     for m in ms {
                         if let Some(s) = m.get("content").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-                            self.polish = s.into();
-                            self.polish_done |= m.get("status").and_then(Value::as_str) == Some("complete");
-                            (self.partial)(s);
+                            let _ = (m, s);
                         }
                     }
                 }
                 for (k, v) in d {
                     match v.as_str().filter(|s| !s.is_empty()) {
                         Some(s) if k == "translatedText" || k == "translated_text" => {
-                            self.translate = s.into();
-                            (self.partial)(s);
+                            let _ = s;
                         }
                         _ => self.walk(v),
                     }
@@ -210,7 +167,6 @@ struct Session {
     session_id: String,
     round_id: String,
     attached: bool,
-    output: QwenOutput,
 }
 
 impl Session {
@@ -223,7 +179,7 @@ impl Session {
         let ws = ws::connect(&url, &headers).await.map_err(|e| anyhow!("千问 {e}"))?;
         Ok(Self {
             auth, ws: Some(ws), dead: false, session_id: String::new(), round_id: String::new(),
-            attached: false, output: QwenOutput::default(),
+            attached: false,
         })
     }
 
@@ -231,11 +187,10 @@ impl Session {
         self.ws.as_mut().ok_or_else(|| anyhow!("千问连接缺失"))
     }
 
-    async fn ensure_attach(&mut self, output: QwenOutput) -> Result<()> {
-        if self.attached && !self.session_id.is_empty() && self.output == output {
+    async fn ensure_attach(&mut self) -> Result<()> {
+        if self.attached && !self.session_id.is_empty() {
             return Ok(());
         }
-        self.output = output;
         let r = self.attach().await;
         if r.is_err() {
             self.dead = true;
@@ -259,28 +214,6 @@ impl Session {
             bail!("千问 attach 没有 sessionId");
         }
         Ok(())
-    }
-
-    async fn update_translation(&mut self) -> Result<()> {
-        let pkt = self.base("/voice_assistant/channel/transform")
-            .kv(4, "target_sub_scene", "VOICE_INPUT_TRANSLATE")
-            .kv(4, "target_language", "en")
-            .kv(4, "source_language", "zh");
-        self.ws()?.send(bin(pkt.0)).await?;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            let Some(d) = ws::recv_opt(self.ws()?, Duration::from_secs(1)).await? else { continue };
-            debug("TRANSFORM", &d);
-            let Ok(v) = serde_json::from_slice::<Value>(&d) else { continue };
-            if v["route"] == "/voice_assistant/channel/transform" {
-                if v["data"]["accepted"] == true {
-                    return Ok(());
-                }
-                let reason = v["data"]["reason"].as_str().or(v["msg"].as_str()).unwrap_or("rejected");
-                bail!("千问 transform 拒绝: {reason}");
-            }
-        }
-        bail!("千问 transform 无响应")
     }
 
     fn handle(&mut self, d: &[u8], t: &mut Transcript) {
@@ -312,19 +245,18 @@ impl Session {
 
     fn attach_packet(&self) -> Result<Vec<u8>> {
         let reqt = now_ms().to_string();
-        let polish = if self.output == QwenOutput::Asr { "off" } else { "smart" };
         let asr = json!({
             "body": {"bitDepth": "16", "channel": "mono", "format": "pcm", "maxEndSilence": "180000",
                      "maxStartSilence": "180000", "sampleRate": "16000", "type": "manualStreamStop"},
             "chid": self.auth.chid,
-            "header": {"clt-acs-reqt": reqt, "ai_polish_mode": polish},
+            "header": {"clt-acs-reqt": reqt, "ai_polish_mode": "off"},
             "param": {},
             "route": "/app/live/init",
         });
         let pipe = json!({
             "biz_data": {}, "biz_id": "ai_command", "chat_client": "native", "client_tm": reqt,
             "endpoint_config": {}, "from": "kkframenew_quark_asr", "scene": "voice_input_assistant",
-            "ai_polish_mode": polish,
+            "ai_polish_mode": "off",
         });
         Ok(PBuf::new()
             .s(1, "/voice_assistant/channel/attach")

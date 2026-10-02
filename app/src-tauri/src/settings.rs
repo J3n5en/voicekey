@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use voicekey_core::util::data_file;
-use voicekey_core::QwenOutput;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -10,6 +9,8 @@ pub enum Channel {
     Wetype,
     Qwen,
     Baidu,
+    Sogou,
+    Iflytek,
     Offline,
     WetypeOffline,
     All,
@@ -22,6 +23,8 @@ impl Channel {
             Channel::Wetype => "微信输入法",
             Channel::Qwen => "千问输入法",
             Channel::Baidu => "百度输入法",
+            Channel::Sogou => "搜狗输入法",
+            Channel::Iflytek => "讯飞输入法",
             Channel::Offline => "豆包离线",
             Channel::WetypeOffline => "微信离线",
             Channel::All => "多渠道（说完挑选）",
@@ -30,7 +33,7 @@ impl Channel {
 
     /// 当前平台可用的识别渠道（不含「全部」）
     pub fn engines() -> Vec<Channel> {
-        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen, Channel::Baidu];
+        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen, Channel::Baidu, Channel::Sogou, Channel::Iflytek];
         if crate::offline::SUPPORTED {
             v.push(Channel::Offline);
         }
@@ -73,7 +76,6 @@ pub struct Settings {
     pub streaming: bool,
     pub live_text: bool,
     pub mic: String,
-    pub qwen_output: QwenOutput,
     /// 多渠道模式下同时识别的渠道（至少 2 个）
     pub multi: Vec<Channel>,
     /// 候选框上次选中的渠道，下次默认聚焦
@@ -94,7 +96,6 @@ impl Default for Settings {
             streaming: true,
             live_text: true,
             mic: String::new(),
-            qwen_output: QwenOutput::Polish,
             multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
             last_pick: None,
             autostart: false,
