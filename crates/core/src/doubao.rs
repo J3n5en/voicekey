@@ -335,7 +335,7 @@ impl DoubaoDevice {
 
         let mut q: Vec<(&str, String)> = APP.iter().chain(DEV).map(|(k, v)| (*k, v.to_string())).collect();
         q.extend([("ssmix", "a".into()), ("_rticket", now.clone()), ("cdid", cdid.clone()), ("ac", "wifi".into())]);
-        let reg = Self::post("https://log.snssdk.com/service/2/device_register/", &q, serde_json::to_vec(&body)?, "application/json", &[]).await?;
+        let reg = Self::post("https://log-klink.zijieapi.com/service/2/device_register/", &q, serde_json::to_vec(&body)?, "application/json", &[]).await?;
         let did = reg["device_id_str"]
             .as_str()
             .map(String::from)
