@@ -9,9 +9,9 @@ use zip::ZipArchive;
 pub const URL: &str = "https://download.z.weixin.qq.com/publish_words/v1/ime_asr_decoder_model/20260710220526250_ime_asr_decoder_model.apk";
 pub const SIZE: u64 = 102_920_639;
 pub const MD5: &str = "28386481eb94ff73b28ee3949c0cf690";
-const FILES: [&str; 2] = ["dict.decoder.utf8.txt", "CMS.40.bin"];
+const FILES: [&str; 1] = ["dict.decoder.utf8.txt"];
 
-/// 解出模型、词表、CMS 到 dir：先写同级临时目录并试加载，成功后整体改名
+/// 解出模型、词表到 dir：先写同级临时目录并试加载，成功后整体改名
 pub fn unpack(pack: &Path, dir: &Path) -> Result<()> {
     let tmp = dir.with_extension("tmp");
     let _ = fs::remove_dir_all(&tmp);

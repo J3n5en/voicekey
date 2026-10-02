@@ -1,5 +1,5 @@
 //! 声学模型：卷积前端 + 40 层 pre-norm Transformer + CTC 输出层；int8 权重直接 mmap 自 xnet
-use crate::fbank::{Cms, DIM};
+use crate::fbank::DIM;
 use crate::kernels::{dotf, qgemm, quant, QAct};
 use crate::xnet::{self, Rec, F32, I8};
 use anyhow::{bail, Context, Result};
@@ -52,7 +52,6 @@ pub struct Model {
     out: Q,
     out_b: Vec<f32>,
     vocab: Vec<String>,
-    pub cms: Cms,
 }
 
 struct Loader<'a> {
@@ -120,7 +119,6 @@ impl Model {
         if vocab.len() != out {
             bail!("词表大小 {} 与模型输出 {out} 不符", vocab.len());
         }
-        let cms = Cms::parse(&std::fs::read(dir.join("CMS.40.bin")).context("CMS 文件不存在")?).context("CMS 文件损坏")?;
         Ok(Model {
             c1: l.f32("frontend.conv2d.weight", &[F1, 1, 5, 5])?,
             c2: l.f32("frontend.conv2d_1.weight", &[F2, F1, 7, 7])?,
@@ -131,7 +129,6 @@ impl Model {
             out: l.q("output_conv", out, D)?,
             out_b: l.f32("output_conv.bias", &[out])?,
             vocab,
-            cms,
             map,
         })
     }
