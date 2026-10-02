@@ -65,7 +65,7 @@ jobs:
           mkdir -p dist
           B=target/x86_64-pc-windows-msvc/release/bundle
           cp $B/nsis/*-setup.exe "dist/VoiceKey-$VER-x64-setup.exe"
-          cp $B/msi/*.msi "dist/VoiceKey-$VER-x64.msi"
+          cp $B/msi/*_zh-CN.msi "dist/VoiceKey-$VER-x64.msi"
 
       - uses: actions/upload-artifact@v4
         with:
