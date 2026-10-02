@@ -13,10 +13,11 @@ export interface Settings {
 }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
+export interface UpdateStatus { state: "idle" | "checking" | "latest" | "available" | "downloading" | "error"; version?: string; progress?: number; error?: string }
 export interface AppInfo {
   settings: Settings; platform: "mac" | "win"; arch: string; version: string;
   holdKeys: { id: string; name: string }[]; channels: Channel[];
-  offline: { supported: boolean }; models: Partial<Record<Channel, OfflineStatus>>; perms: Perms;
+  offline: { supported: boolean }; models: Partial<Record<Channel, OfflineStatus>>; perms: Perms; update: UpdateStatus;
 }
 export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }

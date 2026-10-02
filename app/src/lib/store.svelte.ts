@@ -1,4 +1,4 @@
-import { call, on, applyLook, type AppInfo, type Settings, type Perms, type Model, type Shortcut, type OfflineStatus, type Channel } from "./api";
+import { call, on, applyLook, type AppInfo, type Settings, type Perms, type Model, type Shortcut, type OfflineStatus, type Channel, type UpdateStatus } from "./api";
 
 export const app = $state({
   info: null as AppInfo | null,
@@ -9,6 +9,7 @@ export const app = $state({
   recording: false,
   mics: [] as string[],
   models: {} as Partial<Record<Channel, OfflineStatus>>,
+  update: { state: "idle" } as UpdateStatus,
 });
 
 export function save(patch: Partial<Settings>) {
@@ -31,6 +32,7 @@ export async function init() {
   app.s = info.settings;
   app.perms = info.perms;
   app.models = info.models;
+  app.update = info.update;
   const look = () => app.s && applyLook(info.platform, app.s.theme);
   look();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", look);
@@ -40,6 +42,7 @@ export async function init() {
   });
   on<number>("level", (v) => (app.level = v));
   on<{ ch: Channel; status: OfflineStatus }>("model", (v) => (app.models[v.ch] = v.status));
+  on<UpdateStatus>("update", (v) => (app.update = v));
   on<Model>("compare", (m) => (app.compare = m));
   on<Shortcut | null>("recorded", () => (app.recording = false));
   refreshMics();

@@ -5,6 +5,7 @@ mod hotkey;
 mod offline;
 mod settings;
 mod ui;
+mod update;
 mod wtoffline;
 
 use controller::Msg;
@@ -75,6 +76,7 @@ pub fn model_ready(ch: Channel) -> bool {
 pub fn tray_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "settings" => ui::show_settings(app),
+        "update" => update::install(app),
         "quit" => app.exit(0),
         "pause" => {
             let st = app.state::<AppState>();
@@ -118,6 +120,7 @@ fn get_state(app: AppHandle) -> serde_json::Value {
         "offline": { "supported": offline::SUPPORTED },
         "models": { "offline": offline::status(), "wetypeoffline": wtoffline::status() },
         "perms": perms(),
+        "update": update::status(),
     })
 }
 
@@ -201,6 +204,16 @@ fn open_url(url: String) {
     let _ = std::process::Command::new(cmd).arg(url).spawn();
 }
 
+#[tauri::command]
+fn update_check(app: AppHandle) {
+    update::check(&app, true);
+}
+
+#[tauri::command]
+fn update_install(app: AppHandle) {
+    update::install(&app);
+}
+
 fn main() {
     if let Some(code) = offline::worker_main() {
         std::process::exit(code);
@@ -210,9 +223,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| ui::show_settings(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download
+            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
+            update_check, update_install
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -237,6 +252,7 @@ fn main() {
             if first_run || !perm::accessibility(false) {
                 ui::show_settings(&handle);
             }
+            update::schedule(&handle);
             Ok(())
         })
         .on_window_event(|w, e| {

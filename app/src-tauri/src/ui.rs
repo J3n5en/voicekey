@@ -244,6 +244,11 @@ fn tray_menu<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) -> taur
     }
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
     items.push(Box::new(CheckMenuItem::with_id(app, "pause", "暂停监听", true, paused, None::<&str>)?));
+    if let Some(v) = crate::update::available() {
+        items.push(Box::new(MenuItem::with_id(app, "update", format!("更新到 v{v} 并重启"), true, None::<&str>)?));
+    } else if crate::update::downloading() {
+        items.push(Box::new(MenuItem::with_id(app, "update", "正在下载更新…", false, None::<&str>)?));
+    }
     items.push(Box::new(MenuItem::with_id(app, "settings", "设置…", true, Some("CmdOrCtrl+,"))?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
     items.push(Box::new(MenuItem::with_id(app, "quit", "退出 VoiceKey", true, Some("CmdOrCtrl+Q"))?));

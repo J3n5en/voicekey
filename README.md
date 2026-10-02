@@ -19,7 +19,7 @@
 - **点按说话**：自定义快捷键，点一下开始，停顿 1–5 秒自动结束，再点一下可提前结束
 - **边说边上屏**：识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴
 - **千问输出**：原文、润色或译成英文
-- **麦克风选择**、开机启动、浅色 / 深色主题
+- **麦克风选择**、开机启动、浅色 / 深色主题、应用内自动更新
 
 ## 截图
 
@@ -40,11 +40,13 @@
 | macOS 13+（Apple 芯片与 Intel 通用） | `VoiceKey-x.y.z.dmg`，打开后拖到「应用程序」 |
 | Windows 10/11 x64 | `VoiceKey-x.y.z-x64-setup.exe` 或 `.msi` |
 
-macOS 发布包为 ad-hoc 签名、未经 Apple 公证，首次运行前需解除隔离：
+macOS 发布包为自签名、未经 Apple 公证，首次运行前需解除隔离：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 ```
+
+之后的版本可在应用内更新（设置 → 通用，或菜单栏），无需重复上述步骤，已授予的权限也会保留。
 
 旧版原生 Swift 实现（仅 macOS 15+）保留在 [`legacy`](https://github.com/J3n5en/voicekey/tree/legacy) 分支。
 
@@ -87,11 +89,13 @@ npx tauri build                  # Windows：nsis / msi 安装包
 
 ## 发布
 
-推送 `v*` 标签后，GitHub Actions 构建 macOS 通用 DMG 与 Windows 安装包并创建 Release：
+推送 `v*` 标签后，GitHub Actions 构建 macOS 通用 DMG 与 Windows 安装包，连同应用内更新所需的更新包与 `latest.json` 一起创建 Release：
 
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
 ```
+
+需要的 Secrets：`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（`npx tauri signer generate` 生成的更新签名密钥）、`MACOS_CERTIFICATE` / `MACOS_CERTIFICATE_PASSWORD`（`Scripts/gen-cert.sh` 生成的自签名证书，base64 编码的 p12）。
 
 ## 结构
 
