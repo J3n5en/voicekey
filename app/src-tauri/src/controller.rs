@@ -328,6 +328,11 @@ impl Ctl {
             }
         }));
         if mode == Mode::Pick {
+            let last = self.settings().last_pick;
+            if let Some(i) = self.rows.iter().position(|r| Some(r.channel) == last && r.state == RowState::Listen) {
+                self.sel = i;
+                self.user_picked = true;
+            }
             self.front = pf::front_app();
             self.hk.picking.store(true, Ordering::Relaxed);
             // 安全输入下钩子收不到方向键/数字：改为让面板取得焦点自己接收按键
@@ -404,7 +409,9 @@ impl Ctl {
                         r.state = RowState::Error;
                     }
                 }
-                if r.state == RowState::Final && !self.user_picked && self.rows[self.sel].state != RowState::Final {
+                let cur = self.rows[self.sel].state;
+                let fallback = !self.user_picked || matches!(cur, RowState::Error | RowState::Skip);
+                if self.rows[i].state == RowState::Final && fallback && cur != RowState::Final {
                     self.sel = i;
                 }
                 let finished = !self.rows.iter().any(|r| matches!(r.state, RowState::Listen | RowState::Wait));
@@ -549,6 +556,10 @@ impl Ctl {
             return;
         }
         let text = r.text.clone();
+        let ch = r.channel;
+        if self.settings().last_pick != Some(ch) {
+            crate::update_settings(&self.app, |s| s.last_pick = Some(ch));
+        }
         let front = self.front.take();
         self.cancel();
         tauri::async_runtime::spawn(async move {

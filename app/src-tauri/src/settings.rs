@@ -71,6 +71,8 @@ pub struct Settings {
     pub qwen_output: QwenOutput,
     /// 多渠道模式下同时识别的渠道（至少 2 个）
     pub multi: Vec<Channel>,
+    /// 候选框上次选中的渠道，下次默认聚焦
+    pub last_pick: Option<Channel>,
     pub autostart: bool,
     pub theme: String,
     pub onboarded: bool,
@@ -89,6 +91,7 @@ impl Default for Settings {
             mic: String::new(),
             qwen_output: QwenOutput::Polish,
             multi: Channel::engines(),
+            last_pick: None,
             autostart: false,
             theme: "system".into(),
             onboarded: false,

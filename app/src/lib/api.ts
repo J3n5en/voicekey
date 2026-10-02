@@ -9,7 +9,7 @@ export type QwenOutput = "asr" | "polish" | "translate";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Settings {
   channel: Channel; holdKey: string; tapShortcut: Shortcut | null; silence: number; streaming: boolean;
-  liveText: boolean; mic: string; qwenOutput: QwenOutput; multi: Channel[]; autostart: boolean; theme: string; onboarded: boolean;
+  liveText: boolean; mic: string; qwenOutput: QwenOutput; multi: Channel[]; lastPick: Channel | null; autostart: boolean; theme: string; onboarded: boolean;
 }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
