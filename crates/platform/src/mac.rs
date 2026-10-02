@@ -47,6 +47,8 @@ extern "C" {
     fn AXUIElementCopyAttributeValue(el: Ref, attr: CFStringRef, out: *mut Ref) -> i32;
     fn AXUIElementCopyParameterizedAttributeValue(el: Ref, attr: CFStringRef, param: Ref, out: *mut Ref) -> i32;
     fn AXUIElementSetMessagingTimeout(el: Ref, t: f32) -> i32;
+    fn AXUIElementCreateApplication(pid: i32) -> Ref;
+    fn AXValueCreate(kind: u32, value: *const c_void) -> Ref;
     fn AXValueGetValue(v: Ref, kind: u32, out: *mut c_void) -> bool;
     static kAXTrustedCheckOptionPrompt: CFStringRef;
 }
@@ -271,26 +273,62 @@ fn ax_attr(el: Ref, name: &str) -> Option<CFType> {
 /// 当前输入焦点的选区（或控件）屏幕坐标，原点左上，单位逻辑点
 pub fn caret() -> Option<Rect> {
     unsafe {
-        let sys = CFType::wrap_under_create_rule(AXUIElementCreateSystemWide() as _);
-        AXUIElementSetMessagingTimeout(sys.as_CFTypeRef() as Ref, 0.3);
-        let el = ax_attr(sys.as_CFTypeRef() as Ref, "AXFocusedUIElement")?;
+        let el = focused_element()?;
         let el = el.as_CFTypeRef() as Ref;
+        let frame = (|| {
+            let pos = ax_rect(ax_attr(el, "AXPosition")?.as_CFTypeRef() as Ref, 1)?;
+            let size = ax_rect(ax_attr(el, "AXSize")?.as_CFTypeRef() as Ref, 2)?;
+            Some(CGRect { x: pos.x, y: pos.y, w: size.w, h: size.h })
+        })();
+        // 有些应用（如 Qt 系 Telegram 客户端）空输入时返回 (0,0,1,0) 这类无效矩形：只接受落在输入框内、有高度的结果
+        let valid = |r: &CGRect| {
+            r.h > 0.0
+                && frame.is_none_or(|f| r.x >= f.x - 4.0 && r.x <= f.x + f.w + 4.0 && r.y >= f.y - 4.0 && r.y <= f.y + f.h + 4.0)
+        };
         if let Some(range) = ax_attr(el, "AXSelectedTextRange") {
-            let attr = CFString::new("AXBoundsForRange");
-            let mut out: Ref = std::ptr::null_mut();
-            if AXUIElementCopyParameterizedAttributeValue(el, attr.as_concrete_TypeRef(), range.as_CFTypeRef() as Ref, &mut out) == 0
-                && !out.is_null()
-            {
-                let v = CFType::wrap_under_create_rule(out as _);
-                if let Some(r) = ax_rect(v.as_CFTypeRef() as Ref, 3).filter(|r| r.w + r.h > 0.0) {
-                    return Some(Rect { x: r.x, y: r.y, w: r.w, h: r.h, physical: false });
+            if let Some(r) = bounds_for(el, range.as_CFTypeRef() as Ref).filter(valid) {
+                return Some(Rect { x: r.x, y: r.y, w: r.w, h: r.h, physical: false });
+            }
+            // 插入点本身取不到时，用前一个字符的右边缘
+            let mut cr = [0isize; 2];
+            if AXValueGetValue(range.as_CFTypeRef() as Ref, 4, cr.as_mut_ptr() as *mut c_void) && cr[1] == 0 && cr[0] > 0 {
+                let prev = [cr[0] - 1, 1isize];
+                let v = AXValueCreate(4, prev.as_ptr() as *const c_void);
+                if !v.is_null() {
+                    let v = CFType::wrap_under_create_rule(v as _);
+                    if let Some(r) = bounds_for(el, v.as_CFTypeRef() as Ref).filter(valid) {
+                        return Some(Rect { x: r.x + r.w, y: r.y, w: 0.0, h: r.h, physical: false });
+                    }
                 }
             }
         }
-        let pos = ax_rect(ax_attr(el, "AXPosition")?.as_CFTypeRef() as Ref, 1)?;
-        let size = ax_rect(ax_attr(el, "AXSize")?.as_CFTypeRef() as Ref, 2)?;
-        Some(Rect { x: pos.x, y: pos.y, w: size.w, h: size.h, physical: false })
+        // 退回输入框本身：取其左上角一行高度，面板贴着输入框上沿
+        let f = frame.filter(|f| f.w > 0.0 && f.h > 0.0)?;
+        Some(Rect { x: f.x + 8.0, y: f.y, w: 0.0, h: f.h.min(22.0), physical: false })
     }
+}
+
+unsafe fn bounds_for(el: Ref, range: Ref) -> Option<CGRect> {
+    let attr = CFString::new("AXBoundsForRange");
+    let mut out: Ref = std::ptr::null_mut();
+    if AXUIElementCopyParameterizedAttributeValue(el, attr.as_concrete_TypeRef(), range, &mut out) != 0 || out.is_null() {
+        return None;
+    }
+    let v = CFType::wrap_under_create_rule(out as _);
+    ax_rect(v.as_CFTypeRef() as Ref, 3)
+}
+
+/// 系统级焦点查询对部分应用（如 iMe/Telegram）返回空，退回按前台应用 pid 查询
+unsafe fn focused_element() -> Option<CFType> {
+    let sys = CFType::wrap_under_create_rule(AXUIElementCreateSystemWide() as _);
+    AXUIElementSetMessagingTimeout(sys.as_CFTypeRef() as Ref, 0.3);
+    if let Some(el) = ax_attr(sys.as_CFTypeRef() as Ref, "AXFocusedUIElement") {
+        return Some(el);
+    }
+    let pid = front_app()?.0;
+    let app = CFType::wrap_under_create_rule(AXUIElementCreateApplication(pid) as _);
+    AXUIElementSetMessagingTimeout(app.as_CFTypeRef() as Ref, 0.3);
+    ax_attr(app.as_CFTypeRef() as Ref, "AXFocusedUIElement")
 }
 
 /// 前台应用（按 pid 记录，便于跨线程）
