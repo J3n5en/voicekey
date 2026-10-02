@@ -2,82 +2,91 @@
 
 <h1 align="center">VoiceKey</h1>
 
-<p align="center">macOS 菜单栏语音输入：在任意输入框里按住或点按快捷键说话，识别结果直接打到光标处。</p>
+<p align="center">macOS / Windows 语音输入：在任意输入框里按住或点按快捷键说话，识别结果直接打到光标处。</p>
 
 ## 功能
 
-- **三个识别渠道**：豆包输入法、微信输入法云端识别，以及完全本地运行的离线识别（仅 Apple 芯片），可在设置中切换
-- **长按说话**：按住右 ⌥ / 右 ⌘ / 右 ⌃ / Fn 开始，松开结束
-- **点按说话**：自定义快捷键（单个修饰键或任意组合键），点一下开始，停顿 1–5 秒自动结束，再点一下可提前结束
+- **多个识别渠道**：豆包输入法、微信输入法、千问输入法云端识别，以及完全本地运行的离线识别（仅 Apple 芯片 Mac）
+- **多渠道候选**：勾选 2 个以上渠道同时识别，光标旁弹出候选框实时显示各渠道结果，按数字键或 ↑↓ + 回车选一条上屏；默认选中上次用的渠道
+- **渠道对比**：在设置里录一段话，并排比较各渠道的结果和速度
+- **长按说话**：按住快捷键开始，松开结束
+- **点按说话**：自定义快捷键，点一下开始，停顿 1–5 秒自动结束，再点一下可提前结束
 - **边说边上屏**：识别中的文字实时打到光标处，结束后按定稿修正；关闭后改为结束时一次性粘贴
-- **麦克风选择**：可指定输入设备，设备断开时自动回落到系统默认
-- **声波浮层**：屏幕底部显示随音量起伏的声波
+- **千问输出**：原文、润色或译成英文
+- **麦克风选择**、开机启动、浅色 / 深色主题
 
 ## 安装
 
-从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载 `VoiceKey-x.y.z.dmg`，打开后将 VoiceKey 拖到「应用程序」。
+从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载：
 
-发布包为 ad-hoc 签名、未经 Apple 公证，首次运行前需解除隔离：
+| 系统 | 文件 |
+|---|---|
+| macOS 13+（Apple 芯片与 Intel 通用） | `VoiceKey-x.y.z.dmg`，打开后拖到「应用程序」 |
+| Windows 10/11 x64 | `VoiceKey-x.y.z-x64-setup.exe` 或 `.msi` |
+
+macOS 发布包为 ad-hoc 签名、未经 Apple 公证，首次运行前需解除隔离：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 ```
 
-要求 macOS 15+。通用包，Apple 芯片与 Intel 均可直接运行，无需安装任何依赖。
+旧版原生 Swift 实现（仅 macOS 15+）保留在 [`legacy`](https://github.com/J3n5en/voicekey/tree/legacy) 分支。
 
 ## 使用
 
-1. 启动后出现在菜单栏（麦克风图标）。图标被刘海或菜单栏管理工具挡住时，再次打开 VoiceKey.app 即可弹出设置
-2. 按提示授予 **辅助功能**（监听快捷键、上屏）和 **麦克风** 权限
-3. 在设置中选择渠道、快捷键、麦克风，然后在任意输入框中说话
+1. 首次启动会打开引导：授予 **辅助功能**（仅 macOS，用于监听快捷键和上屏）和 **麦克风** 权限，并试说一句
+2. 之后常驻菜单栏 / 系统托盘，可在托盘菜单切换渠道、暂停监听、打开设置
+3. 在任意输入框中说话
 
-| 设置项 | 默认值 |
-|---|---|
-| 识别渠道 | 豆包输入法 |
-| 长按快捷键 | 右 ⌥ |
-| 点按快捷键 | 右 ⌘ |
-| 静音自动结束 | 1.5 秒 |
-| 边说边上屏 | 开 |
+| 设置项 | macOS 默认 | Windows 默认 |
+|---|---|---|
+| 识别渠道 | 豆包输入法 | 豆包输入法 |
+| 长按快捷键 | 右 ⌥ | 右 Alt |
+| 点按快捷键 | 右 ⌘ | 右 Ctrl |
+| 静音自动结束 | 1.5 秒 | 1.5 秒 |
+| 边说边上屏 | 开 | 开 |
 
-**离线识别**：首次选择「离线」渠道时自动下载引擎库（约 8MB，来自本仓库 [offline-libs](https://github.com/J3n5en/voicekey/releases/tag/offline-libs) Release）和模型（约 177MB，来自字节 CDN），保存在 `~/Library/Application Support/VoiceKey/offline/`。之后断网也能用；识别时会在后台进程中占用约 1GB 内存，空闲 5 分钟后自动释放。
+单个修饰键可同时作为长按键和点按键：快速点一下为点按，按住超过 0.3 秒为长按。设为组合键的点按快捷键会被拦截，不再传给前台应用。
 
-单个修饰键可同时作为长按键和点按键：快速点一下为点按，按住超过 0.3 秒为长按。设为组合键的点按快捷键会被 VoiceKey 拦截，不再传给前台应用。
+**离线识别**：首次选择「离线」渠道时下载引擎库（约 8MB，来自本仓库 [offline-libs](https://github.com/J3n5en/voicekey/releases/tag/offline-libs) Release）和模型（约 177MB，来自字节 CDN），保存在 `~/Library/Application Support/VoiceKey/offline/`。之后断网也能用；只在用到离线渠道时启动后台进程，空闲 5 分钟后自动释放。
 
 ## 从源码构建
 
+需要 Rust（stable）、Node 22+ 和 CMake；Windows 另需 MSVC 生成工具。
+
 ```bash
-./build.sh            # 产物在 build/VoiceKey.app（arm64 + x86_64 通用包）
+cd app
+npm ci
+npx tauri dev                    # 开发运行
+npx tauri build --bundles app    # macOS：target/release/bundle/macos/VoiceKey.app
+npx tauri build                  # Windows：nsis / msi 安装包
 ```
 
-- 只需 Xcode 命令行工具；Opus 由 `Scripts/opus.sh` 从官方源码编译为通用静态库，首次构建自动下载并校验
-- 本地有 Apple Development 证书时自动用它签名，重建后系统权限不会丢失；可用 `SIGN_IDENTITY` 指定证书，`-` 为 ad-hoc
-- `VERSION` / `BUILD` 环境变量设置版本号
-- 打包 DMG：`./Scripts/dmg.sh build/VoiceKey.dmg`（窗口布局与背景见 `Scripts/dmg/`）
-- 调试识别链路：`build/VoiceKey.app/Contents/MacOS/VoiceKey --test doubao|wetype file.wav`
+- Opus 由 `audiopus_sys` 从源码静态编译，相关环境变量见 `.cargo/config.toml`
+- 打包 DMG：`Scripts/dmg.sh out.dmg path/to/VoiceKey.app app/src-tauri/icons/icon.icns`
+- 命令行测试识别：`cargo run -p voicekey-core --bin vk-test -- doubao|wetype|qwen file.wav [asr|polish|translate]`（WAV 需 16kHz 单声道）
 
 ## 发布
 
-推送 `v*` 标签后，GitHub Actions 自动构建并创建 Release：
+推送 `v*` 标签后，GitHub Actions 构建 macOS 通用 DMG 与 Windows 安装包并创建 Release：
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
-## 实现
+## 结构
 
-| 文件 | 内容 |
+| 路径 | 内容 |
 |---|---|
-| `Doubao.swift` | 豆包：设备注册、WebSocket + protobuf 流式识别 |
-| `WeType.swift` | 微信：secp128r1 ECDH、AES-256-ECB、snappy、protobuf 流式识别 |
-| `Offline.swift` | 离线：资源下载与校验、识别子进程管理 |
-| `CHanbao/` | 在 macOS 进程内加载安卓 ELF 引擎库（ELF 加载器 + bionic 兼容层） |
-| `Audio.swift` | AudioQueue 采集 16kHz 单声道、音量计算、设备枚举 |
-| `System.swift` | 全局快捷键（CGEventTap）、上屏、HUD |
-| `Core.swift` | Opus 编码、protobuf 编解码、WebSocket 封装 |
-| `Scripts/icon.swift` | 生成 App 图标 |
+| `crates/core` | 识别引擎：豆包（protobuf + WebSocket）、微信（secp128r1 ECDH、AES-256-ECB、snappy）、千问（HMAC-SHA1、AES-128-CBC）；音频采集与重采样、Opus 编码 |
+| `crates/platform` | 平台层：全局快捷键（CGEventTap / WH_KEYBOARD_LL）、上屏、光标位置、权限 |
+| `crates/hanbao` | 离线引擎：编译 `Sources/CHanbao`，在 macOS 进程内加载安卓 ELF 引擎库 |
+| `app/src-tauri` | Tauri 应用：设置、快捷键状态机、会话调度、浮层窗口、托盘、离线资源下载 |
+| `app/src` | Svelte 界面：设置、引导、声波浮层、候选框、渠道对比 |
+| `design/` | 交互原型与渠道图标 |
 
-音频以 20ms 一帧 Opus 编码后上传。识别设备身份在本机运行时生成，保存在 `~/Library/Application Support/VoiceKey/`。
+音频以 16kHz 单声道、20ms 一帧采集。识别设备身份在本机运行时生成，保存在 `~/Library/Application Support/VoiceKey/`（Windows 为 `%APPDATA%\VoiceKey\`）。
 
 ## 声明
 
-本项目通过分析输入法客户端协议实现，仅供学习与个人使用，与字节跳动、腾讯无关。接口可能随时变更或失效；语音会发送到对应厂商的服务器。
+本项目通过分析输入法客户端协议实现，仅供学习与个人使用，与字节跳动、腾讯、阿里巴巴无关。接口可能随时变更或失效；语音会发送到对应厂商的服务器。
