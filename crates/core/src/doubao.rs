@@ -104,6 +104,61 @@ impl Transcript {
 #[async_trait::async_trait]
 impl Engine for DoubaoEngine {
     async fn run(&self, mut audio: Audio, partial: Partial) -> Result<String> {
+        // 录音同时留底：服务端拒绝当前设备（SessionFailed 且无结果）时换新设备重放一次
+        let (ftx, frx) = tokio::sync::mpsc::unbounded_channel();
+        let kept = Arc::new(Mutex::new(Vec::new()));
+        let k = kept.clone();
+        let _tee = AbortOnDrop(tokio::spawn(async move {
+            while let Some(f) = audio.recv().await {
+                k.lock().unwrap().push(f.clone());
+                let _ = ftx.send(f);
+            }
+        }));
+        let partial: Arc<Partial> = Arc::new(partial);
+        match session(frx, partial.clone()).await {
+            Err(Fail::Rejected(e)) => {
+                DoubaoDevice::reset();
+                let (rtx, rrx) = tokio::sync::mpsc::unbounded_channel();
+                let frames = std::mem::take(&mut *kept.lock().unwrap());
+                // 4 倍速回放，一次性灌入会被服务端拒绝
+                let _replay = AbortOnDrop(tokio::spawn(async move {
+                    for f in frames {
+                        if rtx.send(f).is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                }));
+                session(rrx, partial).await.map_err(|r| {
+                    DoubaoDevice::reset();
+                    anyhow!("{e}；换设备重试：{}", r.into_inner())
+                })
+            }
+            r => r.map_err(Fail::into_inner),
+        }
+    }
+}
+
+/// Rejected：服务端判会话失败且无任何结果，可换设备重试
+enum Fail {
+    Other(anyhow::Error),
+    Rejected(anyhow::Error),
+}
+impl Fail {
+    fn into_inner(self) -> anyhow::Error {
+        match self {
+            Fail::Other(e) | Fail::Rejected(e) => e,
+        }
+    }
+}
+impl<E: Into<anyhow::Error>> From<E> for Fail {
+    fn from(e: E) -> Self {
+        Fail::Other(e.into())
+    }
+}
+
+async fn session(mut audio: Audio, partial: Arc<Partial>) -> std::result::Result<String, Fail> {
+    {
         let device = DoubaoDevice::load().await?;
         let rid = uuid::Uuid::new_v4().to_string();
         let url = format!("{WS_URL}?aid=401734&device_id={}", device.did);
@@ -126,7 +181,7 @@ impl Engine for DoubaoEngine {
         };
         if let Err(e) = handshake.await {
             DoubaoDevice::reset();
-            return Err(e);
+            return Err(e.into());
         }
 
         let transcript = Arc::new(Mutex::new(Transcript::default()));
@@ -172,7 +227,9 @@ impl Engine for DoubaoEngine {
         let _ = tx.close().await;
         let text = transcript.lock().unwrap().result();
         match outcome {
-            Err(e) if text.is_empty() => Err(e),
+            // 如设备被服务端拉黑后的 service discovery failure
+            Err(e) if text.is_empty() && e.to_string().contains("Failed") => Err(Fail::Rejected(e)),
+            Err(e) if text.is_empty() => Err(e.into()),
             _ => Ok(text),
         }
     }
