@@ -1,16 +1,17 @@
-//! vk-test doubao|wetype|qwen file.wav [asr|polish|translate]
+//! vk-test doubao|wetype|qwen|baidu file.wav [asr|polish|translate]
 use std::time::Instant;
-use voicekey_core::{audio, DoubaoEngine, Engine, QwenEngine, QwenOutput, WeTypeEngine};
+use voicekey_core::{audio, BaiduEngine, DoubaoEngine, Engine, QwenEngine, QwenOutput, WeTypeEngine};
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: vk-test doubao|wetype|qwen file.wav [asr|polish|translate]");
+        eprintln!("usage: vk-test doubao|wetype|qwen|baidu file.wav [asr|polish|translate]");
         std::process::exit(2);
     }
     let engine: Box<dyn Engine> = match args[1].as_str() {
         "wetype" => Box::new(WeTypeEngine::default()),
+        "baidu" => Box::new(BaiduEngine),
         "qwen" => {
             let q = QwenEngine::default();
             if let Some(o) = args.get(3) {

@@ -9,6 +9,7 @@ pub enum Channel {
     Doubao,
     Wetype,
     Qwen,
+    Baidu,
     Offline,
     WetypeOffline,
     All,
@@ -20,6 +21,7 @@ impl Channel {
             Channel::Doubao => "豆包输入法",
             Channel::Wetype => "微信输入法",
             Channel::Qwen => "千问输入法",
+            Channel::Baidu => "百度输入法",
             Channel::Offline => "豆包离线",
             Channel::WetypeOffline => "微信离线",
             Channel::All => "多渠道（说完挑选）",
@@ -28,7 +30,7 @@ impl Channel {
 
     /// 当前平台可用的识别渠道（不含「全部」）
     pub fn engines() -> Vec<Channel> {
-        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen];
+        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen, Channel::Baidu];
         if crate::offline::SUPPORTED {
             v.push(Channel::Offline);
         }

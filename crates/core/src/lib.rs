@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod baidu;
 pub mod doubao;
 pub mod opus;
 pub mod pb;
@@ -22,6 +23,7 @@ pub trait Engine: Send + Sync {
     async fn prewarm(&self) {}
 }
 
+pub use baidu::BaiduEngine;
 pub use doubao::DoubaoEngine;
 pub use qwen::{QwenEngine, QwenOutput};
 pub use wetype::WeTypeEngine;

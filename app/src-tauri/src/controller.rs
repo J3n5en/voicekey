@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tauri::async_runtime::JoinHandle;
 use voicekey_core::audio::Recorder;
-use voicekey_core::{DoubaoEngine, Engine, QwenEngine, WeTypeEngine};
+use voicekey_core::{BaiduEngine, DoubaoEngine, Engine, QwenEngine, WeTypeEngine};
 use voicekey_platform::{self as pf, Special, Typer};
 
 pub enum Msg {
@@ -93,6 +93,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
     engines.insert(Channel::Doubao, Arc::new(DoubaoEngine));
     engines.insert(Channel::Wetype, Arc::new(WeTypeEngine::default()));
     engines.insert(Channel::Qwen, qwen);
+    engines.insert(Channel::Baidu, Arc::new(BaiduEngine));
     if let Some(e) = offline::engine() {
         engines.insert(Channel::Offline, e);
     }

@@ -28,6 +28,8 @@ hmac = "0.12"
 base64 = "0.22"
 hex = "0.4"
 dirs = "5"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+bytes = "1"
 
 [[bin]]
 name = "vk-test"

@@ -3,8 +3,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import doubao from "../assets/logos/doubao.png";
 import wetype from "../assets/logos/wetype.png";
 import qwen from "../assets/logos/qwen.png";
+import baidu from "../assets/logos/baidu.png";
 
-export type Channel = "doubao" | "wetype" | "qwen" | "offline" | "wetypeoffline" | "all";
+export type Channel = "doubao" | "wetype" | "qwen" | "baidu" | "offline" | "wetypeoffline" | "all";
 export type QwenOutput = "asr" | "polish" | "translate";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Settings {
@@ -30,6 +31,7 @@ export const CH: Record<Channel, { name: string; short: string; desc: string; ta
   doubao: { name: "豆包输入法", short: "豆包", desc: "响应快、中英混说准确，适合日常输入。", tags: ["在线", "流式", "推荐"], logo: doubao },
   wetype: { name: "微信输入法", short: "微信", desc: "口语化表达识别稳定，数字自动规整。", tags: ["在线", "流式"], logo: wetype },
   qwen: { name: "千问输入法", short: "千问", desc: "支持原文、润色、译成英文三种输出。", tags: ["在线", "润色", "翻译"], logo: qwen },
+  baidu: { name: "百度输入法", short: "百度", desc: "百度输入法官方云端识别，中文流式出字。", tags: ["在线", "流式"], logo: baidu },
   offline: { name: "豆包离线", short: "豆包离线", desc: "豆包输入法离线引擎，本机运行，断网可用，不上传音频。", tags: ["离线", "约 190MB"], logo: doubao },
   wetypeoffline: { name: "微信离线", short: "微信离线", desc: "微信输入法官方离线模型，本机运行，断网可用，不上传音频。", tags: ["离线", "约 100MB"], logo: wetype },
   all: { name: "多渠道", short: "多渠道", desc: "勾选的渠道同时识别、实时出字，说完在光标处挑选最满意的一条上屏。", tags: ["并行", "流式候选"], logo: "" },
