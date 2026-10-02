@@ -1,0 +1,18 @@
+[package]
+name = "voicekey-wtlocal"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+memmap2 = "0.9"
+rayon = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+voicekey-core = { path = "../core" }
+hound = "3"
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[[bin]]
+name = "wtl"
+path = "src/bin/wtl.rs"

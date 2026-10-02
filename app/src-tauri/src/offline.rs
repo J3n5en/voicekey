@@ -65,10 +65,10 @@ pub fn status() -> Value {
 
 fn set_status<R: Runtime>(app: &AppHandle<R>, v: Value) {
     *STATUS.lock().unwrap() = Some(v.clone());
-    let _ = app.emit("offline", v);
+    let _ = app.emit("model", json!({ "ch": "offline", "status": v }));
 }
 
-/// 后台下载引擎库与模型，进度经 "offline" 事件推送
+/// 后台下载引擎库与模型，进度经 "model" 事件推送
 pub fn download<R: Runtime>(app: &AppHandle<R>) {
     if !SUPPORTED || installed() || status()["state"] == "downloading" {
         return;

@@ -10,6 +10,7 @@ pub enum Channel {
     Wetype,
     Qwen,
     Offline,
+    WetypeOffline,
     All,
 }
 
@@ -19,7 +20,8 @@ impl Channel {
             Channel::Doubao => "豆包输入法",
             Channel::Wetype => "微信输入法",
             Channel::Qwen => "千问输入法",
-            Channel::Offline => "离线（本地模型）",
+            Channel::Offline => "豆包离线",
+            Channel::WetypeOffline => "微信离线",
             Channel::All => "多渠道（说完挑选）",
         }
     }
@@ -30,6 +32,7 @@ impl Channel {
         if crate::offline::SUPPORTED {
             v.push(Channel::Offline);
         }
+        v.push(Channel::WetypeOffline);
         v
     }
 
@@ -90,7 +93,7 @@ impl Default for Settings {
             live_text: true,
             mic: String::new(),
             qwen_output: QwenOutput::Polish,
-            multi: Channel::engines(),
+            multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
             last_pick: None,
             autostart: false,
             theme: "system".into(),

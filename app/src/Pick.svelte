@@ -120,7 +120,7 @@
   .row.shake { animation: shake 0.3s; }
   .num { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line); font-size: 11px; display: grid; place-items: center; color: var(--fg2); flex: none; margin-top: 2px; }
   .row.active .num { background: var(--accent); color: #fff; border-color: transparent; }
-  .name { width: 74px; flex: none; font-size: 12px; color: var(--fg2); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+  .name { width: 88px; flex: none; font-size: 12px; color: var(--fg2); margin-top: 2px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .text { flex: 1; font-size: 14px; line-height: 1.55; min-height: 22px; word-break: break-all; -webkit-user-select: text; user-select: text; }
   .text.muted { color: var(--fg3); font-size: 13px; }
   .text.bad { color: var(--err); }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/platform", "crates/hanbao", "app/src-tauri"]
+members = ["crates/core", "crates/platform", "crates/hanbao", "crates/wtlocal", "app/src-tauri"]
 
 [workspace.package]
 version = "1.0.0"
@@ -10,3 +10,7 @@ edition = "2021"
 lto = true
 codegen-units = 1
 strip = true
+
+# 离线推理在 debug 构建下也需要优化，否则开发联调时慢到不可用
+[profile.dev.package.voicekey-wtlocal]
+opt-level = 3

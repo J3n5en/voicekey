@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, save } from "../lib/store.svelte";
-  import { call, CH, type Channel, type QwenOutput } from "../lib/api";
+  import { call, CH, LOCAL, type Channel, type QwenOutput } from "../lib/api";
   import ChIcon from "../lib/ChIcon.svelte";
   import Compare from "./Compare.svelte";
 
@@ -8,6 +8,8 @@
   const engines = $derived(app.info!.channels.filter((c) => c !== "all"));
   const QO: [QwenOutput, string][] = [["asr", "原文"], ["polish", "润色"], ["translate", "译成英文"]];
   const pick = (c: Channel) => save({ channel: c });
+  const st = (c: Channel) => app.models[c] ?? { state: "missing" };
+  const dl = (e: Event, c: Channel) => { e.stopPropagation(); call("model_download", { ch: c }); };
   // 保持渠道顺序；至少保留 2 个
   const toggle = (c: Channel) => {
     const on = s.multi.includes(c);
@@ -20,20 +22,21 @@
 <div class="sub">选择语音转文字的服务，随时可以在托盘菜单里切换。</div>
 <div class="cards">
   {#each engines as c}
+    {@const m = st(c)}
     <button class="ch" class:on={s.channel === c} onclick={() => pick(c)}>
       <div class="hd"><ChIcon ch={c} /><b>{CH[c].name}</b><span class="radio"></span></div>
       <p>{CH[c].desc}</p>
       <div class="tags">{#each CH[c].tags as t}<span class="pill">{t}</span>{/each}</div>
-      {#if c === "offline" && (s.channel === "offline" || app.offline.state === "downloading" || app.offline.state === "failed")}
+      {#if LOCAL[c] && (s.channel === c || m.state === "downloading" || m.state === "failed")}
         <div class="dl">
-          {#if app.offline.state === "ready"}<span class="ok">● 模型已就绪</span>
-          {:else if app.offline.state === "downloading"}
-            模型 <span class="bar"><i style="width:{(app.offline.progress ?? 0) * 100}%"></i></span>{Math.round((app.offline.progress ?? 0) * 100)}%
-          {:else if app.offline.state === "failed"}
-            <span class="err">{app.offline.error}</span>
-            <span class="link" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); call("offline_download"); }} onkeydown={() => {}}>重试</span>
+          {#if m.state === "ready"}<span class="ok">● 模型已就绪</span>
+          {:else if m.state === "downloading"}
+            模型 <span class="bar"><i style="width:{(m.progress ?? 0) * 100}%"></i></span>{Math.round((m.progress ?? 0) * 100)}%
+          {:else if m.state === "failed"}
+            <span class="err">{m.error}</span>
+            <span class="link" role="button" tabindex="-1" onclick={(e) => dl(e, c)} onkeydown={() => {}}>重试</span>
           {:else}
-            <span class="link" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); call("offline_download"); }} onkeydown={() => {}}>下载模型（约 190MB）</span>
+            <span class="link" role="button" tabindex="-1" onclick={(e) => dl(e, c)} onkeydown={() => {}}>下载模型（{LOCAL[c]}）</span>
           {/if}
         </div>
       {/if}
@@ -56,7 +59,7 @@
   </button>
 </div>
 {#if !app.info!.offline.supported}
-  <div class="note">ⓘ 离线识别仅支持 Apple 芯片的 Mac{app.info!.platform === "win" ? "，Windows 版暂不提供" : ""}。</div>
+  <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
 {/if}
 {#if s.channel === "qwen" || (s.channel === "all" && s.multi.includes("qwen"))}
   <h3>千问输出</h3>
@@ -74,7 +77,7 @@
 
 <style>
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .ch { position: relative; background: var(--card); border: 1.5px solid var(--line); border-radius: var(--r); padding: 14px; cursor: pointer; transition: 0.15s; text-align: left; }
+  .ch { position: relative; display: flex; flex-direction: column; justify-content: flex-start; background: var(--card); border: 1.5px solid var(--line); border-radius: var(--r); padding: 14px; cursor: pointer; transition: 0.15s; text-align: left; }
   .ch:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
   .ch.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
   .ch.wide { grid-column: span 2; }

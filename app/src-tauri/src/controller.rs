@@ -1,7 +1,7 @@
 //! 会话编排：快捷键 → 录音 → 识别 → 上屏；「全部」模式流式候选面板；设置页渠道对比
 use crate::hotkey::{HotEvent, Shared};
 use crate::settings::{Channel, Settings};
-use crate::{offline, ui, AppState};
+use crate::{offline, ui, wtoffline, AppState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -96,6 +96,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
     if let Some(e) = offline::engine() {
         engines.insert(Channel::Offline, e);
     }
+    engines.insert(Channel::WetypeOffline, wtoffline::engine());
     let ctl = Ctl {
         settings: st.settings.clone(),
         hk: st.hk.clone(),
@@ -304,7 +305,7 @@ impl Ctl {
         self.rows = channels
             .into_iter()
             .map(|ch| {
-                let skip = ch == Channel::Offline && !offline::installed();
+                let skip = !crate::model_ready(ch);
                 Row {
                     channel: ch,
                     text: if skip { "离线模型未下载，已跳过".into() } else { String::new() },

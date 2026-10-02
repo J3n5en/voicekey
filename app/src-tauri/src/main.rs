@@ -5,6 +5,7 @@ mod hotkey;
 mod offline;
 mod settings;
 mod ui;
+mod wtoffline;
 
 use controller::Msg;
 use hotkey::Shared;
@@ -50,10 +51,25 @@ pub fn update_settings<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut Setti
         g.clone()
     };
     apply(app, &s);
-    if s.channel == Channel::Offline {
-        offline::download(app);
-    }
+    download_model(app, s.channel);
     let _ = app.emit("settings", &s);
+}
+
+/// 本地模型渠道：开始下载（已下载或下载中则忽略）
+fn download_model<R: Runtime>(app: &AppHandle<R>, ch: Channel) {
+    match ch {
+        Channel::Offline => offline::download(app),
+        Channel::WetypeOffline => wtoffline::download(app),
+        _ => {}
+    }
+}
+
+pub fn model_ready(ch: Channel) -> bool {
+    match ch {
+        Channel::Offline => offline::installed(),
+        Channel::WetypeOffline => wtoffline::installed(),
+        _ => true,
+    }
 }
 
 pub fn tray_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
@@ -99,7 +115,8 @@ fn get_state(app: AppHandle) -> serde_json::Value {
         "version": app.package_info().version.to_string(),
         "holdKeys": hold,
         "channels": Channel::available(),
-        "offline": { "supported": offline::SUPPORTED, "status": offline::status() },
+        "offline": { "supported": offline::SUPPORTED },
+        "models": { "offline": offline::status(), "wetypeoffline": wtoffline::status() },
         "perms": perms(),
     })
 }
@@ -128,8 +145,8 @@ fn perm_action(kind: String) {
 }
 
 #[tauri::command]
-fn offline_download(app: AppHandle) {
-    offline::download(&app);
+fn model_download(app: AppHandle, ch: Channel) {
+    download_model(&app, ch);
 }
 
 #[tauri::command]
@@ -195,7 +212,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, offline_download
+            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

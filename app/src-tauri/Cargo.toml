@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 voicekey-core = { path = "../../crates/core" }
 voicekey-platform = { path = "../../crates/platform" }
 voicekey-hanbao = { path = "../../crates/hanbao" }
+voicekey-wtlocal = { path = "../../crates/wtlocal" }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
