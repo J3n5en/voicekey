@@ -17,8 +17,8 @@ use voicekey_platform::{self as pf, Special, Typer};
 pub enum Msg {
     Hot(HotEvent),
     Level(f32),
-    Partial { gen: u64, ch: Channel, text: String },
-    Done { gen: u64, ch: Channel, res: Result<String, String> },
+    Partial { gen: u64, ch: Channel, seg: usize, text: String },
+    Done { gen: u64, ch: Channel, seg: usize, res: Result<String, String> },
     Timeout { token: u64 },
     Flush,
     PickChoose(usize),
@@ -63,6 +63,61 @@ enum Mode {
     Compare,
 }
 
+/// 单渠道会话的分段：识别中再触发继续说，各段结果按顺序拼成一句
+#[derive(Default)]
+struct Segments {
+    parts: Vec<(String, bool)>,
+    error: Option<String>,
+}
+
+impl Segments {
+    fn start(&mut self) -> usize {
+        self.parts.push((String::new(), false));
+        self.parts.len() - 1
+    }
+
+    fn partial(&mut self, i: usize, text: String) -> bool {
+        match self.parts.get_mut(i) {
+            Some((t, false)) => {
+                *t = text;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// keep_partial：流式上屏时已打出的片段在定稿为空或失败时保留
+    fn done(&mut self, i: usize, res: Result<String, String>, keep_partial: bool) {
+        let Some((t, done)) = self.parts.get_mut(i) else { return };
+        if *done {
+            return;
+        }
+        *done = true;
+        match res {
+            Ok(s) if !s.is_empty() => *t = s,
+            Ok(_) => {
+                if !keep_partial {
+                    t.clear()
+                }
+            }
+            Err(e) => {
+                if !keep_partial {
+                    t.clear()
+                }
+                self.error = Some(e);
+            }
+        }
+    }
+
+    fn finished(&self) -> bool {
+        self.parts.iter().all(|p| p.1)
+    }
+
+    fn text(&self) -> String {
+        self.parts.iter().map(|p| p.0.as_str()).collect()
+    }
+}
+
 pub struct Ctl {
     app: AppHandle,
     settings: Arc<RwLock<Settings>>,
@@ -81,9 +136,11 @@ pub struct Ctl {
     heard_voice: bool,
     last_voice: Instant,
     typer: Option<Typer>,
+    segs: Segments,
     rows: Vec<Row>,
     sel: usize,
     user_picked: bool,
+    choose_pending: bool,
     released_at: Option<Instant>,
     front: Option<pf::FrontApp>,
     last_emit: Instant,
@@ -121,9 +178,11 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         heard_voice: false,
         last_voice: Instant::now(),
         typer: None,
+        segs: Segments::default(),
         rows: Vec::new(),
         sel: 0,
         user_picked: false,
+        choose_pending: false,
         released_at: None,
         front: None,
         last_emit: Instant::now(),
@@ -166,8 +225,8 @@ impl Ctl {
                 let _ = self.app.emit("level", v);
                 self.check_silence(v);
             }
-            Msg::Partial { gen, ch, text } if gen == self.gen => self.partial(ch, text),
-            Msg::Done { gen, ch, res } if gen == self.gen => self.done(ch, res),
+            Msg::Partial { gen, ch, seg, text } if gen == self.gen => self.partial(ch, seg, text),
+            Msg::Done { gen, ch, seg, res } if gen == self.gen => self.done(ch, seg, res),
             Msg::Timeout { token } if token == self.timeout_token && self.mode != Mode::Idle => {
                 self.abort(Some("识别超时".into()))
             }
@@ -216,14 +275,17 @@ impl Ctl {
     fn hot(&mut self, e: HotEvent) {
         match e {
             HotEvent::Press => {
-                if matches!(self.mode, Mode::Single(_) | Mode::Pick) && !self.recording {
+                if self.mode == Mode::Pick && !self.recording {
                     return self.abort(None);
                 }
                 if self.mode == Mode::Idle {
                     self.prewarm();
                 }
             }
-            HotEvent::LongPress => self.begin(false),
+            HotEvent::LongPress => match self.mode {
+                Mode::Single(_) => self.resume(false),
+                _ => self.begin(false),
+            },
             HotEvent::Release => {
                 if !self.auto_stop && self.mode != Mode::Compare {
                     self.end()
@@ -235,6 +297,8 @@ impl Ctl {
                 }
                 if self.recording {
                     self.end()
+                } else if matches!(self.mode, Mode::Single(_)) {
+                    self.resume(true)
                 } else if self.mode != Mode::Idle {
                     self.abort(None)
                 } else {
@@ -301,16 +365,16 @@ impl Ctl {
         ui::set_tray_active(&self.app, false);
     }
 
-    fn spawn_engine(&mut self, ch: Channel, audio: voicekey_core::Audio) {
+    fn spawn_engine(&mut self, ch: Channel, seg: usize, audio: voicekey_core::Audio) {
         let Some(engine) = self.engines.get(&ch).cloned() else { return };
         let (gen, tx) = (self.gen, self.tx.clone());
         self.tasks.push(tauri::async_runtime::spawn(async move {
             let ptx = tx.clone();
             let partial = Box::new(move |t: &str| {
-                let _ = ptx.send(Msg::Partial { gen, ch, text: t.to_string() });
+                let _ = ptx.send(Msg::Partial { gen, ch, seg, text: t.to_string() });
             });
             let res = engine.run(audio, partial).await.map_err(|e| format!("{e:#}"));
-            let _ = tx.send(Msg::Done { gen, ch, res });
+            let _ = tx.send(Msg::Done { gen, ch, seg, res });
         }));
     }
 
@@ -327,8 +391,29 @@ impl Ctl {
         self.gen += 1;
         self.mode = Mode::Single(s.channel);
         self.typer = s.streaming.then(Typer::default);
+        self.segs = Segments::default();
+        let seg = self.segs.start();
         ui::hud(&self.app, "listen", "", s.channel);
-        self.spawn_engine(s.channel, audio);
+        self.spawn_engine(s.channel, seg, audio);
+    }
+
+    /// 识别中再触发：新开一段录音，结果接在前面几段后面
+    fn resume(&mut self, auto_stop: bool) {
+        let Mode::Single(ch) = self.mode else { return };
+        if self.recording {
+            return;
+        }
+        let Some(audio) = self.start_recorder() else { return };
+        self.auto_stop = auto_stop;
+        self.timeout_token += 1;
+        let seg = self.segs.start();
+        self.hud_single(ch);
+        self.spawn_engine(ch, seg, audio);
+    }
+
+    fn hud_single(&self, ch: Channel) {
+        let text = if self.settings.read().unwrap().live_text { self.segs.text() } else { String::new() };
+        ui::hud(&self.app, if self.recording { "listen" } else { "wait" }, &text, ch);
     }
 
     fn begin_multi(&mut self, mode: Mode, channels: Vec<Channel>, auto_stop: bool) {
@@ -338,6 +423,7 @@ impl Ctl {
         self.mode = mode;
         self.sel = 0;
         self.user_picked = false;
+        self.choose_pending = false;
         self.released_at = None;
         self.rows = channels
             .into_iter()
@@ -356,7 +442,7 @@ impl Ctl {
         for ch in active {
             let (t, r) = mpsc::unbounded_channel();
             senders.push(t);
-            self.spawn_engine(ch, r);
+            self.spawn_engine(ch, 0, r);
         }
         self.tasks.push(tauri::async_runtime::spawn(async move {
             while let Some(f) = audio.recv().await {
@@ -379,14 +465,16 @@ impl Ctl {
         self.emit_rows();
     }
 
-    fn partial(&mut self, ch: Channel, text: String) {
+    fn partial(&mut self, ch: Channel, seg: usize, text: String) {
         match self.mode {
             Mode::Single(_) => {
-                if let Some(t) = self.typer.as_mut() {
-                    t.update(&text);
+                if !self.segs.partial(seg, text) {
+                    return;
                 }
-                let shown = if self.settings.read().unwrap().live_text { text.as_str() } else { "" };
-                ui::hud(&self.app, if self.recording { "listen" } else { "wait" }, shown, ch);
+                if let Some(t) = self.typer.as_mut() {
+                    t.update(&self.segs.text());
+                }
+                self.hud_single(ch);
             }
             Mode::Pick | Mode::Compare => {
                 if let Some(r) = self.rows.iter_mut().find(|r| r.channel == ch) {
@@ -400,32 +488,44 @@ impl Ctl {
         }
     }
 
-    fn done(&mut self, ch: Channel, res: Result<String, String>) {
+    fn done(&mut self, ch: Channel, seg: usize, res: Result<String, String>) {
         match self.mode {
             Mode::Single(_) => {
+                self.segs.done(seg, res, self.typer.is_some());
+                let text = self.segs.text();
+                if !self.segs.finished() {
+                    if let Some(t) = self.typer.as_mut().filter(|_| !text.is_empty()) {
+                        t.update(&text);
+                    }
+                    return;
+                }
                 self.stop_recording();
                 self.timeout_token += 1;
                 self.tasks.clear();
                 self.mode = Mode::Idle;
                 let typer = self.typer.take();
-                match res {
-                    Ok(text) => {
-                        if let Some(mut t) = typer {
-                            // 定稿可能与流式结果不同（数字/标点整理），按差异修正；之后到达的迟到片段丢弃
-                            if !text.is_empty() {
-                                t.update(&text);
-                            }
-                            t.finish();
-                            ui::hud_hide(&self.app, 0);
-                        } else if text.is_empty() {
-                            ui::hud(&self.app, "info", "没有识别到内容", ch);
-                            ui::hud_hide(&self.app, 1000);
-                        } else {
-                            ui::hud_hide(&self.app, 0);
-                            pf::paste(&text);
-                        }
+                let error = self.segs.error.take();
+                let streamed = typer.is_some();
+                if let Some(mut t) = typer {
+                    // 定稿可能与流式结果不同（数字/标点整理），按差异修正；之后到达的迟到片段丢弃
+                    if !text.is_empty() {
+                        t.update(&text);
                     }
-                    Err(e) => ui::hud_error(&self.app, &format!("识别失败：{e}")),
+                    t.finish();
+                }
+                if let Some(e) = error {
+                    if !streamed && !text.is_empty() {
+                        pf::paste(&text);
+                    }
+                    ui::hud_error(&self.app, &format!("识别失败：{e}"));
+                } else if streamed {
+                    ui::hud_hide(&self.app, 0);
+                } else if text.is_empty() {
+                    ui::hud(&self.app, "info", "没有识别到内容", ch);
+                    ui::hud_hide(&self.app, 1000);
+                } else {
+                    ui::hud_hide(&self.app, 0);
+                    pf::paste(&text);
                 }
             }
             Mode::Pick | Mode::Compare => {
@@ -453,7 +553,16 @@ impl Ctl {
                     self.sel = i;
                 }
                 let finished = !self.rows.iter().any(|r| matches!(r.state, RowState::Listen | RowState::Wait));
+                if self.choose_pending && matches!(self.rows[self.sel].state, RowState::Error | RowState::Skip) {
+                    if let Some(j) = self.rows.iter().position(|r| r.state == RowState::Final) {
+                        self.sel = j;
+                    }
+                }
+                if self.mode == Mode::Pick && self.choose_pending && self.rows[self.sel].state == RowState::Final {
+                    return self.choose(self.sel);
+                }
                 if finished {
+                    self.choose_pending = false;
                     self.timeout_token += 1;
                     if self.mode == Mode::Compare {
                         self.stop_recording();
@@ -583,9 +692,17 @@ impl Ctl {
         }
     }
 
-    /// 选中一行上屏；未定稿的行抖动提示
+    /// 选中一行上屏；聆听/识别中的行先结束录音，定稿后自动上屏；失败的行抖动提示
     fn choose(&mut self, i: usize) {
         let Some(r) = self.rows.get(i) else { return };
+        if matches!(r.state, RowState::Listen | RowState::Wait) {
+            self.sel = i;
+            self.user_picked = true;
+            self.choose_pending = true;
+            self.end();
+            self.emit_rows();
+            return;
+        }
         if r.state != RowState::Final {
             self.sel = i;
             self.user_picked = true;
@@ -633,5 +750,43 @@ impl Ctl {
                 let _ = self.app.emit_to("main", "compare", model);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Segments;
+
+    #[test]
+    fn resumed_segments_join_in_order_and_wait_for_all() {
+        let mut s = Segments::default();
+        let a = s.start();
+        assert!(s.partial(a, "今天".into()));
+        let b = s.start();
+        assert!(s.partial(b, "天气".into()));
+        s.done(b, Ok("天气不错。".into()), false);
+        assert!(!s.finished());
+        s.done(a, Ok("今天，".into()), false);
+        assert!(s.finished());
+        assert_eq!(s.text(), "今天，天气不错。");
+        assert!(!s.partial(a, "迟到".into()));
+    }
+
+    #[test]
+    fn failed_segment_keeps_other_text_and_reports_error() {
+        let mut s = Segments::default();
+        let a = s.start();
+        let b = s.start();
+        s.partial(b, "半句".into());
+        s.done(a, Ok("第一句".into()), false);
+        s.done(b, Err("网络".into()), false);
+        assert_eq!(s.text(), "第一句");
+        assert_eq!(s.error.as_deref(), Some("网络"));
+
+        let mut streamed = Segments::default();
+        let c = streamed.start();
+        streamed.partial(c, "已上屏".into());
+        streamed.done(c, Ok(String::new()), true);
+        assert_eq!(streamed.text(), "已上屏");
     }
 }
