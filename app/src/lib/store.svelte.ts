@@ -22,8 +22,12 @@ export async function refreshPerms() {
   app.perms = await call<Perms>("perm_status");
 }
 
+let micRevision = 0;
+
 export async function refreshMics() {
-  app.mics = await call<string[]>("microphones");
+  const revision = ++micRevision;
+  const mics = await call<string[]>("microphones");
+  if (revision === micRevision) app.mics = mics;
 }
 
 export async function init() {
@@ -45,5 +49,9 @@ export async function init() {
   on<UpdateStatus>("update", (v) => (app.update = v));
   on<Model>("compare", (m) => (app.compare = m));
   on<Shortcut | null>("recorded", () => (app.recording = false));
-  refreshMics();
+  await on<string[]>("microphones", (mics) => {
+    ++micRevision;
+    app.mics = mics;
+  });
+  await refreshMics();
 }

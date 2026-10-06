@@ -5,6 +5,11 @@ use rubato::{FftFixedIn, Resampler};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
+#[cfg(target_os = "macos")]
+mod devices;
+#[cfg(target_os = "macos")]
+pub use devices::watch_microphones;
+
 pub const FRAME: usize = 320;
 
 /// 任意采样率的单声道 f32 → 16kHz Int16，按 20ms 切帧
@@ -72,10 +77,46 @@ pub fn level(frame: &[i16]) -> f32 {
 }
 
 pub fn microphones() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    return devices::microphones();
+
+    #[cfg(not(target_os = "macos"))]
     cpal::default_host()
         .input_devices()
         .map(|it| it.filter_map(|d| d.name().ok()).collect())
         .unwrap_or_default()
+}
+
+#[cfg(target_os = "macos")]
+fn named_input<D>(devices: impl Iterator<Item = D>, name: &str, device_name: impl Fn(&D) -> Option<String>, has_input: impl Fn(&D) -> bool) -> Option<D> {
+    devices.filter(|d| device_name(d).as_deref() == Some(name)).find(has_input)
+}
+
+fn selected_device(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
+    #[cfg(target_os = "macos")]
+    {
+        // cpal 检查输入配置会建 AudioUnit，先匹配名称，避免触碰其他蓝牙设备。
+        named_input(host.devices().ok()?, name, |d| d.name().ok(), |d| {
+            d.supported_input_configs().map(|mut configs| configs.any(|c| c.channels() > 0)).unwrap_or(false)
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    host.input_devices().ok()?.find(|d| d.name().ok().as_deref() == Some(name))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn watch_microphones(on_change: impl Fn(Vec<String>) + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut previous = None;
+        loop {
+            let current = (microphones(), cpal::default_host().default_input_device().and_then(|d| d.name().ok()));
+            if previous.as_ref() != Some(&current) {
+                on_change(current.0.clone());
+                previous = Some(current);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
 }
 
 type LevelFn = Box<dyn Fn(f32) + Send>;
@@ -110,10 +151,14 @@ impl Recorder {
         let host = cpal::default_host();
         let device = mic
             .filter(|m| !m.is_empty())
-            .and_then(|m| host.input_devices().ok()?.find(|d| d.name().ok().as_deref() == Some(m)))
+            // 同名蓝牙输出/输入可能是不同 ID；实际采集仍只匹配已就绪的输入设备。
+            .and_then(|m| selected_device(&host, m))
             .or_else(|| host.default_input_device())
             .ok_or_else(|| anyhow!("没有可用的麦克风"))?;
         let config = device.default_input_config().map_err(|e| anyhow!("麦克风打开失败：{e}"))?;
+        if config.channels() == 0 {
+            return Err(anyhow!("麦克风输入通道尚未就绪"));
+        }
         let (tx, rx) = mpsc::unbounded_channel();
         let shared = Arc::new(Mutex::new(Shared {
             framer: Framer::new(config.sample_rate().0)?,
@@ -193,6 +238,32 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod selection_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn name_is_matched_before_input_probe_and_same_name_output_is_skipped() {
+        let devices = [("Other headset", 1), ("Selected headset", 0), ("Selected headset", 1)];
+        let probed = RefCell::new(Vec::new());
+        let selected = named_input(devices.into_iter(), "Selected headset", |d| Some(d.0.into()), |d| {
+            probed.borrow_mut().push(*d);
+            d.1 > 0
+        });
+        assert_eq!(selected, Some(("Selected headset", 1)));
+        assert_eq!(*probed.borrow(), devices[1..]);
+    }
+
+    #[test]
+    fn missing_or_zero_channel_input_falls_back_to_default() {
+        for devices in [vec![], vec![("Selected headset", 0)], vec![("Other headset", 1)]] {
+            let selected = named_input(devices.into_iter(), "Selected headset", |d| Some(d.0.into()), |d| d.1 > 0);
+            assert_eq!(selected.or(Some(("Default", 1))), Some(("Default", 1)));
+        }
     }
 }
 

@@ -5529,6 +5529,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "cbc",
+ "coreaudio-sys",
  "cpal",
  "dirs 5.0.1",
  "ecb",

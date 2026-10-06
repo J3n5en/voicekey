@@ -125,7 +125,11 @@ fn get_state(app: AppHandle) -> serde_json::Value {
 
 #[tauri::command]
 fn set_settings(app: AppHandle, settings: Settings) {
+    let mic_changed = app.state::<AppState>().settings.read().unwrap().mic != settings.mic;
     update_settings(&app, |s| *s = settings);
+    if mic_changed {
+        send(&app, Msg::RefreshMeter);
+    }
 }
 
 #[tauri::command]
@@ -245,6 +249,10 @@ fn main() {
             });
             let handle = app.handle().clone();
             controller::spawn(handle.clone(), qwen, rx);
+            let audio_tx = handle.state::<AppState>().tx.clone();
+            voicekey_core::audio::watch_microphones(move |mics| {
+                let _ = audio_tx.send(Msg::MicrophonesChanged(mics));
+            });
             ui::create_overlays(&handle)?;
             ui::build_tray(&handle, &settings)?;
             apply(&handle, &settings);

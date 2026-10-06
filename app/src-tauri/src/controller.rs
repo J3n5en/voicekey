@@ -26,6 +26,8 @@ pub enum Msg {
     CompareToggle,
     CompareStop,
     Meter(bool),
+    RefreshMeter,
+    MicrophonesChanged(Vec<String>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
@@ -69,6 +71,7 @@ pub struct Ctl {
     engines: HashMap<Channel, Arc<dyn Engine>>,
     recorder: Option<Recorder>,
     meter: Option<Recorder>,
+    meter_enabled: bool,
     tasks: Vec<JoinHandle<()>>,
     gen: u64,
     timeout_token: u64,
@@ -108,6 +111,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         engines,
         recorder: None,
         meter: None,
+        meter_enabled: false,
         tasks: Vec::new(),
         gen: 0,
         timeout_token: 0,
@@ -130,8 +134,24 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
 
 impl Ctl {
     async fn run(mut self, mut rx: UnboundedReceiver<Msg>) {
-        while let Some(m) = rx.recv().await {
-            self.handle(m);
+        let mut retry = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            tokio::select! {
+                m = rx.recv() => {
+                    let Some(m) = m else { break };
+                    let was_idle = self.mode == Mode::Idle;
+                    self.handle(m);
+                    if !was_idle && self.mode == Mode::Idle {
+                        self.refresh_meter();
+                    }
+                }
+                _ = retry.tick() => {
+                    // 驱动可能先公布输入通道，稍后才允许打开；只重试用户正在看的电平表。
+                    if self.meter_enabled && self.mode == Mode::Idle && self.meter.is_none() {
+                        self.refresh_meter();
+                    }
+                }
+            }
         }
     }
 
@@ -164,18 +184,32 @@ impl Ctl {
             },
             Msg::CompareStop if self.mode == Mode::Compare => self.abort(None),
             Msg::Meter(on) => {
-                self.meter = None;
-                if on && self.mode == Mode::Idle {
-                    let tx = self.tx.clone();
-                    let mic = self.settings().mic;
-                    self.meter = Recorder::start(Some(&mic), move |v| {
-                        let _ = tx.send(Msg::Level(v));
-                    })
-                    .ok()
-                    .map(|(r, _)| r);
-                }
+                self.meter_enabled = on;
+                self.refresh_meter();
+            }
+            Msg::RefreshMeter => self.refresh_meter(),
+            Msg::MicrophonesChanged(mics) => {
+                let _ = self.app.emit("microphones", mics);
+                self.refresh_meter();
             }
             _ => {}
+        }
+    }
+
+    fn refresh_meter(&mut self) {
+        if self.mode != Mode::Idle {
+            return;
+        }
+        self.meter = None;
+        let _ = self.app.emit("level", 0.0f32);
+        if self.meter_enabled {
+            let tx = self.tx.clone();
+            let mic = self.settings().mic;
+            self.meter = Recorder::start(Some(&mic), move |v| {
+                let _ = tx.send(Msg::Level(v));
+            })
+            .ok()
+            .map(|(r, _)| r);
         }
     }
 

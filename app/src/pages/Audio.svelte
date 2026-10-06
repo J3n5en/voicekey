@@ -9,13 +9,16 @@
 
   onMount(() => {
     refreshMics();
+    window.addEventListener("focus", refreshMics);
     call("meter", { on: true });
-    return () => call("meter", { on: false });
+    return () => {
+      window.removeEventListener("focus", refreshMics);
+      call("meter", { on: false });
+    };
   });
 
   function pick(v: string) {
     save({ mic: v });
-    call("meter", { on: true });
   }
 </script>
 

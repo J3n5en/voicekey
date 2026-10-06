@@ -31,6 +31,9 @@ dirs = "5"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 bytes = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"
+
 [[bin]]
 name = "vk-test"
 path = "src/bin/vk-test.rs"
