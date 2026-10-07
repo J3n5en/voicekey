@@ -138,6 +138,7 @@ pub struct Ctl {
     typer: Option<Typer>,
     segs: Segments,
     rows: Vec<Row>,
+    row_segs: Vec<Segments>,
     sel: usize,
     user_picked: bool,
     choose_pending: bool,
@@ -180,6 +181,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         typer: None,
         segs: Segments::default(),
         rows: Vec::new(),
+        row_segs: Vec::new(),
         sel: 0,
         user_picked: false,
         choose_pending: false,
@@ -275,15 +277,12 @@ impl Ctl {
     fn hot(&mut self, e: HotEvent) {
         match e {
             HotEvent::Press => {
-                if self.mode == Mode::Pick && !self.recording {
-                    return self.abort(None);
-                }
                 if self.mode == Mode::Idle {
                     self.prewarm();
                 }
             }
             HotEvent::LongPress => match self.mode {
-                Mode::Single(_) => self.resume(false),
+                Mode::Single(_) | Mode::Pick => self.resume(false),
                 _ => self.begin(false),
             },
             HotEvent::Release => {
@@ -297,7 +296,7 @@ impl Ctl {
                 }
                 if self.recording {
                     self.end()
-                } else if matches!(self.mode, Mode::Single(_)) {
+                } else if matches!(self.mode, Mode::Single(_) | Mode::Pick) {
                     self.resume(true)
                 } else if self.mode != Mode::Idle {
                     self.abort(None)
@@ -397,18 +396,32 @@ impl Ctl {
         self.spawn_engine(s.channel, seg, audio);
     }
 
-    /// 识别中再触发：新开一段录音，结果接在前面几段后面
+    /// 识别中或候选框未关时再触发：新开一段录音，结果接在前面几段后面
     fn resume(&mut self, auto_stop: bool) {
-        let Mode::Single(ch) = self.mode else { return };
-        if self.recording {
+        if self.recording || !matches!(self.mode, Mode::Single(_) | Mode::Pick) {
             return;
         }
         let Some(audio) = self.start_recorder() else { return };
         self.auto_stop = auto_stop;
         self.timeout_token += 1;
-        let seg = self.segs.start();
-        self.hud_single(ch);
-        self.spawn_engine(ch, seg, audio);
+        if let Mode::Single(ch) = self.mode {
+            let seg = self.segs.start();
+            self.hud_single(ch);
+            return self.spawn_engine(ch, seg, audio);
+        }
+        self.released_at = None;
+        self.choose_pending = false;
+        let mut targets = Vec::new();
+        for (r, segs) in self.rows.iter_mut().zip(&mut self.row_segs) {
+            if r.state == RowState::Skip {
+                continue;
+            }
+            targets.push((r.channel, segs.start()));
+            r.state = RowState::Listen;
+            r.text = segs.text();
+        }
+        self.fan_out(audio, targets);
+        self.emit_rows();
     }
 
     fn hud_single(&self, ch: Channel) {
@@ -417,7 +430,7 @@ impl Ctl {
     }
 
     fn begin_multi(&mut self, mode: Mode, channels: Vec<Channel>, auto_stop: bool) {
-        let Some(mut audio) = self.start_recorder() else { return };
+        let Some(audio) = self.start_recorder() else { return };
         self.auto_stop = auto_stop;
         self.gen += 1;
         self.mode = mode;
@@ -437,20 +450,15 @@ impl Ctl {
                 }
             })
             .collect();
-        let active: Vec<Channel> = self.rows.iter().filter(|r| r.state == RowState::Listen).map(|r| r.channel).collect();
-        let mut senders = Vec::new();
-        for ch in active {
-            let (t, r) = mpsc::unbounded_channel();
-            senders.push(t);
-            self.spawn_engine(ch, 0, r);
-        }
-        self.tasks.push(tauri::async_runtime::spawn(async move {
-            while let Some(f) = audio.recv().await {
-                for s in &senders {
-                    let _ = s.send(f.clone());
-                }
-            }
-        }));
+        self.row_segs = self.rows.iter().map(|_| Segments::default()).collect();
+        let targets = self
+            .rows
+            .iter()
+            .zip(&mut self.row_segs)
+            .filter(|(r, _)| r.state == RowState::Listen)
+            .map(|(r, segs)| (r.channel, segs.start()))
+            .collect();
+        self.fan_out(audio, targets);
         if mode == Mode::Pick {
             let last = self.settings().last_pick;
             if let Some(i) = self.rows.iter().position(|r| Some(r.channel) == last && r.state == RowState::Listen) {
@@ -465,6 +473,22 @@ impl Ctl {
         self.emit_rows();
     }
 
+    fn fan_out(&mut self, mut audio: voicekey_core::Audio, targets: Vec<(Channel, usize)>) {
+        let mut senders = Vec::new();
+        for (ch, seg) in targets {
+            let (t, r) = mpsc::unbounded_channel();
+            senders.push(t);
+            self.spawn_engine(ch, seg, r);
+        }
+        self.tasks.push(tauri::async_runtime::spawn(async move {
+            while let Some(f) = audio.recv().await {
+                for s in &senders {
+                    let _ = s.send(f.clone());
+                }
+            }
+        }));
+    }
+
     fn partial(&mut self, ch: Channel, seg: usize, text: String) {
         match self.mode {
             Mode::Single(_) => {
@@ -477,9 +501,9 @@ impl Ctl {
                 self.hud_single(ch);
             }
             Mode::Pick | Mode::Compare => {
-                if let Some(r) = self.rows.iter_mut().find(|r| r.channel == ch) {
-                    if matches!(r.state, RowState::Listen | RowState::Wait) {
-                        r.text = text;
+                if let Some(i) = self.rows.iter().position(|r| r.channel == ch) {
+                    if self.row_segs[i].partial(seg, text) {
+                        self.rows[i].text = self.row_segs[i].text();
                     }
                 }
                 self.emit_rows();
@@ -531,21 +555,19 @@ impl Ctl {
             Mode::Pick | Mode::Compare => {
                 let ms = self.released_at.map(|t| t.elapsed().as_millis() as u64);
                 let Some(i) = self.rows.iter().position(|r| r.channel == ch) else { return };
+                let segs = &mut self.row_segs[i];
+                segs.done(seg, res, false);
+                let text = segs.text();
                 let r = &mut self.rows[i];
-                match res {
-                    Ok(t) if !t.is_empty() => {
-                        r.text = t;
-                        r.state = RowState::Final;
-                        r.ms = Some(ms.unwrap_or(0));
-                    }
-                    Ok(_) => {
-                        r.text = "没有识别到内容".into();
-                        r.state = RowState::Error;
-                    }
-                    Err(e) => {
-                        r.text = e;
-                        r.state = RowState::Error;
-                    }
+                if !segs.finished() {
+                    r.text = text;
+                } else if !text.is_empty() {
+                    r.text = text;
+                    r.state = RowState::Final;
+                    r.ms = Some(ms.unwrap_or(0));
+                } else {
+                    r.text = segs.error.clone().unwrap_or_else(|| "没有识别到内容".into());
+                    r.state = RowState::Error;
                 }
                 let cur = self.rows[self.sel].state;
                 let fallback = !self.user_picked || matches!(cur, RowState::Error | RowState::Skip);
