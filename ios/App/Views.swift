@@ -340,7 +340,11 @@ struct SettingsView: View {
                         Text("九宫格").tag(true)
                     }
                     .onChange(of: typing.t9) { typing.save() }
-                } header: { Text("键盘") } footer: { Text("键盘顶部「26｜九键」随时切，切过就记住。") }
+                    Toggle("按键震动", isOn: $typing.haptics)
+                        .onChange(of: typing.haptics) { typing.save() }
+                    Toggle("显示按键耗时", isOn: $typing.metrics)
+                        .onChange(of: typing.metrics) { typing.save() }
+                } header: { Text("键盘") } footer: { Text("键盘顶部「26｜九键」随时切，切过就记住。按键震动需允许完全访问；按键耗时显示在键盘底部，排查卡顿用。") }
                 Section("通用") {
                     Button("重新查看引导", action: reonboard)
                 }

@@ -107,6 +107,8 @@ final class KeyboardViewController: UIInputViewController {
     private var swipe: ClearSwipe?
     private var clearing: ClearPlan?
     private let haptic = UISelectionFeedbackGenerator()
+    /// 每次按键的轻震
+    private let tapHaptic = UIImpactFeedbackGenerator(style: .light)
     /// 用户关掉的会话提醒：按会话结束时刻 / 到期时刻记
     private static var dismissedEnd: Double?
     private static var dismissedExpiry: Double?
@@ -186,6 +188,9 @@ final class KeyboardViewController: UIInputViewController {
         bigSub.isHidden = compact
         voiceGlobe.isHidden = !needsInputModeSwitchKey
     }
+
+    /// 尽量让系统别在键盘左右边缘等手势判定（按键区本身另用手势识别器绕开延迟）
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { .all }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
@@ -831,6 +836,14 @@ final class KeyboardViewController: UIInputViewController {
 
         // 打字：按键区 / 展开的候选；组字时候选栏盖住顶栏
         keypad.wire = { [weak self] b, key in self?.wire(b, key) }
+        keypad.onTrack = { [weak self] b, key, phase, touch in
+            switch key {
+            case .space: self?.spaceTrack(b, phase, touch)
+            case .back: self?.backTrack(b, phase, touch)
+            default: break
+            }
+        }
+        keypad.onFeedback = { [weak self] in self?.keyFeedback() }
         keypad.onKey = { [weak self] in self?.press($0) }
         keypad.onList = { [weak self] item, pinyin in
             guard let self else { return }
@@ -950,7 +963,7 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    /// 空格、删除、🌐 用原有的手势处理
+    /// 🌐、展开候选里的 ⌫ 等真按钮接原有的触摸处理
     private func wire(_ b: KeyButton, _ key: KeyPad.Key) {
         let touches: UIControl.Event = [.touchDown, .touchDragInside, .touchDragOutside, .touchUpInside, .touchUpOutside, .touchCancel]
         switch key {
@@ -987,8 +1000,20 @@ final class KeyboardViewController: UIInputViewController {
         case .page(let p):
             page = p
             render()
-        case .space, .back, .globe: break
+        // 空格、删除平时走 onTrack，这里只有旁白激活会进来
+        case .space:
+            if mode == .type, zh, composer.isComposing { pickCandidate(0) } else { insert(" ") }
+        case .back: deleteOne()
+        case .globe: break
         }
+    }
+
+    /// 按下即反馈：按键音跟随系统「键盘点击声」，震动需完全访问且设置里开着
+    private func keyFeedback() {
+        UIDevice.current.playInputClick()
+        guard prefs.haptics, hasFullAccess else { return }
+        tapHaptic.impactOccurred(intensity: 0.7)
+        tapHaptic.prepare()
     }
 
     /// 标点、数字：组字中先按首选上屏
@@ -1070,8 +1095,12 @@ final class KeyboardViewController: UIInputViewController {
     /// 短按输入空格（组字中选首选词）；按住 0.3 秒进光标模式，松手退出、不插空格
     @objc private func spaceTouch(_ sender: UIButton, event: UIEvent) {
         guard let t = event.touches(for: sender)?.first else { return }
+        spaceTrack(sender, t.phase, t)
+    }
+
+    private func spaceTrack(_ sender: UIButton, _ phase: UITouch.Phase, _ t: UITouch) {
         spaceX = t.location(in: view).x
-        switch t.phase {
+        switch phase {
         case .began:
             spaceHold?.invalidate()
             spacePicks = mode == .type && composer.isComposing
@@ -1087,7 +1116,8 @@ final class KeyboardViewController: UIInputViewController {
             }
         case .moved: moveCursor(to: spaceX)
         case .ended:
-            let inside = sender.bounds.contains(t.location(in: sender))
+            // 键缝也算这个键，松手判定放宽到半个键距外
+            let inside = sender.bounds.insetBy(dx: -8, dy: -8).contains(t.location(in: sender))
             if spacePicks {
                 spacePicks = false
                 if inside { pickCandidate(0) }
@@ -1137,8 +1167,12 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func backTouch(_ sender: UIButton, event: UIEvent) {
         guard let t = event.touches(for: sender)?.first else { return }
+        backTrack(sender, t.phase, t)
+    }
+
+    private func backTrack(_ sender: UIButton, _ phase: UITouch.Phase, _ t: UITouch) {
         let y = t.location(in: view).y
-        switch t.phase {
+        switch phase {
         case .began:
             backComposing = mode == .type && composer.isComposing
             startRepeat()
@@ -1247,4 +1281,9 @@ private final class ProxyTarget: TextTarget {
 
 private extension UIStackView {
     func addArrangedSubviews(_ views: [UIView]) { views.forEach(addArrangedSubview) }
+}
+
+/// 键盘视图声明支持按键音，UIDevice.playInputClick 才会按系统「键盘点击声」设置出声
+extension UIInputView: @retroactive UIInputViewAudioFeedback {
+    public var enableInputClicksWhenVisible: Bool { true }
 }
