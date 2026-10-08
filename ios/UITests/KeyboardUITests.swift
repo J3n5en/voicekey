@@ -22,7 +22,8 @@ final class KeyboardUITests: XCTestCase {
 
     private func launch(_ args: [String]) {
         app = XCUIApplication()
-        app.launchArguments = ["-onboarded", "NO", "-typing", "26"] + args
+        // 原有用例按常开麦跑；画中画待机见 PipStandbyUITests
+        app.launchArguments = ["-onboarded", "NO", "-typing", "26", "-standby", "mic"] + args
         app.launch()
         for _ in 0..<12 {
             if tapIf("去试一试") { break }

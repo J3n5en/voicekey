@@ -14,6 +14,8 @@ struct VoiceKeyApp: App {
             for i in SessionManager.shared.config.channels.indices { SessionManager.shared.config.channels[i].on = ids.contains(SessionManager.shared.config.channels[i].id) }
         }
         if let m = Launch.value("-multi") { SessionManager.shared.config.multi = m == "1" }
+        // -standby pip|mic：待机方式
+        if let s = Launch.value("-standby").flatMap(Standby.init(rawValue:)) { SessionManager.shared.config.standby = s }
         // -typing t9,metrics：键盘布局与测试用耗时/内存显示
         if let t = Launch.value("-typing") {
             var p = TypingPrefs()

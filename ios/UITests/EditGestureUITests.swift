@@ -76,7 +76,7 @@ final class EditGestureUITests: XCTestCase {
     /// 说话中长按空格移光标：按现有规则停止边说边改，完整结果进「最近」
     func testCursorModeDuringDictationStopsRewriting() {
         let app = XCUIApplication()
-        app.launchArguments = ["-onboarded", "NO", "-arm", "-fakemic", "-enable", "a", "-multi", "0"]
+        app.launchArguments = ["-onboarded", "NO", "-standby", "mic", "-arm", "-fakemic", "-enable", "a", "-multi", "0"]
         app.launch()
         for _ in 0..<12 {
             if app.buttons["去试一试"].waitForExistence(timeout: 1.5) { app.buttons["去试一试"].tap(); break }

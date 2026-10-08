@@ -1,8 +1,8 @@
 import Foundation
 
-/// 主 App ⇄ 键盘协议 v1，字段与时序说明见 ios/PROTOCOL.md。时间一律为 Unix 秒（Double）
+/// 主 App ⇄ 键盘协议 v2，字段与时序说明见 ios/PROTOCOL.md。时间一律为 Unix 秒（Double）
 enum VK {
-    static let version = 1
+    static let version = 2
     static let keyboardBundleID = "do.j3.voicekey.ios.keyboard"
     /// 键盘拉起主 App 开会话；source=keyboard 时主 App 提示用户点左上角返回
     static let sessionURL = URL(string: "voicekey://session?source=keyboard")!
@@ -37,6 +37,14 @@ struct Channel: Codable, Equatable, Identifiable {
     var on: Bool
 }
 
+/// 会话待机方式
+enum Standby: String, Codable, CaseIterable {
+    /// 画中画小窗待机，不占麦；点麦克风时后台开麦，说完即关
+    case pip
+    /// 整个会话常开麦克风
+    case mic
+}
+
 struct Config: Codable, Equatable {
     var channels: [Channel]
     /// 多渠道候选；打开的渠道 ≥2 时生效
@@ -47,6 +55,8 @@ struct Config: Codable, Equatable {
     var idleMinutes: Int
     /// 多渠道候选默认选中上次上屏的渠道
     var lastPick: String?
+    /// 待机方式；旧版配置没有此字段，按画中画
+    var standby: Standby?
 
     static let idleChoices = [5, 10, 30, 0]
 
@@ -57,10 +67,11 @@ struct Config: Codable, Equatable {
             Channel(id: "c", engine: "iflytek", name: "讯飞", on: false),
             Channel(id: "d", engine: "baidu", name: "百度", on: false),
         ],
-        multi: true, defaultChannel: "a", idleMinutes: 10, lastPick: nil)
+        multi: true, defaultChannel: "a", idleMinutes: 10, lastPick: nil, standby: .pip)
 
     var enabled: [Channel] { channels.filter(\.on) }
     var isMulti: Bool { multi && enabled.count >= 2 }
+    var standbyMode: Standby { standby ?? .pip }
 
     /// 按当前设置本次参与识别的渠道
     var active: [Channel] {
@@ -147,6 +158,8 @@ struct Command: Codable, Equatable {
     var silenceStop: Double?
     /// commit：上屏的渠道 id
     var channel: String?
+    /// start：用户点麦克风的时刻，仅用于统计开录延迟
+    var tapAt: Double?
 }
 
 struct CommandQueue: Codable {
@@ -157,11 +170,11 @@ struct CommandQueue: Codable {
 
     /// 键盘侧：追加一条命令并通知主 App，返回 seq（用于对上 state.ackSeq / utterance.startSeq）
     @discardableResult
-    static func send(_ op: Command.Op, utt: Int? = nil, channels: [String]? = nil, silenceStop: Double? = nil, channel: String? = nil) -> Int {
+    static func send(_ op: Command.Op, utt: Int? = nil, channels: [String]? = nil, silenceStop: Double? = nil, channel: String? = nil, tapAt: Double? = nil) -> Int {
         var q = Bus.read(CommandQueue.self, VK.File.cmd) ?? CommandQueue()
         let ack = Bus.read(LiveState.self, VK.File.state)?.ackSeq ?? 0
         let seq = max(q.maxSeq, ack) + 1
-        q.cmds.append(Command(seq: seq, at: VK.now, op: op, utt: utt, channels: channels, silenceStop: silenceStop, channel: channel))
+        q.cmds.append(Command(seq: seq, at: VK.now, op: op, utt: utt, channels: channels, silenceStop: silenceStop, channel: channel, tapAt: tapAt))
         q.cmds = Array(q.cmds.suffix(keep))
         Bus.write(q, VK.File.cmd)
         Bus.post(VK.Note.cmd)
@@ -196,6 +209,11 @@ struct LiveState: Codable, Equatable {
         var interrupted: Bool
         var endReason: EndReason?
         var endedAt: Double?
+        /// 本次会话实际待机方式；v1 主 App 不写，按常开麦
+        var standby: Standby?
+
+        /// 键盘点麦克风可直接开始说；否则跳主 App（画中画待机被打断时须回主 App 重开）
+        var micReady: Bool { active && !(standby == .pip && interrupted) }
     }
 
     enum EndReason: String, Codable {
@@ -209,6 +227,10 @@ struct LiveState: Codable, Equatable {
         case micDenied
         /// 音频引擎启动失败
         case failed
+        /// 画中画小窗被用户关掉或被系统收回
+        case pipClosed
+        /// 画中画待机时后台开麦失败，下次在主 App 里改为常开麦
+        case bgDenied
     }
 
     struct Utterance: Codable, Equatable {
@@ -242,6 +264,8 @@ struct LiveState: Codable, Equatable {
         case micBusy
         /// 没有可用渠道
         case noChannel
+        /// 画中画待机时后台开麦失败，会话已结束；键盘应拉起主 App 改为常开麦
+        case bgDenied
     }
 
     struct Row: Codable, Equatable {
@@ -319,6 +343,53 @@ enum Idle {
         guard seconds > 0 else { return nil }
         return (busy ? now : lastActivity) + seconds
     }
+}
+
+// MARK: - 麦克风开关时机
+
+/// 各待机方式下何时开关麦克风。常开麦：会话期间一直开；画中画：只在录音时开，录音一停立即关会话让橙点熄灭
+enum MicPlan {
+    enum Step: Equatable {
+        /// 设置 PlayAndRecord 类别（不激活）
+        case category
+        case activate, engineOn, engineOff
+        /// setActive(false, notifyOthersOnDeactivation)
+        case deactivate
+        case pipOn, pipOff
+    }
+
+    enum Event {
+        /// 开启会话
+        case arm
+        /// 开始录音（start 或接着说）
+        case record
+        /// 一段录音结束：停止、1.5 秒停顿、被打断
+        case recordEnd
+        /// 结束会话
+        case disarm
+    }
+
+    /// hot：麦克风当前是否开着
+    static func steps(_ e: Event, _ mode: Standby, hot: Bool) -> [Step] {
+        switch (e, mode) {
+        case (.arm, .mic): return [.category, .activate, .engineOn]
+        case (.arm, .pip): return [.category, .pipOn]
+        case (.record, _): return hot ? [] : [.category, .activate, .engineOn]
+        case (.recordEnd, .mic): return []
+        case (.recordEnd, .pip): return hot ? [.engineOff, .deactivate] : []
+        case (.disarm, .mic): return [.engineOff, .deactivate]
+        case (.disarm, .pip): return (hot ? [.engineOff, .deactivate] : []) + [.pipOff]
+        }
+    }
+
+    /// 画中画待机时后台开麦失败的去向：通话、Siri 等占用 → micBusy（会话保留，键盘空心麦克风）；
+    /// 其他（如 !rec 561145187、what 2003329396，系统不许后台开录）→ bgDenied（结束会话，回主 App 改常开麦）
+    static func failure(code: Int) -> LiveState.StartError {
+        busyCodes.contains(code) ? .micBusy : .bgDenied
+    }
+
+    /// !pri 561017449、!int 560557684、siri 1936290409
+    static let busyCodes: Set<Int> = [561017449, 560557684, 1936290409]
 }
 
 // MARK: - 其他共享文件

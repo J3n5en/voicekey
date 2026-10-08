@@ -84,6 +84,8 @@ final class KeyboardViewController: UIInputViewController {
     /// 已发出、尚未认领的 start
     private var mySeq = 0
     private var startAt = 0.0
+    /// 用户点麦克风的时刻，随 start 带给主 App 统计开录延迟
+    private var tapAt: Double?
     private var utt: Int?
     private var launch: String?
     private var multi = false
@@ -117,6 +119,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private var sessionOn: Bool { alive && st?.session.active == true }
+    /// 点麦克风可直接说（画中画待机被打断时为 false，须回主 App 重开）
+    private var micOn: Bool { alive && st?.session.micReady == true }
     private var starting: Bool { (mySeq > 0 && utt == nil) || ping?.purpose == .start }
     private var busy: Bool { utt != nil || starting }
 
@@ -193,7 +197,7 @@ final class KeyboardViewController: UIInputViewController {
         if let p = ping, let s = st, s.updatedAt >= p.at - 0.05 {
             ping = nil
             if p.purpose == .start {
-                if s.session.active { startUtterance() } else { openApp() }
+                if s.session.micReady { startUtterance() } else { openApp() }
             }
         }
         follow()
@@ -220,12 +224,14 @@ final class KeyboardViewController: UIInputViewController {
 
     private func startUtterance() {
         reset()
-        mySeq = CommandQueue.send(.start, silenceStop: 1.5)
+        mySeq = CommandQueue.send(.start, silenceStop: 1.5, tapAt: tapAt)
         startAt = now
     }
 
     private func tick() {
         if utt != nil, ping == nil, now - lastHeard > 2.5 { sendPing(.watch) }
+        // 空闲时每 5 秒确认主 App 还活着；被杀后麦克风及时变空心
+        if utt == nil, mySeq == 0, ping == nil, alive, now - lastHeard > 5 { sendPing(.probe) }
         if mySeq > 0, utt == nil, ping == nil, now - startAt > 3 {
             reset()
             show(.err, "VoiceKey 没有响应，请再点一次麦克风。")
@@ -323,6 +329,7 @@ final class KeyboardViewController: UIInputViewController {
         case .noSession: openApp()
         case .micBusy: show(.err, "麦克风被占用：可能正在通话或其他 App 在录音，结束后再试。")
         case .noChannel: show(.err, "没有可用的识别渠道，请在 VoiceKey 里打开一个。", action: ("打开", { [weak self] in self?.openApp() }))
+        case .bgDenied: openApp("后台没能开麦，正在打开 VoiceKey 改为常开麦…")
         case nil: show(.err, "没能开始，请再点一次麦克风。")
         }
     }
@@ -360,6 +367,7 @@ final class KeyboardViewController: UIInputViewController {
             CommandQueue.send(.continue, utt: id)
         case .begin:
             if u != nil { reset() }
+            tapAt = now
             sendPing(.start)
         }
         render()
@@ -399,7 +407,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     /// 扩展没有 UIApplication.shared，沿响应链找到宿主的 UIApplication 调用 open
-    private func openApp() {
+    private func openApp(_ message: String = "正在打开 VoiceKey 开启会话…") {
         let sel = NSSelectorFromString("openURL:options:completionHandler:")
         var r: UIResponder? = self
         while let x = r {
@@ -407,7 +415,7 @@ final class KeyboardViewController: UIInputViewController {
                 typealias Open = @convention(c) (NSObject, Selector, NSURL, NSDictionary, (@convention(block) (Bool) -> Void)?) -> Void
                 let f = unsafeBitCast(x.method(for: sel), to: Open.self)
                 f(x, sel, VK.sessionURL as NSURL, NSDictionary(), { ok in Bus.log("open app ok=\(ok)") })
-                show(.info, "正在打开 VoiceKey 开启会话…")
+                show(.info, message)
                 return
             }
             r = x.next
@@ -534,10 +542,10 @@ final class KeyboardViewController: UIInputViewController {
 
         let name = c.isMulti ? "多渠道 · \(c.enabled.count)" : (c.active.first?.name ?? "无渠道")
         chip.setTitle("\(name) ▾", for: .normal)
-        chipDot.backgroundColor = sessionOn ? Theme.ok : Theme.fg3
-        status.text = typing ? (full ? (sessionOn ? "语音就绪" : "点麦克风说话") : "本地打字") : statusText(full, u, dm)
+        chipDot.backgroundColor = micOn ? Theme.ok : Theme.fg3
+        status.text = typing ? (full ? (micOn ? "语音就绪" : "点麦克风说话") : "本地打字") : statusText(full, u, dm)
         typeMic.isHidden = !typing
-        typeMic.look = full && sessionOn ? .solid : .outline
+        typeMic.look = full && micOn ? .solid : .outline
         typeMic.alpha = full ? 1 : 0.35
         typingButton.isHidden = typing
         voiceBox.isHidden = typing
@@ -604,7 +612,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func renderIdle(_ full: Bool) {
-        bigMic.look = full && sessionOn ? .solid : .outline
+        bigMic.look = full && micOn ? .solid : .outline
         bigMic.alpha = full ? 1 : 0.35
         if !full {
             bigLabel.text = "需要完全访问"
@@ -612,9 +620,12 @@ final class KeyboardViewController: UIInputViewController {
         } else if starting {
             bigLabel.text = "准备中…"
             bigSub.text = " "
-        } else if sessionOn {
+        } else if micOn {
             bigLabel.text = "点按说话"
             bigSub.text = "再点一下结束 · 识别中再点＝接着说"
+        } else if sessionOn {
+            bigLabel.text = "点按回 VoiceKey"
+            bigSub.text = "画中画待机被打断，回 VoiceKey 重新开启小窗"
         } else {
             bigLabel.text = "点按开启会话"
             bigSub.text = "会先跳到 VoiceKey 开启会话，再点左上角「◀」回来"
@@ -658,6 +669,8 @@ final class KeyboardViewController: UIInputViewController {
             let m = s.idleMinutes
             return Notice(kind: .info, text: "会话已结束（\(m > 0 ? "\(m) 分钟" : "长时间")未使用）。点麦克风会重新开启。")
         case .interrupted: return Notice(kind: .info, text: "会话被通话或其他 App 打断后已结束。点麦克风会重新开启。")
+        case .pipClosed: return Notice(kind: .info, text: "画中画小窗已关闭，会话已结束。点麦克风回 VoiceKey 重新开启。")
+        case .bgDenied: return Notice(kind: .info, text: "后台没能开麦，会话已结束。点麦克风回 VoiceKey，本次改为常开麦。")
         case .micDenied: return Notice(kind: .err, text: "麦克风权限已关闭，点麦克风到 VoiceKey 里开启。")
         default: return nil
         }

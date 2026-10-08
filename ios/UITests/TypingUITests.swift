@@ -17,7 +17,8 @@ final class TypingUITests: XCTestCase {
 
     private func launch(_ typing: String) {
         app = XCUIApplication()
-        app.launchArguments = ["-onboarded", "NO", "-typing", typing]
+        // 上一个用例留下的会话会在启动时恢复；按常开麦恢复，免得画中画小窗挡住引导按钮
+        app.launchArguments = ["-onboarded", "NO", "-typing", typing, "-standby", "mic"]
         app.launch()
         for _ in 0..<12 {
             if tapIf("去试一试") { break }

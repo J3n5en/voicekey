@@ -2,7 +2,7 @@ import AVFoundation
 import UIKit
 import VoiceKeyCore
 
-/// 会话管理：常开麦克风保活，按键盘命令识别，结果写入 state.json（协议见 ios/PROTOCOL.md）
+/// 会话管理：画中画待机（点麦克风才开麦）或常开麦保活，按键盘命令识别，结果写入 state.json（协议见 ios/PROTOCOL.md）
 final class SessionManager: ObservableObject {
     static let shared = SessionManager()
 
@@ -11,6 +11,8 @@ final class SessionManager: ObservableObject {
     @Published private(set) var since: Double?
     @Published private(set) var lastActivity = VK.now
     @Published private(set) var endReason: LiveState.EndReason?
+    /// 本次会话实际待机方式（画中画失败时本次改为常开麦）
+    @Published private(set) var standby: Standby = .mic
     @Published private(set) var history: [HistoryItem] = Bus.read([HistoryItem].self, VK.File.history) ?? []
     /// 由键盘拉起：会话页提示点左上角返回
     @Published var openedFromKeyboard = false
@@ -39,6 +41,11 @@ final class SessionManager: ObservableObject {
     private var heartbeat: Timer?
     private var bg: UIBackgroundTaskIdentifier = .invalid
     private var fake: FakeMic?
+    private let pip = PiPStandby()
+    /// 麦克风开着（会话已激活、引擎在跑）
+    private var hot = false
+    /// 本轮画中画后台开麦失败或小窗打不开：下次开会话改为常开麦
+    private var micFallback = false
 
     // 音频线程与主线程共享，受 lock 保护
     private let lock = NSLock()
@@ -47,6 +54,8 @@ final class SessionManager: ObservableObject {
     private var recording: [Int16] = []
     private var detector: SilenceDetector?
     private var level: Float = 0
+    /// 开录延迟统计：(点麦克风时刻, 命令写入时刻, 主 App 收到时刻)，等第一块音频
+    private var firstAudio: (tap: Double?, cmd: Double, got: Double)?
     /// 每句最多保留 3 分钟录音供重试
     private var maxSamples: Int { Int(rate * 180) }
 
@@ -66,6 +75,8 @@ final class SessionManager: ObservableObject {
             endedAt = old?.session.endedAt
         }
         if Launch.has("-fakemic") { fake = FakeMic() }
+        pip.onLost = { [weak self] why in self?.pipLost(why) }
+        pip.onFailed = { [weak self] why in self?.pipFailed(why) }
 
         Bus.observe(VK.Note.cmd) { [weak self] in self?.drain() }
         Bus.observe(VK.Note.ping) { [weak self] in
@@ -85,7 +96,9 @@ final class SessionManager: ObservableObject {
         }
         nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] n in
             guard let self, n.object as AnyObject? === self.audio else { return }
-            Bus.log("engine configuration change")
+            Bus.log("engine configuration change hot=\(self.hot)")
+            // 画中画待机不开麦时引擎本就停着，无需重建
+            guard self.standby == .mic || self.hot else { return }
             self.rebuild(newEngine: false)
         }
         nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { n in
@@ -112,16 +125,21 @@ final class SessionManager: ObservableObject {
             publish()
             return false
         }
+        let mode: Standby = micFallback || !PiPStandby.supported ? .mic : config.standbyMode
         do {
-            try activateAudioSession()
-            try startEngine()
+            if mode == .pip, UIApplication.shared.applicationState == .background {
+                throw NSError(domain: "VoiceKey", code: 2, userInfo: [NSLocalizedDescriptionKey: "pip needs foreground"])
+            }
+            try run(MicPlan.steps(.arm, mode, hot: hot))
         } catch {
-            Bus.log("arm failed state=\(UIApplication.shared.applicationState.rawValue): \(error)")
+            Bus.log("arm failed standby=\(mode.rawValue) state=\(UIApplication.shared.applicationState.rawValue): \(error)")
+            try? run([.engineOff, .deactivate])
             endReason = .failed
             publish()
             return false
         }
         active = true
+        standby = mode
         interrupted = false
         since = VK.now
         endReason = nil
@@ -133,7 +151,7 @@ final class SessionManager: ObservableObject {
         heartbeat?.invalidate()
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.beat() }
         let s = AVAudioSession.sharedInstance()
-        Bus.log("armed in=\(s.currentRoute.inputs.map(\.portType.rawValue)) out=\(s.currentRoute.outputs.map(\.portType.rawValue)) rate=\(rate) appState=\(UIApplication.shared.applicationState.rawValue)")
+        Bus.log("armed standby=\(mode.rawValue) fallback=\(micFallback) supported=\(PiPStandby.supported) in=\(s.currentRoute.inputs.map(\.portType.rawValue)) out=\(s.currentRoute.outputs.map(\.portType.rawValue)) rate=\(rate) appState=\(UIApplication.shared.applicationState.rawValue)")
         publish()
         return true
     }
@@ -142,17 +160,15 @@ final class SessionManager: ObservableObject {
     func disarm(_ reason: LiveState.EndReason) {
         guard active else { return }
         if utt?.phase == .recording { stopSegment(.interrupted) }
-        audio.stop()
-        audio.inputNode.removeTap(onBus: 0)
-        fake?.stop()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        try? run(MicPlan.steps(.disarm, standby, hot: hot))
+        if reason != .bgDenied { micFallback = false }
         idleTimer?.invalidate()
         heartbeat?.invalidate()
         active = false
         interrupted = false
         endReason = reason
         endedAt = VK.now
-        Bus.log("disarmed \(reason.rawValue) after \(Int(VK.now - (since ?? VK.now)))s state=\(UIApplication.shared.applicationState.rawValue)")
+        Bus.log("disarmed \(reason.rawValue) standby=\(standby.rawValue) after \(Int(VK.now - (since ?? VK.now)))s state=\(UIApplication.shared.applicationState.rawValue)")
         publish()
         Self.mirrorLog()
     }
@@ -161,13 +177,118 @@ final class SessionManager: ObservableObject {
         lastActivity = VK.now
     }
 
-    private func activateAudioSession() throws {
+    /// 设置里切换待机方式；会话进行中且在前台时立即按新方式重来，不结束会话
+    func setStandby(_ m: Standby) {
+        config.standby = m
+        micFallback = false
+        guard active, standby != m, UIApplication.shared.applicationState != .background else { return }
+        if utt?.phase == .recording { stopSegment(.user) }
+        Bus.log("standby switch \(standby.rawValue) -> \(m.rawValue)")
+        do {
+            try run(MicPlan.steps(.disarm, standby, hot: hot))
+            standby = m
+            try run(MicPlan.steps(.arm, m, hot: false))
+        } catch {
+            Bus.log("standby switch failed: \(error)")
+            disarm(.failed)
+        }
+        publish()
+    }
+
+    /// 按 MicPlan 的步骤开关麦克风 / 小窗；返回各步耗时（毫秒）供日志
+    @discardableResult
+    private func run(_ steps: [MicPlan.Step]) throws -> String {
         let s = AVAudioSession.sharedInstance()
-        // 不带 allowBluetoothHFP：连着蓝牙耳机时用手机麦克风，耳机保持 A2DP 音质
-        try s.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
-        try s.setActive(true)
-        if let m = s.availableInputs?.first(where: { $0.portType == .builtInMic }), s.preferredInput?.portType != .builtInMic {
-            try? s.setPreferredInput(m)
+        var took: [String] = []
+        for step in steps {
+            let t = VK.now
+            defer { took.append("\(step)=\(Int((VK.now - t) * 1000))") }
+            switch step {
+            case .category:
+                // 不带 allowBluetoothHFP：连着蓝牙耳机时用手机麦克风，耳机保持 A2DP 音质
+                try s.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
+            case .activate:
+                try s.setActive(true)
+                if let m = s.availableInputs?.first(where: { $0.portType == .builtInMic }), s.preferredInput?.portType != .builtInMic {
+                    try? s.setPreferredInput(m)
+                }
+            case .engineOn:
+                try startEngine()
+                hot = true
+            case .engineOff:
+                audio.stop()
+                audio.inputNode.removeTap(onBus: 0)
+                fake?.stop()
+                hot = false
+            case .deactivate:
+                do { try s.setActive(false, options: .notifyOthersOnDeactivation) } catch { Bus.log("deactivate failed: \(error)") }
+            case .pipOn: pip.start()
+            case .pipOff: pip.stop()
+            }
+        }
+        return took.joined(separator: " ")
+    }
+
+    /// 画中画待机：录音前在后台开麦。失败返回原因（已关麦并记日志）
+    private func heatUp() -> LiveState.StartError? {
+        guard standby == .pip, !hot else { return nil }
+        let st = UIApplication.shared.applicationState
+        if st == .background, !pip.running {
+            Bus.log("mic on refused: pip not running state=\(st.rawValue)")
+            return .noSession
+        }
+        let t = VK.now
+        do {
+            let took = try run(MicPlan.steps(.record, .pip, hot: false))
+            Bus.log("mic Hot in \(Int((VK.now - t) * 1000))ms (\(took)) state=\(st.rawValue) pip=\(pip.running)")
+            return nil
+        } catch {
+            let e = error as NSError
+            try? run([.engineOff, .deactivate])
+            let r = MicPlan.failure(code: e.code)
+            Bus.log("mic on failed \(e.domain) \(e.code) -> \(r.rawValue) state=\(st.rawValue) pip=\(pip.running): \(e.localizedDescription)")
+            return r
+        }
+    }
+
+    /// 后台开麦失败的回落：被占用 → 标记打断（键盘空心麦克风）；小窗没了 → 结束会话；其他 → 结束会话，回主 App 改常开麦
+    private func fallback(_ e: LiveState.StartError) {
+        switch e {
+        case .micBusy: interrupted = true
+        case .noSession: disarm(.pipClosed)
+        default:
+            micFallback = true
+            disarm(.bgDenied)
+        }
+    }
+
+    /// 画中画录音结束后立即关麦，橙点熄灭
+    private func coolDown() {
+        guard standby == .pip, hot else { return }
+        try? run(MicPlan.steps(.recordEnd, .pip, hot: hot))
+        Bus.log("mic Cold")
+    }
+
+    private func pipLost(_ why: String) {
+        Bus.log("pip lost: \(why) active=\(active) standby=\(standby.rawValue)")
+        guard active, standby == .pip else { return }
+        disarm(.pipClosed)
+    }
+
+    /// 小窗打不开：本次会话改为常开麦，不静默失败
+    private func pipFailed(_ why: String) {
+        Bus.log("pip failed: \(why) active=\(active) standby=\(standby.rawValue)")
+        guard active, standby == .pip else { return }
+        micFallback = true
+        do {
+            try run(MicPlan.steps(.disarm, .pip, hot: hot))
+            standby = .mic
+            try run(MicPlan.steps(.arm, .mic, hot: false))
+            Bus.log("fallback to mic standby")
+            publish()
+        } catch {
+            Bus.log("fallback to mic failed: \(error)")
+            disarm(.failed)
         }
     }
 
@@ -197,13 +318,14 @@ final class SessionManager: ObservableObject {
 
     private func beat() {
         let st = UIApplication.shared.applicationState
-        Bus.log("alive \(Int(VK.now - (since ?? VK.now)))s running=\(audio.isRunning) interrupted=\(interrupted) state=\(st.rawValue) mem=\(String(format: "%.1f", Bus.footprintMB()))MB")
+        Bus.log("alive \(Int(VK.now - (since ?? VK.now)))s standby=\(standby.rawValue) mic=\(hot ? "Hot" : "Cold") pip=\(pip.running) running=\(audio.isRunning) interrupted=\(interrupted) state=\(st.rawValue) mem=\(String(format: "%.1f", Bus.footprintMB()))MB")
         Self.mirrorLog()
-        if active, !interrupted, !audio.isRunning {
+        if active, standby == .mic, !interrupted, !audio.isRunning {
             Bus.log("engine stopped unexpectedly")
             interrupted = true
             resume(attempt: 0)
         }
+        if active, standby == .pip, !pip.running, st == .background { pipLost("heartbeat: not running") }
     }
 
     /// iOS 17 的 devicectl 拉不到 App Group 容器，镜像一份到 App 自己的容器
@@ -225,6 +347,7 @@ final class SessionManager: ObservableObject {
         if type == .began {
             interrupted = true
             if utt?.phase == .recording { stopSegment(.interrupted) }
+            coolDown()
             publish()
         } else {
             resume(attempt: 0)
@@ -246,9 +369,17 @@ final class SessionManager: ObservableObject {
     }
 
     private func tryResume() -> Bool {
+        // 画中画待机平时不开麦，打断结束只需清标记，下次录音再开
+        if standby == .pip {
+            interrupted = false
+            Bus.log("resumed pip standby state=\(UIApplication.shared.applicationState.rawValue)")
+            publish()
+            return true
+        }
         do {
-            try activateAudioSession()
+            try run([.category, .activate])
             if !audio.isRunning { try startEngine() }
+            hot = true
             interrupted = false
             Bus.log("resumed state=\(UIApplication.shared.applicationState.rawValue)")
             publish()
@@ -275,6 +406,10 @@ final class SessionManager: ObservableObject {
             recoverPending = false
             Bus.log("recover session after relaunch")
             arm()
+        }
+        if active, standby == .pip {
+            if interrupted { resume(attempt: 0) }
+            pip.start()
         } else if active, interrupted || !audio.isRunning {
             interrupted = true
             resume(attempt: 0)
@@ -305,7 +440,10 @@ final class SessionManager: ObservableObject {
         switch c.op {
         case .start: start(c)
         case .stop: if current, utt?.phase == .recording { stopSegment(.user) }
-        case .continue: if current, let u = utt, u.phase == .finalizing || u.phase == .done { beginSegment(u) }
+        case .continue:
+            if current, let u = utt, u.phase == .finalizing || u.phase == .done {
+                if let e = heatUp() { fallback(e) } else { beginSegment(u) }
+            }
         case .retry: if current { retry() }
         case .close: if current { closeUtterance() }
         case .commit:
@@ -320,6 +458,7 @@ final class SessionManager: ObservableObject {
     }
 
     private func start(_ c: Command) {
+        let got = VK.now
         closeUtterance()
         let u = Utt(id: nextUtt, startSeq: c.seq, silenceStop: (c.silenceStop ?? 0) > 0 ? c.silenceStop : nil)
         nextUtt += 1
@@ -333,13 +472,18 @@ final class SessionManager: ObservableObject {
         if interrupted, !tryResume() { return fail(.micBusy) }
         let chans = config.resolve(c.channels)
         guard !chans.isEmpty else { return fail(.noChannel) }
+        if let e = heatUp() {
+            fail(e)
+            return fallback(e)
+        }
         u.rows = chans.map { Utt.Row(channel: $0) }
         lock.lock()
         recording = []
+        firstAudio = (c.tapAt, c.at, got)
         lock.unlock()
         if bg == .invalid { bg = UIApplication.shared.beginBackgroundTask { [weak self] in self?.endBackgroundTask() } }
         beginSegment(u)
-        Bus.log("start #\(u.id) \(chans.map(\.engine)) silence=\(u.silenceStop ?? 0) rate=\(rate)")
+        Bus.log("start #\(u.id) \(chans.map(\.engine)) silence=\(u.silenceStop ?? 0) rate=\(rate) took=\(Int((VK.now - got) * 1000))ms")
     }
 
     private func beginSegment(_ u: Utt) {
@@ -380,6 +524,7 @@ final class SessionManager: ObservableObject {
         lock.unlock()
         levelTimer?.invalidate()
         cores.forEach { $0.finish() }
+        coolDown()
         let seg = u.audio.count - 1
         u.audio[seg] = u.audio[seg].lowerBound..<end
         let now = VK.now
@@ -432,8 +577,10 @@ final class SessionManager: ObservableObject {
         feeds = []
         detector = nil
         recording = []
+        firstAudio = nil
         lock.unlock()
         levelTimer?.invalidate()
+        coolDown()
         utt = nil
         endBackgroundTask()
     }
@@ -511,9 +658,12 @@ final class SessionManager: ObservableObject {
         for i in 0..<n { sum += p[i] * p[i] }
         let rms = (sum / Float(n)).squareRoot()
         var done = false
+        var first: (tap: Double?, cmd: Double, got: Double)?
         lock.lock()
         level = rms
         if !feeds.isEmpty {
+            first = firstAudio
+            firstAudio = nil
             for c in feeds { c.push(p, count: n) }
             if recording.count + n <= maxSamples {
                 for i in 0..<n { recording.append(Int16(max(-1, min(1, p[i])) * 32767)) }
@@ -524,6 +674,12 @@ final class SessionManager: ObservableObject {
             }
         }
         lock.unlock()
+        if let f = first {
+            let t = VK.now
+            func ms(_ a: Double) -> Int { Int(((t - a) * 1000).rounded()) }
+            let m = "first audio tap->rec=\(f.tap.map { "\(ms($0))" } ?? "-")ms cmd->rec=\(ms(f.cmd))ms app->rec=\(ms(f.got))ms"
+            DispatchQueue.main.async { Bus.log(m) }
+        }
         if done { DispatchQueue.main.async { self.stopSegment(.silence) } }
     }
 
@@ -536,10 +692,14 @@ final class SessionManager: ObservableObject {
         let s = LiveState(
             launch: launch, updatedAt: VK.now, ackSeq: ackSeq,
             session: .init(active: active, since: since, expiresAt: expiresAt, idleMinutes: config.idleMinutes,
-                           interrupted: interrupted, endReason: active ? nil : endReason, endedAt: active ? nil : endedAt),
+                           interrupted: interrupted, endReason: active ? nil : endReason, endedAt: active ? nil : endedAt,
+                           standby: standby),
             utterance: utt?.wire(level: min(1, lv * 8)))
         Bus.write(s, VK.File.state)
         Bus.post(VK.Note.state)
+        if active, standby == .pip {
+            pip.show(interrupted ? "暂停" : utt?.phase == .recording ? "聆听中" : utt?.phase == .finalizing ? "识别中" : "待命")
+        }
     }
 
     /// 识别错误原文只进日志，界面只给简短原因

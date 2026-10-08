@@ -98,7 +98,7 @@ final class ProtocolTests: XCTestCase {
             utterance: .init(id: 1, startSeq: 3, phase: .recording, silenceStop: 1.5, level: 0.2,
                              rows: [.init(channel: "a", name: "微信", text: "你好", state: .listening)], retryable: true))
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as! [String: Any]
-        XCTAssertEqual(json["v"] as? Int, 1)
+        XCTAssertEqual(json["v"] as? Int, 2)
         let u = json["utterance"] as! [String: Any]
         XCTAssertEqual(u["phase"] as? String, "recording")
         XCTAssertEqual((u["rows"] as! [[String: Any]])[0]["state"] as? String, "listening")
@@ -106,5 +106,83 @@ final class ProtocolTests: XCTestCase {
 
         let c = try JSONDecoder().decode(Command.self, from: Data(#"{"seq":4,"at":1,"op":"continue","utt":1}"#.utf8))
         XCTAssertEqual(c.op, .continue)
+        XCTAssertNil(c.tapAt)
+        // v1 主 App 写的 state 没有 standby，按常开麦
+        let old = try JSONDecoder().decode(LiveState.Session.self, from: Data(#"{"active":true,"idleMinutes":10,"interrupted":true}"#.utf8))
+        XCTAssertNil(old.standby)
+        XCTAssertTrue(old.micReady)
+    }
+
+    // MARK: 待机方式
+
+    func testStandbyDefaultsToPipIncludingUpgrades() throws {
+        XCTAssertEqual(Config.initial.standbyMode, .pip)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Config.initial)) as! [String: Any]
+        json.removeValue(forKey: "standby")
+        let upgraded = try JSONDecoder().decode(Config.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(upgraded.standbyMode, .pip, "旧版配置升级后默认画中画")
+        XCTAssertEqual(upgraded.channels, Config.initial.channels, "升级不丢渠道设置")
+        var c = Config.initial
+        c.standby = .mic
+        let back = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(c))
+        XCTAssertEqual(back.standbyMode, .mic, "切到常开麦后保持")
+        XCTAssertNotEqual(back, Config.initial, "切换会触发保存")
+    }
+
+    func testMicReadyFallsBackOnlyForInterruptedPip() {
+        func s(_ active: Bool, _ interrupted: Bool, _ m: Standby?) -> LiveState.Session {
+            .init(active: active, idleMinutes: 10, interrupted: interrupted, standby: m)
+        }
+        XCTAssertTrue(s(true, false, .pip).micReady)
+        XCTAssertFalse(s(true, true, .pip).micReady, "画中画被打断：空心麦克风，点了跳主 App")
+        XCTAssertTrue(s(true, true, .mic).micReady, "常开麦被打断仍按原逻辑由主 App 回 micBusy")
+        XCTAssertFalse(s(false, false, .pip).micReady)
+        XCTAssertFalse(s(false, false, .mic).micReady)
+    }
+
+    func testBackgroundMicFailureClassification() {
+        XCTAssertEqual(MicPlan.failure(code: 561145187), .bgDenied, "!rec")
+        XCTAssertEqual(MicPlan.failure(code: 2003329396), .bgDenied, "what")
+        XCTAssertEqual(MicPlan.failure(code: 1), .bgDenied, "未知错误按回主 App 开麦处理")
+        XCTAssertEqual(MicPlan.failure(code: 561017449), .micBusy, "!pri 通话占用")
+        XCTAssertEqual(MicPlan.failure(code: 560557684), .micBusy, "!int")
+        XCTAssertEqual(MicPlan.failure(code: 1936290409), .micBusy, "siri")
+    }
+
+    func testPipStandbyNeverHoldsMicOutsideRecording() {
+        XCTAssertEqual(MicPlan.steps(.arm, .pip, hot: false), [.category, .pipOn], "待机不激活会话、不开引擎")
+        XCTAssertEqual(MicPlan.steps(.record, .pip, hot: false), [.category, .activate, .engineOn])
+        XCTAssertEqual(MicPlan.steps(.record, .pip, hot: true), [], "接着说时麦已开就不重复")
+        XCTAssertEqual(MicPlan.steps(.recordEnd, .pip, hot: true), [.engineOff, .deactivate], "先停引擎再关会话")
+        XCTAssertEqual(MicPlan.steps(.recordEnd, .pip, hot: false), [])
+        XCTAssertEqual(MicPlan.steps(.disarm, .pip, hot: true), [.engineOff, .deactivate, .pipOff])
+        XCTAssertEqual(MicPlan.steps(.disarm, .pip, hot: false), [.pipOff], "闲置到点：关小窗结束会话")
+
+        // 模拟一轮：开会话 → 说 → 停 → 接着说 → 停 → 结束，录音之外麦克风都关着
+        var hot = false
+        var log: [MicPlan.Step] = []
+        func go(_ e: MicPlan.Event) {
+            let s = MicPlan.steps(e, .pip, hot: hot)
+            log += s
+            if s.contains(.engineOn) { hot = true }
+            if s.contains(.engineOff) { hot = false }
+        }
+        go(.arm); XCTAssertFalse(hot)
+        go(.record); XCTAssertTrue(hot)
+        go(.recordEnd); XCTAssertFalse(hot)
+        go(.record); go(.recordEnd); XCTAssertFalse(hot)
+        go(.disarm); XCTAssertFalse(hot)
+        XCTAssertEqual(log.filter { $0 == .activate }.count, log.filter { $0 == .deactivate }.count, "每次激活都配一次关闭")
+        XCTAssertEqual(log.last, .pipOff)
+    }
+
+    func testMicStandbyUnchanged() {
+        XCTAssertEqual(MicPlan.steps(.arm, .mic, hot: false), [.category, .activate, .engineOn])
+        XCTAssertEqual(MicPlan.steps(.record, .mic, hot: true), [], "常开麦录音不重开")
+        XCTAssertEqual(MicPlan.steps(.recordEnd, .mic, hot: true), [], "常开麦说完不关麦")
+        XCTAssertEqual(MicPlan.steps(.disarm, .mic, hot: true), [.engineOff, .deactivate])
+        for e in [MicPlan.Event.arm, .record, .recordEnd, .disarm] {
+            XCTAssertFalse(MicPlan.steps(e, .mic, hot: true).contains(.pipOn))
+        }
     }
 }
