@@ -2,3 +2,5 @@
 build/
 *.app
 /target/
+/dist/
+.DS_Store

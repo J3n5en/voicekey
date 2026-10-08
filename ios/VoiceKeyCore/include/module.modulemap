@@ -1,0 +1,4 @@
+module VoiceKeyCoreFFI {
+    header "voicekey_ffi.h"
+    export *
+}

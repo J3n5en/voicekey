@@ -1,0 +1,56 @@
+# 九宫格：拼写运算取自雾凇 t9.schema.yaml，每个音节派生出数字与字母混合的拼写，
+# 左侧选拼音时把对应数字换成字母即可收窄候选
+schema:
+  schema_id: vk_t9
+  name: 九宫格
+  version: "1"
+engine:
+  processors:
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - script_translator
+  filters:
+    - uniquifier
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcba98765432
+  initials: zyxwvutsrqponmlkjihgfedcba98765432
+  delimiter: " '"
+  algebra:
+    - erase/^hm$/
+    - erase/^m$/
+    - erase/^n$/
+    - erase/^ng$/
+    - abbrev/^([a-z]).+$/$1/
+    - abbrev/^([zcs]h).+$/$1/
+    - derive/^([nl])ve$/$1ue/
+    - derive/^([jqxy])u/$1v/
+    - derive/un$/uen/
+    - derive/ui$/uei/
+    - derive/iu$/iou/
+    - derive/([aeiou])ng$/$1gn/
+    - derive/([dtngkhrzcs])o(u|ng)$/$1o/
+    - derive/ong$/on/
+    - derive/ao$/oa/
+    - derive/([iu])a(o|ng?)$/a$1$2/
+    - derive/[abc]/2/
+    - derive/[def]/3/
+    - derive/[ghi]/4/
+    - derive/[jkl]/5/
+    - derive/[mno]/6/
+    - derive/[pqrs]/7/
+    - derive/[tuv]/8/
+    - derive/[wxyz]/9/
+translator:
+  dictionary: vk
+  prism: vk_t9
+  enable_word_completion: true
+  enable_user_dict: true
+  spelling_hints: 100
+menu:
+  page_size: 20

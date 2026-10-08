@@ -1,0 +1,8 @@
+---
+name: vk
+version: "1"
+sort: by_weight
+import_tables:
+  - cn_dicts/8105
+  - cn_dicts/base
+...

@@ -1,0 +1,114 @@
+name: VoiceKeyIOS
+options:
+  bundleIdPrefix: do.j3.voicekey
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: 69GW9UBCN2
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  VoiceKeyCore:
+    path: VoiceKeyCore
+  Pinyin:
+    path: Pinyin
+targets:
+  VoiceKey:
+    type: application
+    platform: iOS
+    sources: [App, Shared, Resources]
+    dependencies:
+      - target: Keyboard
+      - package: VoiceKeyCore
+    entitlements:
+      path: App/App.entitlements
+      properties:
+        com.apple.security.application-groups: [group.do.j3.voicekey]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceKey
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        NSMicrophoneUsageDescription: 在键盘上点麦克风说话时，由 VoiceKey 收音并识别为文字。
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [voicekey]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  Keyboard:
+    type: app-extension
+    platform: iOS
+    sources: [Keyboard, Shared]
+    dependencies:
+      - package: Pinyin
+    entitlements:
+      path: Keyboard/Keyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.do.j3.voicekey]
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceKey
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            RequestsOpenAccess: true
+            PrimaryLanguage: zh-Hans
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios.keyboard
+  VoiceKeyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests, Shared, Keyboard/LiveTyper.swift, Keyboard/Dictation.swift, Keyboard/EditGestures.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios.tests
+  VoiceKeyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: VoiceKey
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios.uitests
+        TEST_TARGET_NAME: VoiceKey
+schemes:
+  VoiceKey:
+    build:
+      targets:
+        VoiceKey: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  VoiceKeyTests:
+    build:
+      targets:
+        VoiceKeyTests: [test]
+    test:
+      targets:
+        - VoiceKeyTests
+        - package: Pinyin/PinyinTests
+  VoiceKeyUITests:
+    build:
+      targets:
+        VoiceKeyUITests: [test]
+    test:
+      targets: [VoiceKeyUITests]

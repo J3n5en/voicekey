@@ -1,0 +1,18 @@
+[package]
+name = "voicekey-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+voicekey-core = { path = "../../../crates/core" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+# 独立于桌面端 workspace
+[workspace]
+
+[profile.release]
+lto = true
+codegen-units = 1
