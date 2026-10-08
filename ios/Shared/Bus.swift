@@ -2,7 +2,37 @@ import Foundation
 
 /// 进程间传输：Darwin 通知只做信号，内容走 App Group 文件（协议见 ios/PROTOCOL.md）
 enum Bus {
-    static let group = "group.do.j3.voicekey"
+    static let defaultGroup = "group.do.j3.voicekey"
+
+    /// 实际使用的 App Group。自签/重签工具常把组名改写（如加队伍 ID 后缀），
+    /// 因此先试默认组名，打不开再从包内描述文件里找能打开的组；App 与键盘按同一规则选，结果一致。
+    static let group: String = {
+        let fm = FileManager.default
+        if fm.containerURL(forSecurityApplicationGroupIdentifier: defaultGroup) != nil { return defaultGroup }
+        var bundles = [Bundle.main.bundleURL]
+        if Bundle.main.bundleURL.pathExtension == "appex" {   // 扩展再参考宿主 App 的描述文件
+            bundles.append(Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent())
+        }
+        var seen = Set<String>()
+        let candidates = bundles.flatMap(provisionedGroups).filter { seen.insert($0).inserted }
+        func rank(_ g: String) -> Int {
+            g.hasPrefix(defaultGroup) ? 0 : g.lowercased().contains("voicekey") ? 1 : 2
+        }
+        let sorted = candidates.sorted { (rank($0), $0) < (rank($1), $1) }
+        return sorted.first { fm.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil } ?? defaultGroup
+    }()
+
+    /// 包内 embedded.mobileprovision 声明的 App Group
+    static func provisionedGroups(in bundleURL: URL) -> [String] {
+        guard let data = try? Data(contentsOf: bundleURL.appendingPathComponent("embedded.mobileprovision")),
+              let s = String(data: data, encoding: .isoLatin1),
+              let a = s.range(of: "<?xml"), let b = s.range(of: "</plist>"), a.lowerBound < b.lowerBound,
+              let xml = String(s[a.lowerBound..<b.upperBound]).data(using: .isoLatin1),
+              let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil) as? [String: Any],
+              let ent = plist["Entitlements"] as? [String: Any]
+        else { return [] }
+        return ent["com.apple.security.application-groups"] as? [String] ?? []
+    }
 
     /// 协议文件目录
     static let root: URL? = {
