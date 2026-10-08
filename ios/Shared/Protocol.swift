@@ -13,6 +13,9 @@ enum VK {
         static let ping = "do.j3.voicekey.ping"
         static let config = "do.j3.voicekey.config"
         static let keyboard = "do.j3.voicekey.keyboard"
+        /// 操作按钮 / 快捷指令：让正在显示的键盘开始或结束说话；键盘收到回 hotkeyAck
+        static let hotkey = "do.j3.voicekey.hotkey"
+        static let hotkeyAck = "do.j3.voicekey.hotkey.ack"
     }
 
     enum File {
@@ -22,6 +25,8 @@ enum VK {
         static let history = "history.json"
         static let keyboard = "keyboard.json"
         static let typing = "typing.json"
+        /// 最近一次 hotkey 的时刻（秒），键盘据此忽略迟到的旧信号
+        static let hotkey = "hotkey.json"
     }
 
     static var now: Double { Date().timeIntervalSince1970 }

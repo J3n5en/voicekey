@@ -17,6 +17,8 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 | `do.j3.voicekey.state` | 主 App | `state.json` 已更新 |
 | `do.j3.voicekey.config` | 双方 | `config.json` 已更新 |
 | `do.j3.voicekey.keyboard` | 键盘 | `keyboard.json` 已更新 |
+| `do.j3.voicekey.hotkey` | 主 App | 操作按钮 / 快捷指令「VoiceKey 说话」：正在显示的键盘开始或结束说话（同点麦克风），时刻写在 `hotkey.json`，超过 2 秒的忽略 |
+| `do.j3.voicekey.hotkey.ack` | 键盘 | 已响应 hotkey；主 App 0.8 秒内没收到就提示「没有在用 VoiceKey 键盘」 |
 
 | 文件 | 写入方 | 内容 |
 |---|---|---|
@@ -24,6 +26,7 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 | `state.json` | 主 App | `LiveState`：会话 + 当前这句话 |
 | `cmd.json` | 键盘 | `CommandQueue`：最近 32 条命令 |
 | `history.json` | 双方 | 最近上屏 20 条；键盘删除键上滑清空输入框时也写入（渠道记为「已清空」），主 App 写前先重读 |
+| `hotkey.json` | 主 App | 最近一次 hotkey 的时刻（秒） |
 | `keyboard.json` | 键盘 | `KeyboardInfo`，键盘每次出现时写；主 App 据此显示「完全访问已开」 |
 | `typing.json` | 双方 | `TypingPrefs`：中文键盘用九宫格还是 26 键（键盘里切布局即改默认）；`haptics` 按键震动；`metrics` 键盘底部显示按键耗时。未开完全访问时键盘读写自己的副本 |
 
