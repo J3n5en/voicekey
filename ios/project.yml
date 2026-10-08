@@ -9,7 +9,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     TARGETED_DEVICE_FAMILY: "1"
     GENERATE_INFOPLIST_FILE: YES
 packages:
@@ -45,6 +45,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
   Keyboard:
     type: app-extension
     platform: iOS
@@ -72,6 +73,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: do.j3.voicekey.ios.keyboard
+        TARGETED_DEVICE_FAMILY: "1"
   VoiceKeyTests:
     type: bundle.unit-test
     platform: iOS
