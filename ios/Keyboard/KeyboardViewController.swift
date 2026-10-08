@@ -14,6 +14,8 @@ final class KeyboardViewController: UIInputViewController {
     private let content = UIView()
     private let voiceBox = UIStackView()
     private let keypad = KeyPad()
+    /// 语音模式底排的 🌐；系统已在键盘下方提供时隐藏
+    private let voiceGlobe = KeyButton(symbol: "globe", style: .fn)
     private let grid = CandidateGrid()
     private var metricsLabel: UILabel?
     private let chip = UIButton(type: .system)
@@ -175,8 +177,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         let compact = traitCollection.verticalSizeClass == .compact
-        height?.constant = compact ? 214 : 290
+        // 与系统键盘同高：顶栏 44 + 四行键 210 + 上下留白
+        height?.constant = compact ? 214 : 274
         bigSub.isHidden = compact
+        voiceGlobe.isHidden = !needsInputModeSwitchKey
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -792,7 +796,7 @@ final class KeyboardViewController: UIInputViewController {
         ])
 
         // 底排：🌐 ， 空格 。 ⌫ 换行；候选框时 🌐 [大键] ⌫
-        let globe = KeyButton(symbol: "globe", style: .fn)
+        let globe = voiceGlobe
         globe.accessibilityLabel = "切换输入法"
         globe.addTarget(self, action: #selector(globeEvent(_:event:)), for: .allTouchEvents)
         let comma = textKey("，", "，", style: .fn)
@@ -847,7 +851,7 @@ final class KeyboardViewController: UIInputViewController {
         column.axis = .vertical
         column.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(column)
-        let h = root.heightAnchor.constraint(equalToConstant: 290)
+        let h = root.heightAnchor.constraint(equalToConstant: 274)
         h.priority = .init(999)
         height = h
         NSLayoutConstraint.activate([
@@ -912,7 +916,7 @@ final class KeyboardViewController: UIInputViewController {
     private func renderTyping() {
         let composing = zh && composer.isComposing
         if !composing { expanded = false }
-        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh))
+        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh, globe: needsInputModeSwitchKey))
         if cursorKey == nil { keypad.update(composing: composing, pinyin: zh ? composer.pinyinOptions : []) }
         keypad.isHidden = expanded
         grid.isHidden = !expanded
