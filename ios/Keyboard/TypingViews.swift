@@ -1,6 +1,6 @@
 import UIKit
 
-/// 打字按键区：26 键（字母、数字、符号页）与九宫格，按 design/ios/index.html
+/// 打字按键区：26 键（字母、数字、符号页）与九宫格，尺寸对照 iOS 26 系统拼音键盘（440pt 宽机型实测）
 final class KeyPad: UIView {
     enum Page { case abc, num, sym }
 
@@ -14,9 +14,12 @@ final class KeyPad: UIView {
         var zh = true
         var page = Page.abc
         var shift = false
+        /// 系统没在键盘下方提供 🌐 时（Home 键机型等）才在键盘里放
+        var globe = true
     }
 
-    private enum Width { case unit, fixed(CGFloat), flex }
+    /// sys：Shift / 删除 / 123 等功能键；enter：底行换行键（宽度按原生比例由布局算出）
+    private enum Width { case unit, fixed(CGFloat), flex, sys, enter }
 
     private struct Item {
         let key: Key
@@ -24,9 +27,20 @@ final class KeyPad: UIView {
         var width = Width.unit
         /// 与下一个键之间额外的间距
         var extra: CGFloat = 0
-        /// 九宫格位置：列、行
-        var cell: (Int, Int)?
+        /// 九宫格位置
+        var cell: Cell?
     }
+
+    /// 九宫格 5 列 × 4 行网格中的位置：起始列（可为半列）、行、占几列、占几行
+    private struct Cell {
+        var c: CGFloat
+        var r: Int
+        var cw: CGFloat = 1
+        var rh = 1
+    }
+
+    /// 系统键盘的键圆角
+    static let radius: CGFloat = 8.5
 
     var onKey: ((Key) -> Void)?
     /// 九宫格左列：组字中为拼音，空闲时为标点
@@ -86,8 +100,8 @@ final class KeyPad: UIView {
         switch key {
         case .letter(let c):
             let t = spec.shift && !spec.zh ? c.uppercased() : String(c)
-            b = KeyButton(t, style: c == "'" ? .fn : .key)
-            b.fontSize = 21
+            b = KeyButton(t, style: .key)
+            b.fontSize = 23
             b.accessibilityLabel = String(c)
         case .digit(let c):
             let d = DigitKey(String(c), Self.t9Letters[c] ?? "")
@@ -100,30 +114,30 @@ final class KeyPad: UIView {
             b = d
         case .text(let s):
             b = KeyButton(s, style: .key)
-            b.fontSize = s.count == 1 && s.first!.isNumber ? 21 : 18
+            b.fontSize = s.count == 1 && s.first!.isNumber ? 23 : 20
             b.accessibilityLabel = s
         case .space:
             b = KeyButton("空格", style: .key)
-            b.fontSize = 14
+            b.fontSize = 16
             b.accessibilityIdentifier = "空格"
             space = b
         case .back:
-            b = KeyButton(symbol: "delete.left", style: .fn)
+            b = KeyButton(symbol: "delete.left", style: .key)
             b.accessibilityLabel = "删除"
         case .enter:
-            b = KeyButton("换行", style: .enter)
-            b.fontSize = 14
+            b = KeyButton("换行", style: .key)
+            b.fontSize = 16
             b.accessibilityIdentifier = "换行"
             enter = b
         case .globe:
-            b = KeyButton(symbol: "globe", style: .fn)
+            b = KeyButton(symbol: "globe", style: .key)
             b.accessibilityLabel = "切换输入法"
         case .shift:
-            b = KeyButton(symbol: spec.shift ? "shift.fill" : "shift", style: spec.shift ? .key : .fn)
+            b = KeyButton(symbol: spec.shift ? "shift.fill" : "shift", style: .key)
             b.accessibilityLabel = "大写"
         case .lang:
-            b = KeyButton(nil, style: .fn)
-            let on = UIFont.systemFont(ofSize: 14), off = UIFont.systemFont(ofSize: 11)
+            b = KeyButton(nil, style: .key)
+            let on = UIFont.systemFont(ofSize: 16), off = UIFont.systemFont(ofSize: 12)
             let t = NSMutableAttributedString()
             t.append(NSAttributedString(string: spec.zh ? "中" : "中/", attributes: [.font: spec.zh ? on : off, .foregroundColor: spec.zh ? Theme.fg : Theme.fg3]))
             t.append(NSAttributedString(string: spec.zh ? "/英" : "英", attributes: [.font: spec.zh ? off : on, .foregroundColor: spec.zh ? Theme.fg3 : Theme.fg]))
@@ -137,9 +151,11 @@ final class KeyPad: UIView {
             case .num: title = "123"
             case .sym: title = spec.t9 ? "符" : "#+="
             }
-            b = KeyButton(title, style: .fn)
-            b.fontSize = 14
+            b = KeyButton(title, style: .key)
+            b.fontSize = 16
         }
+        // iOS 26 系统键盘：功能键与字母键同为白底、大圆角
+        b.layer.cornerRadius = Self.radius
         if [.space, .back, .globe].contains(key) {
             wire?(b, key)
         } else {
@@ -148,9 +164,8 @@ final class KeyPad: UIView {
         return b
     }
 
-    private func item(_ key: Key, _ w: Width = .unit, extra: CGFloat = 0, fn: Bool = false, size: CGFloat? = nil) -> Item {
+    private func item(_ key: Key, _ w: Width = .unit, extra: CGFloat = 0, size: CGFloat? = nil) -> Item {
         let b = make(key)
-        if fn { b.style = .fn }
         if let size { b.fontSize = size }
         return Item(key: key, button: b, width: w, extra: extra)
     }
@@ -162,52 +177,55 @@ final class KeyPad: UIView {
         var r: [[Item]]
         switch s.page {
         case .abc:
-            let lead = zh ? item(.letter("'"), .fixed(42), extra: 5) : item(.shift, .fixed(42), extra: 5)
-            r = [letters("qwertyuiop"), letters("asdfghjkl"), [lead] + letters("zxcvbnm") + [item(.back, .fixed(42))]]
-            r[2][r[2].count - 2].extra = 10
+            let lead = zh ? item(.letter("'"), .sys) : item(.shift, .sys)
+            r = [letters("qwertyuiop"), letters("asdfghjkl"), [lead] + letters("zxcvbnm") + [item(.back, .sys)]]
         case .num, .sym:
             let num = s.page == .num
             let row1 = num ? "1234567890".map(String.init) : ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
             let row2 = num ? (zh ? ["，", "。", "？", "！", "、", "：", "；", "（", "）", "@"] : ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""])
                 : ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"]
             let row3 = zh ? ["…", "—", "《", "》", "“", "”", "·"] : [".", ",", "?", "!", "'", "-", "…"]
-            var third = [item(.page(num ? .sym : .num), .fixed(42), extra: 5)] + texts(row3) + [item(.back, .fixed(42))]
-            third[third.count - 2].extra = 10
-            r = [texts(row1), texts(row2), third]
+            r = [texts(row1), texts(row2), [item(.page(num ? .sym : .num), .sys)] + texts(row3) + [item(.back, .sys)]]
         }
-        r.append([
-            item(.page(s.page == .abc ? .num : .abc), .fixed(40)),
-            item(.globe, .fixed(31)),
-            item(.text(zh ? "，" : ","), .fixed(27), fn: true, size: 16),
+        // 底行：123 | (🌐) | 中/英 | ， | 空格 | 。 | 换行
+        var bottom = [item(.page(s.page == .abc ? .num : .abc), .sys)]
+        if s.globe { bottom.append(item(.globe)) }
+        bottom += [
+            item(.lang, .sys),
+            item(.text(zh ? "，" : ","), size: 20),
             item(.space, .flex),
-            item(.text(zh ? "。" : "."), .fixed(27), fn: true, size: 16),
-            item(.lang, .fixed(40)),
-            item(.enter, .fixed(48)),
-        ])
+            item(.text(zh ? "。" : "."), size: 20),
+            item(.enter, .enter),
+        ]
+        r.append(bottom)
         return r
     }
 
     private static let t9Letters: [Character: String] = ["2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ"]
 
+    /// 与系统九宫格一致的 5 列 × 4 行：左列（前三行为标点/拼音列表）、中间 3 列、右列 ⌫ / 0 / 换行（换行占两行）
     private func t9Rows(_ s: Spec) -> [[Item]] {
-        func at(_ key: Key, _ c: Int, _ r: Int, fn: Bool = false) -> Item {
-            var i = item(key, fn: fn)
-            i.cell = (c, r)
+        func at(_ key: Key, _ c: CGFloat, _ r: Int, cw: CGFloat = 1, rh: Int = 1) -> Item {
+            var i = item(key)
+            i.cell = Cell(c: c, r: r, cw: cw, rh: rh)
             return i
         }
-        var grid: [Item]
-        let bottom: [Item]
-        if s.page == .num {
-            grid = (1...9).map { n in at(.text(String(n)), (n - 1) % 3 + 1, (n - 1) / 3) }
-            grid += [at(.back, 4, 0), at(.text("."), 4, 1, fn: true), at(.enter, 4, 2)]
-            bottom = [item(.page(.abc), .fixed(50)), item(.globe, .fixed(31)), item(.page(.sym), .fixed(44)), item(.text("0"), .flex), item(.space, .flex)]
-        } else {
-            grid = [at(.one, 1, 0)] + (2...9).map { n in at(.digit(Character(String(n))), (n - 1) % 3 + 1, (n - 1) / 3) }
-            // 待定点 4：0 单独一个键，放在 ⌫ 下面
-            grid += [at(.back, 4, 0), at(.text("0"), 4, 1, fn: true), at(.enter, 4, 2)]
-            bottom = [item(.page(.num), .fixed(50)), item(.globe, .fixed(31)), item(.space, .flex), item(.lang, .fixed(50))]
+        // 底行左列：123（Home 键机型再与 🌐 平分）
+        func lead(_ p: Page) -> [Item] {
+            s.globe ? [at(.page(p), 0, 3, cw: 0.5), at(.globe, 0.5, 3, cw: 0.5)] : [at(.page(p), 0, 3)]
         }
-        return [grid, bottom]
+        var g: [Item]
+        if s.page == .num {
+            g = (1...9).map { n in at(.text(String(n)), CGFloat((n - 1) % 3 + 1), (n - 1) / 3) }
+            g += [at(.back, 4, 0), at(.text("."), 4, 1), at(.enter, 4, 2, rh: 2)]
+            g += lead(.abc) + [at(.page(.sym), 1, 3), at(.text("0"), 2, 3), at(.space, 3, 3)]
+        } else {
+            g = [at(.one, 1, 0)] + (2...9).map { n in at(.digit(Character(String(n))), CGFloat((n - 1) % 3 + 1), (n - 1) / 3) }
+            // 待定点 4：0 单独一个键，放在 ⌫ 下面
+            g += [at(.back, 4, 0), at(.text("0"), 4, 1), at(.enter, 4, 2, rh: 2)]
+            g += lead(.num) + [at(.lang, 1, 3), at(.space, 2, 3, cw: 2)]
+        }
+        return [g]
     }
 
     // MARK: 布局
@@ -217,76 +235,98 @@ final class KeyPad: UIView {
         if listCell { layoutT9() } else { layoutQwerty() }
     }
 
+    /// 系统 26 键：键高 42、行距 14，键距约为宽度的 2%（440pt 上 9），第二行缩进半格，
+    /// 第三行 Shift / 删除贴边（约 1.33 键宽）、字母居中；底行 123 与中/英同 Shift 宽，换行约 23.5% 宽
     private func layoutQwerty() {
-        let w = bounds.width, h = bounds.height, pad: CGFloat = 3, gap: CGFloat = 5
-        let unit = floor((w - 2 * pad - 9 * gap) / 10)
+        let w = bounds.width, h = bounds.height, pad: CGFloat = 2.5
+        let gap = (w * 0.0205).rounded(), bgap = (gap * 0.75).rounded()
+        let unit = (w - 2 * pad - 9 * gap) / 10, slot = unit + gap
+        let sys = (unit * 1.33).rounded()
         let n = CGFloat(rows.count)
-        let rowH = min(42, floor((h - 4 * (n + 1)) / n))
-        let vgap = (h - n * rowH) / (n + 1)
+        let vgap: CGFloat = h > 200 ? 14 : 8
+        let rowH = min(42, floor((h - 8 - (n - 1) * vgap) / n))
+        let y0 = (h - n * rowH - (n - 1) * vgap) / 2
         for (i, row) in rows.enumerated() {
-            let y = vgap + CGFloat(i) * (rowH + vgap)
-            place(row, x0: pad, width: w - 2 * pad, y: y, h: rowH, unit: unit, gap: gap)
+            let y = y0 + CGFloat(i) * (rowH + vgap)
+            if row.contains(where: { if case .flex = $0.width { return true }; return false }) {
+                place(row, x0: pad, width: w - 2 * pad, y: y, h: rowH, unit: unit, gap: bgap, sys: sys, enter: (w * 0.235).rounded())
+            } else if case .sys = row.first?.width, row.count > 2 {
+                // 功能键贴两边，中间字母按格居中
+                let mid = row.count - 2
+                var x = (w - CGFloat(mid) * slot + gap) / 2
+                row[0].button.frame = CGRect(x: pad, y: y, width: sys, height: rowH)
+                row[row.count - 1].button.frame = CGRect(x: w - pad - sys, y: y, width: sys, height: rowH)
+                for it in row[1...mid] {
+                    it.button.frame = CGRect(x: x, y: y, width: unit, height: rowH)
+                    x += slot
+                }
+            } else {
+                var x = (w - CGFloat(row.count) * slot + gap) / 2
+                for it in row {
+                    it.button.frame = CGRect(x: x, y: y, width: unit, height: rowH)
+                    x += slot
+                }
+            }
         }
     }
 
+    /// 系统九宫格：5 列等宽、键距 6，键高 45、行距 11
     private func layoutT9() {
-        let w = bounds.width, h = bounds.height, gap: CGFloat = 6, side: CGFloat = 50
-        let x0: CGFloat = 1, y0: CGFloat = 2
-        let mid = (w - 2 * x0 - 2 * side - 4 * gap) / 3
-        let botH = min(42, h * 0.2)
-        let cellH = (h - 2 * y0 - botH - 3 * gap) / 3
-        func colX(_ c: Int) -> CGFloat { c == 0 ? x0 : x0 + side + gap + CGFloat(c - 1) * (mid + gap) }
-        func colW(_ c: Int) -> CGFloat { c == 0 || c == 4 ? side : mid }
-        list.frame = CGRect(x: colX(0), y: y0, width: side, height: 3 * cellH + 2 * gap)
-        for it in rows[0] {
-            guard let (c, r) = it.cell else { continue }
-            it.button.frame = CGRect(x: colX(c), y: y0 + CGFloat(r) * (cellH + gap), width: colW(c), height: cellH)
+        let w = bounds.width, h = bounds.height, pad: CGFloat = 2.5, gap: CGFloat = 6
+        let col = (w - 2 * pad - 4 * gap) / 5
+        let vgap: CGFloat = h > 200 ? 11 : 6
+        let rowH = min(45, floor((h - 8 - 3 * vgap) / 4))
+        let y0 = (h - 4 * rowH - 3 * vgap) / 2
+        func frame(_ c: Cell) -> CGRect {
+            CGRect(x: pad + c.c * (col + gap), y: y0 + CGFloat(c.r) * (rowH + vgap),
+                   width: c.cw * col + (c.cw - 1) * gap, height: CGFloat(c.rh) * rowH + CGFloat(c.rh - 1) * vgap)
         }
-        place(rows[1], x0: x0, width: w - 2 * x0, y: y0 + 3 * (cellH + gap), h: botH, unit: mid, gap: 5)
+        list.frame = frame(Cell(c: 0, r: 0, rh: 3))
+        for it in rows.flatMap({ $0 }) {
+            if let c = it.cell { it.button.frame = frame(c) }
+        }
     }
 
-    private func place(_ row: [Item], x0: CGFloat, width: CGFloat, y: CGFloat, h: CGFloat, unit: CGFloat, gap: CGFloat) {
+    private func place(_ row: [Item], x0: CGFloat, width: CGFloat, y: CGFloat, h: CGFloat, unit: CGFloat, gap: CGFloat,
+                       sys: CGFloat = 44, enter: CGFloat = 88) {
+        func size(_ wd: Width) -> CGFloat? {
+            switch wd {
+            case .unit: return unit
+            case .fixed(let f): return f
+            case .sys: return sys
+            case .enter: return enter
+            case .flex: return nil
+            }
+        }
         var fixed: CGFloat = 0, flex = 0
         for (i, it) in row.enumerated() {
-            switch it.width {
-            case .unit: fixed += unit
-            case .fixed(let f): fixed += f
-            case .flex: flex += 1
-            }
+            if let s = size(it.width) { fixed += s } else { flex += 1 }
             if i < row.count - 1 { fixed += gap + it.extra }
         }
         let flexW = flex > 0 ? (width - fixed) / CGFloat(flex) : 0
         var x = flex > 0 ? x0 : x0 + (width - fixed) / 2
         for it in row {
-            let wd: CGFloat
-            switch it.width {
-            case .unit: wd = unit
-            case .fixed(let f): wd = f
-            case .flex: wd = flexW
-            }
+            let wd = size(it.width) ?? flexW
             it.button.frame = CGRect(x: x, y: y, width: wd, height: h)
             x += wd + gap + it.extra
         }
     }
 }
 
-/// 九宫格数字键：上方小字数字，下方字母或说明
+/// 九宫格字母键：同系统只显示字母（加字距），数字仅用于无障碍
 final class DigitKey: KeyButton {
-    let bottom = Theme.label(16)
+    let bottom = Theme.label(18)
 
     init(_ digit: String, _ letters: String) {
         super.init(nil, style: .key)
-        let top = Theme.label(10, Theme.fg2)
-        top.text = digit
-        bottom.text = letters
-        let col = UIStackView(arrangedSubviews: [top, bottom])
-        col.axis = .vertical
-        col.alignment = .center
-        col.isUserInteractionEnabled = false
-        col.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(col)
-        col.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
-        col.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+        let t = NSMutableAttributedString(string: letters)
+        if letters.count > 1 { t.addAttribute(.kern, value: 2, range: NSRange(location: 0, length: (letters as NSString).length - 1)) }
+        bottom.attributedText = t
+        bottom.isUserInteractionEnabled = false
+        bottom.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bottom)
+        bottom.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+        bottom.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -302,7 +342,7 @@ final class SideList: UIScrollView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        layer.cornerRadius = 6
+        layer.cornerRadius = KeyPad.radius
         showsVerticalScrollIndicator = false
         empty.text = "—"
         empty.textAlignment = .center
@@ -316,7 +356,7 @@ final class SideList: UIScrollView {
         guard items != self.items || pinyin != self.pinyin else { return }
         self.items = items
         self.pinyin = pinyin
-        backgroundColor = pinyin ? Theme.key : Theme.key2
+        backgroundColor = Theme.key
         while pool.count < items.count {
             let b = UIButton(type: .custom)
             b.setTitleColor(Theme.fg, for: .normal)
