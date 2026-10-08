@@ -103,6 +103,10 @@ final class KeyboardViewController: UIInputViewController {
     private var repeatTimer: Timer?
     private var spaceHold: Timer?
     private var spaceX: CGFloat = 0
+    /// 已写进输入框的拼音（marked text）
+    private var marked = ""
+    /// 本轮刚覆盖拼音上屏过：宿主会合并同一轮的写入并可能乱序，下一段拼音挪到下一轮再写
+    private var committedThisTurn = false
     private var walk: CursorWalk?
     private var swipe: ClearSwipe?
     private var clearing: ClearPlan?
@@ -146,6 +150,7 @@ final class KeyboardViewController: UIInputViewController {
         prefs = TypingPrefs.load()
         composer.layout = prefs.t9 ? .t9 : .qwerty
         composer.clear()
+        marked = ""
         PinyinLoader.warm(composer.layout)
         mode = .type
         page = .abc
@@ -173,6 +178,7 @@ final class KeyboardViewController: UIInputViewController {
         typer?.abandon()
         reset()
         composer.clear()
+        syncMarked()
         expanded = false
         closeSheet()
         endCursorMode()
@@ -915,6 +921,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         mode = .voice
         expanded = false
+        composer.clear()
+        syncMarked()
         tapMic()
     }
 
@@ -1023,7 +1031,35 @@ final class KeyboardViewController: UIInputViewController {
 
     private func insert(_ s: String) {
         guard !s.isEmpty else { return }
-        textDocumentProxy.insertText(s)
+        guard !marked.isEmpty else { return textDocumentProxy.insertText(s) }
+        // 覆盖输入框里的拼音上屏：Apple 文档的做法，改成最终文字再 unmark，同一次写完（标点也并进来）
+        textDocumentProxy.setMarkedText(s, selectedRange: NSRange(location: (s as NSString).length, length: 0))
+        textDocumentProxy.unmarkText()
+        marked = ""
+        committedThisTurn = true
+        DispatchQueue.main.async { [weak self] in self?.committedThisTurn = false }
+    }
+
+    /// 组字变化后把拼音同步到输入框；不再组字时清掉
+    private func syncMarked() {
+        var want = ""
+        if prefs.inlinePinyin, mode == .type, zh, composer.isComposing {
+            let p = composer.preedit
+            want = p.confirmed + (p.picked + p.guess).joined(separator: "'")
+        }
+        guard want != marked else { return }
+        if committedThisTurn, !want.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.syncMarked() }
+            return
+        }
+        let p = textDocumentProxy
+        if want.isEmpty {
+            p.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
+            p.unmarkText()
+        } else {
+            p.setMarkedText(want, selectedRange: NSRange(location: (want as NSString).length, length: 0))
+        }
+        marked = want
     }
 
     private func pickCandidate(_ i: Int) {
@@ -1036,6 +1072,7 @@ final class KeyboardViewController: UIInputViewController {
     private func timed(_ body: () -> Void) {
         TypingStats.begin()
         body()
+        syncMarked()
         TypingStats.engineDone()
         render()
         view.layoutIfNeeded()
