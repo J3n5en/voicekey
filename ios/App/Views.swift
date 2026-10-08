@@ -353,7 +353,8 @@ struct OnboardingView: View {
     @EnvironmentObject var perms: Permissions
     @EnvironmentObject var session: SessionManager
     var done: () -> Void
-    @State private var step = 0
+    /// 打开完全访问时系统会结束 App，回来要停在原步骤
+    @AppStorage("onboardingStep") private var step = 0
     @State private var trying = false
 
     var body: some View {
@@ -380,19 +381,29 @@ struct OnboardingView: View {
         case 0:
             VStack(spacing: 12) {
                 AppIconView().padding(.top, 30).padding(.bottom, 10)
-                Text("在任何 App 里\n说话就能输入").font(.title.bold()).multilineTextAlignment(.center)
-                Text("用 VoiceKey 键盘点一下麦克风开始说，再点一下结束。勾选多个渠道时，可以在键盘里对比结果再选一条。")
+                Text("想说就说\n想打就打").font(.title.bold()).multilineTextAlignment(.center)
+                Text("中文全拼 26 键或九宫格打字，点左上角麦克风就能说。勾选多个渠道时，可以在键盘里对比结果再选一条。")
                     .foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
         case 1:
             title("添加 VoiceKey 键盘", "在系统设置里打开下面两项，回来后这里会自动更新。")
             stepRow(perms.keyboard ? nil : "1", "添加键盘", "设置 › VoiceKey › 键盘 › 打开「VoiceKey」")
-            stepRow(perms.fullAccess ? nil : "2", "允许完全访问", perms.keyboard && !perms.fullAccess
-                ? "打开后，在任意输入框切到 VoiceKey 键盘一次，这里就会打勾。键盘上敲的字不会被记录或上传。"
-                : "键盘需要它和主 App 传递录音状态与识别结果，并联网识别。键盘上敲的字不会被记录或上传。")
+            stepRow(perms.fullAccess ? nil : "2", "允许完全访问", "用于语音和最近记录；没开启也能本地打字。普通打字不写入最近；主动清空的文字会保存在本机，方便恢复。")
             if perms.cellularRestricted {
                 stepRow("!", "允许使用无线数据", "设置 › VoiceKey › 无线数据，选「WLAN 与蜂窝网络」，否则无法联网识别")
+            }
+            if !perms.fullAccess {
+                // 完全访问只有键盘出现过才知道：在这里切到 VoiceKey，键盘一出现就打勾
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(perms.keyboardSeen ? "已切到 VoiceKey，但完全访问还没打开。" : "打开后，在下面输入框里按住 🌐 切到「VoiceKey」，键盘一出现这里就会打勾。")
+                        .font(.footnote).foregroundStyle(perms.keyboardSeen ? Color.errVK : .secondary)
+                    ProbeField(placeholder: "点这里，切到 VoiceKey")
+                        .frame(height: 22)
+                        .padding(10)
+                        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .card()
             }
         case 2:
             title("允许使用麦克风", "iOS 不允许键盘直接录音，所以录音在 VoiceKey 主 App 里进行：在键盘上点麦克风时，主 App 在后台收音并把文字送回键盘。")
@@ -425,8 +436,8 @@ struct OnboardingView: View {
         default:
             title("怎么用", nil)
             stepRow("1", "在任意 App 点输入框，按住 🌐 选「VoiceKey」", nil)
-            stepRow("2", "点麦克风", "没有会话时会先跳到 VoiceKey 开启会话，再点屏幕左上角「◀ 原 App」回去，回去后再点一次麦克风开始说。会话保持期间不用再跳。")
-            stepRow("3", "点一下开始说，再点一下结束", "识别中再点一下＝接着说，拼成同一句。")
+            stepRow("2", "打字，或点左上角麦克风", "默认中文 26 键全拼，键盘顶部「26｜九键」可切九宫格。空心麦克风会先跳到 VoiceKey 开会话，再点左上角「◀」回到原 App。")
+            stepRow("3", "说完上屏，回到打字", "会话就绪时点麦克风直接开始说，再点结束。多渠道时选一条上屏；⌨ 返回打字。")
         }
     }
 
@@ -442,20 +453,27 @@ struct OnboardingView: View {
                 if perms.keyboard && perms.fullAccess {
                     primary("下一步") { step = 2 }
                 } else {
+                    // 检测不到也不拦人：只提示，「下一步」一直能点
+                    Text("还没检测到\(perms.keyboard ? "完全访问" : "键盘")，可以先继续，之后在「设置」里查看。")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     primary("前往设置") { Permissions.openSettings() }
+                    Button("下一步") { step = 2 }
                 }
-                Button("稍后再说") { step = 2 }
             case 2:
                 if perms.micGranted {
                     primary("下一步") { step = 3 }
                 } else {
                     primary(perms.mic == .denied ? "去设置开启" : "允许麦克风") { perms.requestMic() }
+                    Button("下一步") { step = 3 }
                 }
             case 3:
                 primary("下一步") { step = 4 }.disabled(session.config.enabled.isEmpty)
             default:
                 primary("去试一试") { trying = true }
-                Button("完成", action: done)
+                Button("完成") {
+                    step = 0
+                    done()
+                }
             }
         }
         .padding(.top, 12)
@@ -498,6 +516,35 @@ private extension View {
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
             .padding(.top, 10)
     }
+}
+
+/// 引导里检测键盘的输入框：切到 VoiceKey 时上报（没开完全访问的键盘自己传不出消息）
+private struct ProbeField: UIViewRepresentable {
+    let placeholder: String
+
+    func makeUIView(context: Context) -> UITextField {
+        let f = UITextField()
+        f.placeholder = placeholder
+        f.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        context.coordinator.tokens = [UITextInputMode.currentInputModeDidChangeNotification, UIResponder.keyboardDidShowNotification].map {
+            NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { [weak f] _ in
+                guard let f, f.isFirstResponder, f.textInputMode?.vkID == VK.keyboardBundleID else { return }
+                Permissions.shared.keyboardShown()
+            }
+        }
+        return f
+    }
+
+    func updateUIView(_ v: UITextField, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    static func dismantleUIView(_ v: UITextField, coordinator: Coordinator) {
+        coordinator.tokens.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    final class Coordinator { var tokens: [NSObjectProtocol] = [] }
 }
 
 /// 引导里的试用输入框

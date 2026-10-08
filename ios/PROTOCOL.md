@@ -132,3 +132,5 @@
 日志同 SPIKE.md（iOS 17 设备从 App 自己容器的 `Library/Caches/log.txt` 拉）。
 
 键盘真机冒烟（手机须解锁，已添加 VoiceKey 键盘并开完全访问）：`xcodebuild test -project VoiceKeyIOS.xcodeproj -scheme VoiceKeyUITests -destination id=<UDID> -allowProvisioningUpdates`。用 `-fakemic` 在引导「试一试」和备忘录里点键盘，核对输入框文字与最近上屏一致、改字/移光标后停止改写、多渠道候选、会话到期提醒、无会话跳主 App。会装上 Debug 包，测完用 `build.sh <UDID>` 换回 Release。
+
+引导真机测试（会改设置里的键盘与完全访问开关，默认跳过）：先 `xcrun devicectl device uninstall app --device <UDID> do.j3.voicekey.ios`，再 `TEST_RUNNER_VK_ONBOARDING=1 xcodebuild test … -only-testing:VoiceKeyUITests/OnboardingUITests/testGrantAll`（逐项授权，跑完键盘、完全访问、麦克风都已打开）或 `testSkipAll`（全不授权也能走完）。每个用例前都要重新卸载。
