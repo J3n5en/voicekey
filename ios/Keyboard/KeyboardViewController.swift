@@ -102,6 +102,8 @@ final class KeyboardViewController: UIInputViewController {
     private var walk: CursorWalk?
     private var swipe: ClearSwipe?
     private var clearing: ClearPlan?
+    /// 键盘正显示着（操作按钮的信号只给它）
+    private var visible = false
     private let haptic = UISelectionFeedbackGenerator()
     /// 用户关掉的会话提醒：按会话结束时刻 / 到期时刻记
     private static var dismissedEnd: Double?
@@ -126,10 +128,12 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLoad()
         build()
         Bus.observe(VK.Note.state) { [weak self] in self?.received() }
+        Bus.observe(VK.Note.hotkey) { [weak self] in self?.hotkey() }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        visible = true
         if hasFullAccess {
             Bus.write(KeyboardInfo(fullAccess: true, at: now), VK.File.keyboard)
             Bus.post(VK.Note.keyboard)
@@ -154,6 +158,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        visible = false
         ticker?.invalidate()
         repeatTimer?.invalidate()
         ping = nil
@@ -886,6 +891,14 @@ final class KeyboardViewController: UIInputViewController {
         mode = .voice
         expanded = false
         tapMic()
+    }
+
+    /// 操作按钮 / 快捷指令：只有正在显示的键盘响应；同点麦克风（开始、说话中则结束）
+    private func hotkey() {
+        guard visible, hasFullAccess, let at = Bus.read(Double.self, VK.File.hotkey), now - at < 2 else { return }
+        Bus.post(VK.Note.hotkeyAck)
+        closeSheet()
+        tapTypeMic()
     }
 
     private func backToTyping() {
