@@ -227,22 +227,40 @@ class KeyButton: UIButton {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.6 : 1 } }
+    /// 按下：普通键变深、功能键变浅（同系统键盘）；彩色键仍用半透明
+    override var isHighlighted: Bool {
+        didSet { if isHighlighted != oldValue { applyStyle() } }
+    }
+
+    /// 按键区的键不直接接收触摸（KeyPad 统一处理），旁白激活走这里
+    var activate: (() -> Void)?
+
+    override func accessibilityActivate() -> Bool {
+        guard let activate else { return super.accessibilityActivate() }
+        activate()
+        return true
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let t = traitCollection
         grad.frame = bounds
+        applyStyle()
+    }
+
+    private func applyStyle() {
+        let t = traitCollection
+        let down = isHighlighted
         grad.isHidden = style != .action
         let fg: UIColor
         switch style {
-        case .key: backgroundColor = Theme.key; fg = Theme.fg
-        case .fn: backgroundColor = Theme.key2; fg = Theme.fg
+        case .key: backgroundColor = down ? Theme.key2 : Theme.key; fg = Theme.fg
+        case .fn: backgroundColor = down ? Theme.key : Theme.key2; fg = Theme.fg
         case .enter: backgroundColor = Theme.accent; fg = .white
         case .action: backgroundColor = .clear; fg = .white
         case .actionRec: backgroundColor = Theme.rec; fg = .white
         case .actionOutline: backgroundColor = Theme.key; fg = Theme.accent
         }
+        if style != .key, style != .fn { alpha = down ? 0.6 : 1 }
         // 富文本标题（中/英键）自带字体颜色，再设 titleLabel 会触发重新布局而死循环
         if attributedTitle(for: .normal) == nil {
             setTitleColor(fg, for: .normal)

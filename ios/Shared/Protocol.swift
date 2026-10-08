@@ -101,8 +101,10 @@ struct Config: Codable, Equatable {
 struct TypingPrefs: Codable, Equatable {
     /// 中文键盘用九宫格，否则 26 键全拼
     var t9 = false
-    /// 测试用：键盘里显示按键耗时与内存，供 UITest 读取
+    /// 键盘里显示按键耗时与内存（设置里可开，UITest 也读它）
     var metrics = false
+    /// 按键震动（需允许完全访问）
+    var haptics = true
 
     /// 键盘里切布局时默认布局跟着改（待定，用户可能改成只对本次生效）
     static let toggleSetsDefault = true
@@ -114,6 +116,7 @@ struct TypingPrefs: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         t9 = try c.decodeIfPresent(Bool.self, forKey: .t9) ?? false
         metrics = try c.decodeIfPresent(Bool.self, forKey: .metrics) ?? false
+        haptics = try c.decodeIfPresent(Bool.self, forKey: .haptics) ?? true
     }
 
     /// 有 App Group（主 App、开了完全访问的键盘）读共享设置，否则读本进程自己的副本

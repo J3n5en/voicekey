@@ -1,4 +1,5 @@
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// 打字按键区：26 键（字母、数字、符号页）与九宫格，尺寸对照 iOS 26 系统拼音键盘（440pt 宽机型实测）
 final class KeyPad: UIView {
@@ -45,8 +46,12 @@ final class KeyPad: UIView {
     var onKey: ((Key) -> Void)?
     /// 九宫格左列：组字中为拼音，空闲时为标点
     var onList: ((String, _ pinyin: Bool) -> Void)?
-    /// 空格、删除、🌐 的触摸交给控制器
+    /// 🌐 仍是真按钮（系统切换输入法要 UIEvent），由控制器接上
     var wire: ((KeyButton, Key) -> Void)?
+    /// 空格、删除的触摸阶段交给控制器（长按移光标、连删、上滑清空）；phase 可能是补发的 ended / cancelled
+    var onTrack: ((KeyButton, Key, UITouch.Phase, UITouch) -> Void)?
+    /// 每次按下一个键：按键音、震动
+    var onFeedback: (() -> Void)?
 
     private(set) var spec = Spec()
     private var built: Spec?
@@ -64,6 +69,15 @@ final class KeyPad: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         list.onTap = { [weak self] in self?.onList?($0, $1) }
+        // 键盘扩展里完全透明的点收不到触摸，键缝要能按就得有一点底色
+        backgroundColor = UIColor.black.withAlphaComponent(0.001)
+        isMultipleTouchEnabled = true
+        let tracker = TouchTracker()
+        tracker.onBegan = { [weak self] in self?.began($0) }
+        tracker.onMoved = { [weak self] in self?.moved($0) }
+        tracker.onEnded = { [weak self] in self?.ended($0, cancelled: $1) }
+        addGestureRecognizer(tracker)
+        addSubview(popup)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -76,10 +90,14 @@ final class KeyPad: UIView {
         guard built != s else { return }
         built = s
         rows.flatMap { $0 }.forEach { $0.button.removeFromSuperview() }
+        hidePopup()
         rows = s.t9 && s.page != .sym ? t9Rows(s) : qwertyRows(s)
         listCell = s.t9 && s.page != .sym
         if listCell { addSubview(list) } else { list.removeFromSuperview() }
-        rows.flatMap { $0 }.forEach { addSubview($0.button) }
+        for it in rows.joined() {
+            it.button.isUserInteractionEnabled = it.key == .globe
+            addSubview(it.button)
+        }
         if s.t9, s.page == .num { list.set(Self.t9Math, pinyin: false) }
         setNeedsLayout()
     }
@@ -156,11 +174,7 @@ final class KeyPad: UIView {
         }
         // iOS 26 系统键盘：功能键与字母键同为白底、大圆角
         b.layer.cornerRadius = Self.radius
-        if [.space, .back, .globe].contains(key) {
-            wire?(b, key)
-        } else {
-            b.addAction(UIAction { [weak self] _ in self?.onKey?(key) }, for: .touchUpInside)
-        }
+        if key == .globe { wire?(b, key) } else { b.activate = { [weak self] in self?.onKey?(key) } }
         return b
     }
 
@@ -311,6 +325,207 @@ final class KeyPad: UIView {
             x += wd + gap + it.extra
         }
     }
+
+    // MARK: 触摸
+    // 整块按键区统一收触摸，落点算到最近的键（键缝、边缘不再是死区）；
+    // 按下即反馈、松手上屏；新手指按下时先把还按着的键上屏（快速双拇指交替不丢字、不乱序）。
+
+    private final class Track {
+        var key: Key
+        var button: KeyButton
+        let wired: Bool
+        weak var touch: UITouch?
+
+        init(_ item: Item, touch: UITouch) {
+            key = item.key
+            button = item.button
+            wired = item.key == .space || item.key == .back
+            self.touch = touch
+        }
+    }
+
+    private var tracks: [(id: ObjectIdentifier, t: Track)] = []
+    private let popup = KeyPopup()
+    private weak var popupOwner: Track?
+
+    private func nearest(_ p: CGPoint) -> Item? {
+        var best: Item?, bd = CGFloat.greatestFiniteMagnitude
+        for it in rows.joined() where !it.button.isHidden {
+            let f = it.button.frame
+            let dx = max(f.minX - p.x, 0, p.x - f.maxX), dy = max(f.minY - p.y, 0, p.y - f.maxY)
+            let d = dx * dx + dy * dy
+            if d < bd { bd = d; best = it }
+        }
+        return best
+    }
+
+    private func inList(_ p: CGPoint) -> Bool { listCell && list.frame.insetBy(dx: -3, dy: -3).contains(p) }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard !isHidden, isUserInteractionEnabled, alpha > 0.01, self.point(inside: point, with: event) else { return nil }
+        if inList(point) { return list.hitTest(convert(point, to: list), with: event) ?? list }
+        if let it = nearest(point), it.key == .globe { return it.button }
+        return self
+    }
+
+    private func track(_ touch: UITouch) -> Track? {
+        tracks.first { $0.id == ObjectIdentifier(touch) }?.t
+    }
+
+    private func began(_ touch: UITouch) {
+        rollover()
+        let p = touch.location(in: self)
+        guard !inList(p), let it = nearest(p), it.key != .globe else { return }
+        let t = Track(it, touch: touch)
+        tracks.append((ObjectIdentifier(touch), t))
+        onFeedback?()
+        if t.wired { onTrack?(t.button, t.key, .began, touch) } else { show(t, down: true) }
+    }
+
+    private func moved(_ touch: UITouch) {
+        guard let t = track(touch) else { return }
+        if t.wired { return onTrack?(t.button, t.key, .moved, touch) ?? () }
+        let p = touch.location(in: self)
+        // 出了当前键（再宽 4pt）才换键，快打时手指轻微搓动不跳键
+        if t.button.superview === self, t.button.frame.insetBy(dx: -4, dy: -4).contains(p) { return }
+        guard let it = nearest(p), it.button !== t.button, it.key != .globe, it.key != .space, it.key != .back else { return }
+        show(t, down: false)
+        t.key = it.key
+        t.button = it.button
+        show(t, down: true)
+    }
+
+    private func ended(_ touch: UITouch, cancelled: Bool) {
+        guard let i = tracks.firstIndex(where: { $0.id == ObjectIdentifier(touch) }) else { return }
+        finish(tracks.remove(at: i).t, cancelled: cancelled)
+    }
+
+    /// 新手指按下：还按着的键先上屏；空格按松手处理，删除停止连删
+    private func rollover() {
+        let pending = tracks
+        tracks = []
+        for (_, t) in pending { finish(t, cancelled: t.key == .back) }
+    }
+
+    private func finish(_ t: Track, cancelled: Bool) {
+        if t.wired {
+            if let touch = t.touch { onTrack?(t.button, t.key, cancelled ? .cancelled : .ended, touch) }
+            return
+        }
+        show(t, down: false)
+        if !cancelled { onKey?(t.key) }
+    }
+
+    /// 按下态：键变色；26 键的字母、符号键弹出放大字
+    private func show(_ t: Track, down: Bool) {
+        // 换过页（Shift、123）后旧按钮已移除，按键值找新按钮
+        let b = t.button.superview === self ? t.button : rows.joined().first { $0.key == t.key }?.button
+        b?.isHighlighted = down
+        if down, let b, !listCell, Self.pops(t.key) {
+            popupOwner = t
+            popup.show(b.title(for: .normal) ?? "", over: b.frame, in: bounds)
+            bringSubviewToFront(popup)
+        } else if !down, popupOwner === t {
+            hidePopup()
+        }
+    }
+
+    private func hidePopup() {
+        popup.isHidden = true
+        popupOwner = nil
+    }
+
+    private static func pops(_ k: Key) -> Bool {
+        switch k {
+        case .letter, .text: return true
+        default: return false
+        }
+    }
+}
+
+/// 系统键盘式的按键放大气泡：上方放大字，下方连着按下的键
+final class KeyPopup: UIView {
+    private let shape = CAShapeLayer()
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isHidden = true
+        layer.zPosition = 10
+        shape.shadowColor = UIColor.black.cgColor
+        shape.shadowOpacity = 0.3
+        shape.shadowRadius = 1.5
+        shape.shadowOffset = CGSize(width: 0, height: 0.5)
+        layer.addSublayer(shape)
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 34)
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ text: String, over k: CGRect, in area: CGRect) {
+        let bw = k.width + 22, bh = (k.height * 1.15).rounded()
+        let x = min(max(k.midX - bw / 2, area.minX), area.maxX - bw)
+        let y = k.minY - bh + 2
+        frame = CGRect(x: x, y: y, width: bw, height: k.maxY - y)
+        let stem = CGRect(x: k.minX - x, y: bh - 14, width: k.width, height: frame.height - bh + 14)
+        let path = UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: bw, height: bh), cornerRadius: 11)
+        path.append(UIBezierPath(roundedRect: stem, cornerRadius: KeyPad.radius))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shape.path = path.cgPath
+        shape.shadowPath = path.cgPath
+        shape.fillColor = Theme.key.resolvedColor(with: traitCollection).cgColor
+        CATransaction.commit()
+        label.text = text
+        label.textColor = Theme.fg
+        label.frame = CGRect(x: 0, y: 0, width: bw, height: bh - 6)
+        isHidden = false
+    }
+}
+
+/// 只观察不拦截的触摸跟踪：手势识别器不受屏幕边缘系统手势的延迟，按键区左右两边的键也即按即响
+private final class TouchTracker: UIGestureRecognizer {
+    var onBegan: ((UITouch) -> Void)?
+    var onMoved: ((UITouch) -> Void)?
+    var onEnded: ((UITouch, _ cancelled: Bool) -> Void)?
+    private var live = Set<ObjectIdentifier>()
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        for t in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
+            live.insert(ObjectIdentifier(t))
+            onBegan?(t)
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        touches.forEach { onMoved?($0) }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { end(touches, cancelled: false) }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { end(touches, cancelled: true) }
+
+    private func end(_ touches: Set<UITouch>, cancelled: Bool) {
+        for t in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
+            live.remove(ObjectIdentifier(t))
+            onEnded?(t, cancelled)
+        }
+        // 所有手指都抬起才收尾，多指交替时一直在跟踪
+        if live.isEmpty { state = .failed }
+    }
+
+    override func reset() { live.removeAll() }
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 }
 
 /// 九宫格字母键：同系统只显示字母（加字距），数字仅用于无障碍
