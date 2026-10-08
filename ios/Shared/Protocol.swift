@@ -99,6 +99,8 @@ struct Config: Codable, Equatable {
 // MARK: - 打字设置（主 App 与键盘双方可写）
 
 struct TypingPrefs: Codable, Equatable {
+    /// 组字中的拼音显示在输入框里（marked text，同系统键盘）；个别 App 显示异常时可关
+    var inlinePinyin = true
     /// 中文键盘用九宫格，否则 26 键全拼
     var t9 = false
     /// 测试用：键盘里显示按键耗时与内存，供 UITest 读取
@@ -112,6 +114,7 @@ struct TypingPrefs: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        inlinePinyin = try c.decodeIfPresent(Bool.self, forKey: .inlinePinyin) ?? true
         t9 = try c.decodeIfPresent(Bool.self, forKey: .t9) ?? false
         metrics = try c.decodeIfPresent(Bool.self, forKey: .metrics) ?? false
     }

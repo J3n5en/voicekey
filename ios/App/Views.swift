@@ -312,6 +312,8 @@ struct SettingsView: View {
                     }
                 } header: { Text("权限") }
                 Section {
+                    Toggle("拼音显示在输入框里", isOn: $typing.inlinePinyin)
+                        .onChange(of: typing.inlinePinyin) { typing.save() }
                     Picker("中文键盘", selection: $typing.t9) {
                         Text("26 键全拼").tag(false)
                         Text("九宫格").tag(true)
