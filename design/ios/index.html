@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>VoiceKey iOS 设计稿</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  --g1:#22c3ff;--g2:#7b5cff;--g3:#ff3d8b;--grad:linear-gradient(90deg,var(--g1),var(--g2) 55%,var(--g3));
+  --accent:#6a5cff;--ok:#1fb57a;--warn:#f0a020;--err:#ef4a5a;--rec:#ff3b30;
+  --bg:#e6e9f2;--scr:#f2f2f7;--card:#fff;--kb:#d3d6dd;--key:#fff;--key2:#adb2bc;--keyfg:#111;
+  --line:rgba(20,20,40,.1);--fg:#16161f;--fg2:#5c5f6e;--fg3:#9a9cab;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif;
+}
+.dark{--bg:#0b0c14;--scr:#000;--card:#1c1c1e;--kb:#2c2c30;--key:#5b5b60;--key2:#3c3c41;--keyfg:#fff;
+  --line:rgba(255,255,255,.1);--fg:#f2f2f7;--fg2:#a3a5b5;--fg3:#6c6e80;--accent:#8b80ff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.5 var(--font);color:var(--fg);background:var(--bg);min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+
+/* 设计稿工具条（不属于产品界面） */
+.toolbar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 18px;background:rgba(10,10,20,.93);color:#ccc;font-size:12px}
+.toolbar b{color:#fff;font-size:13px}
+.toolbar .g{display:flex;gap:4px;align-items:center}
+.toolbar .g>span{color:#888;margin-right:2px;white-space:nowrap}
+.toolbar button{border:0;background:rgba(255,255,255,.09);color:#ddd;padding:4px 10px;border-radius:6px;white-space:nowrap}
+.toolbar button.on{background:#fff;color:#111}
+.toolbar button:hover{background:rgba(255,255,255,.18)}.toolbar button.on:hover{background:#fff}
+
+.wrap{display:flex;gap:28px;justify-content:center;align-items:flex-start;padding:22px 18px 40px}
+
+/* 手机外壳 */
+.phone{width:390px;height:844px;border-radius:56px;background:#111;padding:11px;flex:none;box-shadow:0 30px 70px rgba(20,20,50,.3)}
+.screen{position:relative;width:100%;height:100%;border-radius:46px;overflow:hidden;background:var(--scr);color:var(--fg);display:flex;flex-direction:column}
+.sb{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 26px 0 30px;font-size:15px;font-weight:600;position:relative;z-index:5}
+.sb .l{min-width:70px;display:flex;align-items:center;gap:4px}
+.crumb{font-size:12px;font-weight:500;color:var(--accent);border:0;background:none;padding:2px 0}
+.island{position:absolute;left:50%;top:11px;transform:translateX(-50%);height:34px;min-width:122px;border-radius:20px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 12px;gap:8px;color:#fff;font-size:11px;font-weight:600;transition:min-width .3s}
+.island.live{min-width:200px}
+.island .vk{display:flex;align-items:center;gap:5px}
+.island .vk i{width:8px;height:8px;border-radius:50%;background:var(--g2);box-shadow:0 0 6px var(--g2)}
+.island .vk.rec i{background:var(--rec);box-shadow:0 0 6px var(--rec);animation:pulse 1s infinite}
+.sb .r{display:flex;gap:5px;align-items:center;font-size:12px}
+.odot{width:7px;height:7px;border-radius:50%;background:#ff9f0a;display:inline-block}
+.batt{width:24px;height:12px;border:1.5px solid currentColor;border-radius:4px;position:relative;opacity:.9}
+.batt:after{content:"";position:absolute;inset:1.5px;right:5px;background:currentColor;border-radius:1.5px}
+.home{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:var(--fg);opacity:.85;z-index:9}
+.body{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.scroll{flex:1;overflow:auto;padding:4px 18px 30px}
+
+/* 通用 iOS 组件 */
+.lt{font-size:30px;font-weight:700;margin:6px 0 12px}
+.sec{font-size:12px;color:var(--fg3);margin:18px 6px 6px;text-transform:uppercase}
+.grp{background:var(--card);border-radius:12px;overflow:hidden}
+.cell{display:flex;align-items:center;gap:10px;padding:11px 14px;min-height:46px;font-size:15px}
+.cell+.cell{border-top:.5px solid var(--line)}
+.cell .t{flex:1;min-width:0}.cell .t small{display:block;font-size:12px;color:var(--fg3);line-height:1.35}
+.cell .v{color:var(--fg3);font-size:14px}
+.foot{font-size:12px;color:var(--fg3);margin:6px 8px 0;line-height:1.5}
+.sw{width:51px;height:31px;border-radius:16px;background:#e3e3e8;position:relative;border:0;flex:none;transition:.2s}
+.dark .sw{background:#39393d}
+.sw:after{content:"";position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2);transition:.2s}
+.sw.on{background:#34c759}.sw.on:after{left:22px}
+.sw:disabled{opacity:.4}
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:14px;font-size:16px;font-weight:600;background:var(--accent);color:#fff}
+.btn.sec2{background:var(--card);color:var(--accent)}
+.btn:disabled{opacity:.4}
+.lnk{border:0;background:none;color:var(--accent);font-size:14px}
+.pill{font-size:12px;padding:2px 8px;border-radius:10px;background:var(--line);color:var(--fg2);white-space:nowrap}
+.pill.ok{background:rgba(31,181,122,.15);color:var(--ok)}.pill.bad{background:rgba(239,74,90,.14);color:var(--err)}.pill.w{background:rgba(240,160,32,.16);color:#c07a00}
+.navb{display:flex;align-items:center;justify-content:space-between;padding:4px 14px;height:40px;font-size:16px}
+.navb b{font-size:16px}
+.chev{color:var(--fg3)}
+
+/* 引导 */
+.onb{flex:1;display:flex;flex-direction:column;padding:10px 24px 40px}
+.onb .dots{display:flex;gap:6px;justify-content:center;margin:4px 0 18px}.onb .dots i{width:6px;height:6px;border-radius:3px;background:var(--line)}.onb .dots i.on{width:18px;background:var(--accent)}
+.onb h1{font-size:26px;line-height:1.25;margin-bottom:8px}
+.onb p{color:var(--fg2);font-size:15px;line-height:1.55}
+.onb .fill{flex:1}
+.onb .acts{display:flex;flex-direction:column;gap:10px}
+.appicon{width:84px;height:84px;border-radius:20px;background:#171a2e;display:grid;place-items:center;margin:30px auto 22px;box-shadow:0 8px 24px rgba(40,30,120,.35)}
+.step{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;background:var(--card);border-radius:12px;margin-top:10px;font-size:15px}
+.step .n{width:24px;height:24px;border-radius:50%;background:var(--line);display:grid;place-items:center;font-size:13px;font-weight:600;flex:none}
+.step .n.ok{background:var(--ok);color:#fff}
+.step small{display:block;color:var(--fg3);font-size:12.5px;line-height:1.45;margin-top:2px}
+
+/* 宿主 App（示意，非真实 App） */
+.host{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--scr)}
+.hh{height:44px;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:.5px solid var(--line);font-size:16px;flex:none}
+.hh .bk{position:absolute;left:12px;color:var(--accent);font-size:24px}
+.msgs{flex:1;overflow:auto;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+.bub{max-width:76%;padding:7px 12px;border-radius:18px;font-size:15px;line-height:1.4;background:var(--card);align-self:flex-start;white-space:pre-wrap;word-break:break-all}
+.bub.me{align-self:flex-end;background:var(--accent);color:#fff}
+.inbar{display:flex;gap:8px;align-items:flex-end;padding:6px 10px;border-top:.5px solid var(--line);flex:none}
+.field{flex:1;min-height:36px;max-height:96px;overflow:auto;border:1px solid var(--line);border-radius:18px;padding:7px 12px;font-size:15px;line-height:1.4;background:var(--card);white-space:pre-wrap;word-break:break-all}
+.field .ph{color:var(--fg3)}
+.field .live{color:var(--fg3);background:color-mix(in srgb,var(--accent) 10%,transparent);border-radius:3px}
+.caret{display:inline-block;width:2px;height:18px;background:var(--accent);vertical-align:-3px;animation:blink 1s steps(1) infinite}
+.send{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:17px;flex:none}
+
+/* 键盘扩展 */
+.kb{flex:none;height:324px;background:var(--kb);display:flex;flex-direction:column;position:relative;padding-bottom:34px;color:var(--keyfg);user-select:none;-webkit-user-select:none;touch-action:none}
+.kt{height:44px;display:flex;align-items:center;gap:6px;padding:0 4px 0 8px;flex:none}
+.chip{border:0;background:var(--key2);color:var(--keyfg);border-radius:14px;padding:4px 10px;font-size:12.5px;display:flex;align-items:center;gap:5px;max-width:150px;white-space:nowrap;overflow:hidden}
+.chip i{width:7px;height:7px;border-radius:50%;background:var(--fg3);flex:none}.chip i.on{background:var(--ok)}
+.kt .st{flex:1;text-align:center;font-size:12px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gear{border:0;background:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--fg2)}
+.kbody{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 10px;position:relative}
+.mic{width:76px;height:76px;border-radius:50%;border:0;display:grid;place-items:center;background:var(--grad);color:#fff;box-shadow:0 6px 18px rgba(106,92,255,.35);position:relative;transition:.15s}
+.mic:active{transform:scale(.95)}
+.mic.outline{background:var(--key);color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.mic.recn{background:var(--rec);box-shadow:0 0 0 0 rgba(255,59,48,.5);animation:ring 1.4s infinite}
+.mic.fin{background:var(--key);color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.mic.off{opacity:.35}
+.mlbl{margin-top:9px;font-size:13px;color:var(--keyfg);font-weight:500}
+.msub{margin-top:2px;font-size:11.5px;color:var(--fg2);text-align:center;max-width:290px;line-height:1.4}
+.live-box{width:100%;background:var(--key);border-radius:10px;padding:8px 11px;font-size:15px;line-height:1.45;min-height:48px;max-height:76px;overflow:auto;margin-bottom:8px;word-break:break-all;color:var(--keyfg)}
+.live-box .d{color:var(--fg2)}
+.live-box.bad{color:var(--err);font-size:13.5px}
+.wave{display:flex;align-items:center;gap:3px;height:22px;margin-bottom:8px}
+.wave i{width:3px;border-radius:2px;background:var(--accent);transition:height .1s}
+.krow{height:46px;display:flex;gap:6px;padding:0 4px 4px;flex:none}
+.key{flex:1;border:0;border-radius:6px;background:var(--key);color:var(--keyfg);font-size:15px;box-shadow:0 1px 0 rgba(0,0,0,.25);display:grid;place-items:center}
+.key.f{background:var(--key2);flex:none;width:46px}
+.key.w{flex:3}
+.key.act{flex:3;background:var(--grad);color:#fff;font-weight:600;font-size:13.5px}
+.key.act.r{background:var(--rec)}.key.act.f2{background:var(--key);color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
+.note{position:absolute;left:8px;right:8px;top:4px;z-index:3;border-radius:10px;padding:8px 10px;font-size:12.5px;line-height:1.4;display:flex;gap:8px;align-items:flex-start;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.note.err{background:#ffe9eb;color:#a3121f}.note.warn{background:#fff3dc;color:#7a4b00}.note.info{background:var(--card);color:var(--fg)}
+.dark .note.err{background:#4a1a20;color:#ffb3ba}.dark .note.warn{background:#4a3410;color:#ffd99a}
+.note .x{margin-left:auto;border:0;background:none;color:inherit;opacity:.6;font-size:15px;line-height:1}
+.note .a{border:0;background:rgba(0,0,0,.08);color:inherit;border-radius:6px;padding:1px 8px;font-size:12px;white-space:nowrap}
+
+/* 拼音全键盘 */
+.tmic,.tkb{width:32px;height:32px;border-radius:50%;border:0;display:grid;place-items:center;flex:none}
+.tmic{background:var(--grad);color:#fff;box-shadow:0 2px 8px rgba(106,92,255,.3)}
+.tmic.outline{background:var(--key);color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
+.tmic.off{opacity:.35}
+.tkb{background:var(--key);color:var(--keyfg);box-shadow:0 1px 0 rgba(0,0,0,.2)}
+.kt.comp{display:grid;grid-template-columns:1fr 36px;grid-template-rows:16px 28px;gap:0 2px;padding:0 2px 0 10px;align-items:center}
+.pyl{grid-column:1/3;font-size:12.5px;color:var(--fg2);white-space:nowrap;overflow:hidden;letter-spacing:.2px}
+.pyl b{color:var(--keyfg);font-weight:500}
+.cands{display:flex;gap:2px;overflow:hidden;align-items:center;min-width:0}
+.cd{border:0;background:none;color:var(--keyfg);font-size:18px;padding:1px 9px;white-space:nowrap;border-radius:6px;flex:none}
+.cd.first{color:var(--accent);font-weight:600}
+.cd:active{background:var(--key2)}
+.more{border:0;background:none;border-left:.5px solid var(--line);color:var(--fg2);font-size:15px;height:26px}
+.tkeys{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 3px 2px;position:relative}
+.tr{display:flex;gap:5px;justify-content:center}
+.tk{flex:1;max-width:33px;height:42px;border:0;border-radius:6px;background:var(--key);color:var(--keyfg);font-size:19px;box-shadow:0 1px 0 rgba(0,0,0,.25);display:grid;place-items:center;padding:0}
+.tk:active{background:var(--key2)}
+.tk.f{background:var(--key2);font-size:14px;max-width:none;flex:none}
+.tk.f:active{background:var(--key)}
+.tk.sp{flex:1;max-width:none;font-size:14px}
+.tk.ent{background:var(--accent);color:#fff}
+.tk.shift.on{background:var(--key);font-weight:700}
+.tk:disabled{opacity:.4}
+.lng{font-size:13px;letter-spacing:-.2px}.lng i{font-style:normal;opacity:.45;font-size:11px}
+.cgrid{flex:1;min-height:0;display:flex;gap:6px;padding:4px 4px 6px}
+.cgrid .all{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(4,1fr);align-content:start;background:var(--key);border-radius:8px}
+.cgrid .all button{border:0;background:none;border-bottom:.5px solid var(--line);border-right:.5px solid var(--line);color:var(--keyfg);font-size:18px;height:44px;white-space:nowrap;overflow:hidden}
+.cgrid .all button.first{color:var(--accent);font-weight:600}
+.cgrid .all button.raw{font-size:14px;color:var(--fg2)}
+.cgrid .side{width:58px;display:flex;flex-direction:column;gap:6px}
+.cgrid .side .tk{max-width:none;width:100%;flex:1;font-size:14px}
+.kb.cur .kt,.kb.cur .tk:not(.sp),.kb.cur .key:not(.sp),.kb.cur .kbody{opacity:.35}
+.kb.cur .fl{opacity:.35}
+
+/* 拼音九宫格 */
+.t9{flex:1;min-height:0;display:grid;grid-template-columns:50px repeat(3,1fr) 50px;grid-template-rows:repeat(3,1fr) 42px;gap:6px;padding:2px 1px 2px}
+.t9 .tk{max-width:none;height:auto}
+.t9 .fl{grid-column:1;grid-row:1/4;background:var(--key2);border-radius:6px;overflow:auto;display:flex;flex-direction:column}
+.t9 .fl.py{background:var(--key)}
+.t9 .fl button{border:0;background:none;color:var(--keyfg);font-size:15px;min-height:34px;flex:none;border-bottom:.5px solid var(--line)}
+.t9 .fl.py button{font-size:14px}
+.t9 .fl button:first-child{font-weight:600}
+.t9 .fl .emp{color:var(--fg3);text-align:center;padding-top:10px}
+.t9 .d{display:flex;flex-direction:column;align-items:center;line-height:1.15;font-size:16px}
+.t9 .d small{font-size:10px;color:var(--fg2)}
+.t9 .bot{grid-column:1/6;display:flex;gap:5px}
+.t9 .bot .tk{height:100%}
+.lay{display:flex;background:var(--key2);border-radius:8px;padding:2px;flex:none}
+.lay button{border:0;background:none;color:var(--fg2);font-size:11.5px;padding:3px 6px;border-radius:6px}
+.lay button.on{background:var(--key);color:var(--keyfg);font-weight:600}
+.pyl u{text-decoration:none;color:var(--accent)}
+.ctip{position:absolute;z-index:8;width:96px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:13px;color:#fff;background:rgba(30,30,40,.9);pointer-events:none}
+.ctip.armed{background:var(--err)}
+
+/* 键盘内候选面板 */
+.pick{width:100%;flex:1;min-height:0;background:var(--key);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;margin:2px 0 6px}
+.ph2{display:flex;align-items:center;gap:8px;padding:6px 8px 5px 11px;font-size:12px;color:var(--fg2);border-bottom:.5px solid var(--line)}
+.ph2 .rd{width:7px;height:7px;border-radius:50%;background:var(--rec);animation:pulse 1.2s infinite}
+.ph2 .sp{flex:1}
+.ph2 .cl{width:26px;height:26px;border:0;border-radius:7px;background:var(--line);display:grid;place-items:center;color:var(--fg2);font-size:14px}
+.prs{flex:1;overflow:auto}
+.pr{display:flex;gap:8px;align-items:flex-start;padding:7px 10px 7px 11px;position:relative;cursor:pointer}
+.pr+.pr{border-top:.5px solid var(--line)}
+.pr.sel{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.pr.sel:before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:0 2px 2px 0;background:var(--accent)}
+.pr .nm{width:56px;flex:none;font-size:11.5px;color:var(--fg2);display:flex;align-items:center;gap:4px;margin-top:2px;white-space:nowrap;overflow:hidden}
+.sd{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fg3)}
+.sd.listen{background:var(--rec)}.sd.wait{background:var(--warn)}.sd.final{background:var(--ok)}.sd.error{background:var(--err)}
+.pr .tx{flex:1;font-size:14.5px;line-height:1.4;word-break:break-all;color:var(--keyfg)}
+.pr .tx.m{color:var(--fg3);font-size:13px}.pr .tx.bad{color:var(--err);font-size:13px}
+.pr .ms{font-size:11px;color:var(--fg3);min-width:34px;text-align:right;margin-top:3px;font-variant-numeric:tabular-nums}
+.pend{font-size:10.5px;color:var(--accent);display:block}
+
+.sheet{position:absolute;inset:0;background:var(--kb);z-index:6;display:flex;flex-direction:column;padding:6px 8px 40px}
+.sheet .hd{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 6px;font-size:14px;font-weight:600}
+.sheet .grp{background:var(--key)}
+.chk{color:var(--accent);font-weight:700;width:18px;text-align:center}
+
+.syskb{flex:1;display:flex;flex-direction:column;gap:7px;padding:8px 4px 0}
+.syskb .rw{display:flex;gap:5px;justify-content:center}
+.syskb .rw span{flex:1;max-width:33px;height:42px;border-radius:6px;background:var(--key);box-shadow:0 1px 0 rgba(0,0,0,.25);display:grid;place-items:center;font-size:17px}
+.sysmark{font-size:11px;color:var(--fg2);text-align:center}
+
+/* 主 App */
+.tabs{height:82px;flex:none;display:flex;border-top:.5px solid var(--line);background:color-mix(in srgb,var(--card) 92%,transparent);padding-bottom:28px}
+.tabs button{flex:1;border:0;background:none;color:var(--fg3);font-size:10.5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.tabs button svg{width:24px;height:24px}
+.tabs button.on{color:var(--accent)}
+.hero{border-radius:16px;padding:16px;background:var(--card);display:flex;flex-direction:column;gap:10px}
+.hero .top{display:flex;align-items:center;gap:12px}
+.hero .ic{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--line);color:var(--fg2);flex:none}
+.hero.on .ic{background:var(--grad);color:#fff}
+.hero b{font-size:18px;display:block}.hero small{font-size:13px;color:var(--fg2)}
+.banner{border-radius:12px;padding:10px 12px;font-size:13.5px;line-height:1.45;margin-bottom:10px;background:color-mix(in srgb,var(--accent) 13%,var(--card));display:flex;gap:8px}
+.banner.err{background:color-mix(in srgb,var(--err) 13%,var(--card))}
+.seg2{display:flex;background:var(--line);border-radius:8px;padding:2px}
+.seg2 button{flex:1;border:0;background:none;padding:5px 0;font-size:13px;border-radius:6px}
+.seg2 button.on{background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:600}
+.cname{display:flex;align-items:center;gap:6px}
+.edit{border:0;background:none;color:var(--fg3);font-size:13px}
+.radio{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--fg3);flex:none;display:grid;place-items:center;background:none}
+.radio.on{border-color:var(--accent)}.radio.on:after{content:"";width:12px;height:12px;border-radius:50%;background:var(--accent)}
+
+/* 系统界面模拟 */
+.alert{position:absolute;inset:0;background:rgba(0,0,0,.35);z-index:20;display:grid;place-items:center}
+.alert .box{width:270px;border-radius:14px;background:color-mix(in srgb,var(--card) 96%,#888);text-align:center;overflow:hidden}
+.alert .box .c{padding:18px 16px 14px}
+.alert b{display:block;font-size:16px;margin-bottom:4px}.alert p{font-size:13px;line-height:1.4}
+.alert .bs{display:flex;border-top:.5px solid var(--line)}
+.alert .bs button{flex:1;border:0;background:none;padding:11px;font-size:16px;color:#0a84ff}
+.alert .bs button+button{border-left:.5px solid var(--line);font-weight:600}
+.switching{flex:1;display:grid;place-items:center;background:var(--scr)}
+.switching .appicon{animation:pop .5s ease}
+.toast{position:absolute;left:50%;top:60px;transform:translateX(-50%);background:rgba(30,30,40,.9);color:#fff;padding:7px 14px;border-radius:16px;font-size:13px;z-index:30;white-space:nowrap}
+.tag{font-size:10px;padding:0 5px;border-radius:4px;background:#f0a02033;color:#b06e00;margin-left:4px;vertical-align:1px;white-space:nowrap}
+
+/* 右侧说明 */
+.notes{width:400px;flex:none;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--card);border-radius:14px;padding:14px 16px;border:1px solid var(--line)}
+.card h4{font-size:14px;margin-bottom:6px}
+.card .k{font-size:11.5px;color:var(--fg3);margin-top:8px}
+.card ul{padding-left:16px;font-size:12.5px;color:var(--fg2);line-height:1.6}
+.card p{font-size:12.5px;color:var(--fg2)}
+.rules{width:100%;border-collapse:collapse;font-size:12.5px}
+.rules td,.rules th{border-top:1px solid var(--line);padding:5px 4px;text-align:left;vertical-align:top}
+.rules th{color:var(--fg3);font-weight:500;border-top:0}
+.rules tr.cur td{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+
+@keyframes pulse{50%{opacity:.35}}
+@keyframes blink{50%{opacity:0}}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(255,59,48,.45)}100%{box-shadow:0 0 0 16px rgba(255,59,48,0)}}
+@keyframes pop{from{transform:scale(.6);opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:12px;height:12px;border:2px solid var(--fg3);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;vertical-align:-2px}
+@media (max-width:900px){.wrap{flex-direction:column;align-items:center}.notes{width:390px}}
+</style>
+</head>
+<body>
+<div class="toolbar" id="tb"></div>
+<div class="wrap">
+  <div class="phone"><div class="screen" id="scr"></div></div>
+  <div class="notes" id="notes"></div>
+</div>
+<script>
+const LOGO='<svg viewBox="0 0 32 32" width="%s" height="%s"><defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#22c3ff"/><stop offset=".55" stop-color="#7b5cff"/><stop offset="1" stop-color="#ff3d8b"/></linearGradient></defs><g stroke="url(#lg)" stroke-width="3" stroke-linecap="round"><path d="M7 13v6M12 9v14M17 6v20M22 10v12M27 14v4"/></g></svg>';
+const logo=s=>LOGO.replaceAll('%s',s);
+const MIC='<svg viewBox="0 0 24 24" width="%s" height="%s" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3" %f/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const mic=(s,solid)=>MIC.replaceAll('%s',s).replace('%f',solid?'fill="currentColor"':'');
+const STOP='<svg viewBox="0 0 24 24" width="26" height="26"><rect x="6" y="6" width="12" height="12" rx="3" fill="#fff"/></svg>';
+const HISTORY='<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 2.7 7.4M3 5v6h6M12 7v5l3 2"/></svg>';
+const GLOBE='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>';
+const GEAR='<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>';
+const TABI={sess:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',ch:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',set:GEAR.replace('width="19" height="19"','')};
+
+// 示例识别结果：每段话在不同渠道的结果略有差异，用于演示候选对比
+const SEGS=[
+  ['明天下午三点在三楼会议室开会，','明天下午3点在3楼会议室开会。','明天下午三点再三楼会议室开会','明天下午三点，在三楼会议室开会。'],
+  ['记得带上周的数据报表。','记得带上周的数据报表','记得带上州的数据报表。','记得带上上周的数据报表。'],
+  ['会后我把纪要发群里。','会后我把纪要发群里','会后我把记要发群里。','会后我把纪要发到群里。']];
+const LAT=[640,960,1420,820], RATE=[.85,.7,.55,.75];
+
+const init=()=>({
+  scr:'onb', onb:0, sysFrom:null, sysPage:'root', alert:null,
+  perm:{kbd:false,full:false,mic:null},
+  sess:{on:false,t0:0,last:0}, idleMin:10, autoStart:false,
+  ch:[{n:'微信',on:true},{n:'千问',on:true},{n:'讯飞',on:true},{n:'百度',on:false}],
+  multi:true, def:0, lastPick:0,
+  kb:'idle', rows:[], seg:0, tok:0, sel:0, pend:null, recT:0, level:0,
+  notice:null, sheet:false, sysKb:false, justOpened:false, from:false,
+  sim:{net:false,mic:false}, host:'', cpos:0, msgs:[{t:'下午开会的时间地点定了吗？'}], recent:[], tab:'sess', toast:null, tests:{},
+  // 打字：mode 键盘当前是打字还是语音；voiceFrom 记住从打字进入语音，说完回打字
+  mode:'type', voiceFrom:null, openMode:'type', lastMode:'type',
+  lang:'zh', py:'', picks:[], page:'abc', shift:false, more:false, recentSheet:false, cursor:false, clr:null,
+  // 九宫格：layout 中文布局；t9.sel 左列已筛定的拼音，t9.d 还没筛的数字串（' 为分词）；t9p 1 键符号序列当前项
+  layout:'26', t9:{sel:[],d:''}, t9p:null
+});
+let S=init(), timer=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const on=()=>S.ch.map((c,i)=>({...c,i})).filter(c=>c.on);
+const isMulti=()=>S.multi&&on().length>=2;
+const mmss=ms=>{const s=Math.max(0,Math.floor(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+function toast(t){S.toast=t;clearTimeout(toast.h);toast.h=setTimeout(()=>{S.toast=null;render()},1600)}
+
+/* 原型词库，不是生产拼音引擎；候选/分词/频率均仅作交互示意 */
+const PY={
+  nihao:['你好','你号','拟好'],ni:['你','尼','泥','妮','拟','逆','腻','倪','霓'],hao:['好','号','浩','毫','豪','耗','皓','昊'],
+  mingtian:['明天'],ming:['明','名','命','鸣','铭'],tian:['天','田','填','甜','添'],
+  xiawu:['下午'],xia:['下','夏','吓','霞','虾','侠'],wu:['五','无','吴','物','午','舞','误','屋','武'],
+  kaihui:['开会'],kai:['开','凯','楷','恺'],hui:['会','回','灰','汇','挥','慧','惠','辉'],
+  women:['我们'],wo:['我','握','窝','卧'],men:['们','门','闷'],
+  xiexie:['谢谢'],xie:['谢','写','些','鞋','协','携'],shoudao:['收到'],shou:['收','手','首','受','守','瘦'],dao:['到','道','倒','刀','导','岛'],
+  shijian:['时间','实践','事件'],shi:['是','时','事','十','使','市','师','诗','世','式','试','石','史','识','室','视','士','实','食','始','适','示','势','施','湿','失','释','拾'],jian:['见','件','间','建','简','检','坚','箭'],
+  zai:['在','再','载','灾'],san:['三','散','伞'],dian:['点','电','店','典','颠'],
+  huilai:['回来'],lai:['来','赖','莱'],huiyishi:['会议室'],yi:['一','以','已','意','衣','亿','依','宜','易','义','亦','忆','艺','议'],
+  keyi:['可以'],ke:['可','科','课','客','颗','克','刻'],meiwenti:['没问题'],mei:['没','每','美','妹','梅','枚'],wen:['问','文','闻','温','稳'],ti:['题','提','体','替','踢'],
+  zhongwen:['中文'],zhong:['中','种','重','钟','终','众'],pinyin:['拼音'],pin:['拼','品','频','贫'],yin:['音','因','引','银','印','饮','隐'],
+  haode:['好的'],de:['的','得','地'],shuru:['输入'],shu:['书','数','输','树','属','术','熟','舒'],ru:['入','如','乳'],
+  zaijian:['再见'],zaoshang:['早上'],zao:['早','造','枣','澡'],shang:['上','商','伤','赏'],
+  wang:['王','网','往','望','忘'],zhen:['真','镇','针','阵','震'],hen:['很','狠','恨'],dui:['对','队','堆'],bu:['不','部','步','布','补'],le:['了','乐'],
+  ai:['爱','哎','艾','矮'],en:['嗯','恩'],o:['哦','噢'],a:['啊','阿'],ba:['吧','八','把','爸'],ma:['吗','妈','马','嘛'],
+  beijing:['北京'],bei:['北','被','倍','杯'],jing:['京','经','精','景','静'],shanghai:['上海'],hai:['海','还','孩'],
+  pengyou:['朋友'],peng:['朋','鹏','碰','捧'],you:['有','又','由','友','优','游','油'],
+  qing:['请','清','情','轻','青'],fa:['发','法','罚'],gei:['给'],qun:['群','裙'],li:['里','理','李','力','立','利','离'],
+  lv:['绿','旅','吕','律','率'],lve:['略','掠'],mi:['米','密','迷','蜜','秘','觅']
+};
+const SYLL=new Set(('a ai an ang ao ba bai ban bang bao bei ben beng bi bian biao bie bin bing bo bu ca cai can cang cao ce cen ceng cha chai chan chang chao che chen cheng chi chong chou chu chua chuai chuan chuang chui chun chuo ci cong cou cu cuan cui cun cuo da dai dan dang dao de dei den deng di dia dian diao die ding diu dong dou du duan dui dun duo e ei en eng er fa fan fang fei fen feng fo fou fu ga gai gan gang gao ge gei gen geng gong gou gu gua guai guan guang gui gun guo ha hai han hang hao he hei hen heng hong hou hu hua huai huan huang hui hun huo ji jia jian jiang jiao jie jin jing jiong jiu ju juan jue jun ka kai kan kang kao ke ken keng kong kou ku kua kuai kuan kuang kui kun kuo la lai lan lang lao le lei leng li lia lian liang liao lie lin ling liu long lou lu luan lun luo lv lve ma mai man mang mao me mei men meng mi mian miao mie min ming miu mo mou mu na nai nan nang nao ne nei nen neng ni nian niang niao nie nin ning niu nong nou nu nuan nuo nv nve o ou pa pai pan pang pao pei pen peng pi pian piao pie pin ping po pou pu qi qia qian qiang qiao qie qin qing qiong qiu qu quan que qun ran rang rao re ren reng ri rong rou ru ruan rui run ruo sa sai san sang sao se sen seng sha shai shan shang shao she shei shen sheng shi shou shu shua shuai shuan shuang shui shun shuo si song sou su suan sui sun suo ta tai tan tang tao te teng ti tian tiao tie ting tong tou tu tuan tui tun tuo wa wai wan wang wei wen weng wo wu xi xia xian xiang xiao xie xin xing xiong xiu xu xuan xue xun ya yan yang yao ye yi yin ying yo yong you yu yuan yue yun za zai zan zang zao ze zei zen zeng zha zhai zhan zhang zhao zhe zhei zhen zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi zong zou zu zuan zui zun zuo').split(' '));
+function syllables(s){
+  const out=[];let i=0;
+  while(i<s.length){if(s[i]==="'"){i++;continue}let n=Math.min(6,s.length-i);while(n>1&&!SYLL.has(s.slice(i,i+n)))n--;out.push(s.slice(i,i+n));i+=n}
+  return out;
+}
+function candidates(){
+  if(S.t9p!=null)return T9P.map((_,k)=>({t:T9P[(k+S.t9p)%T9P.length]}));
+  if(t9has())return t9Cands();
+  if(!S.py)return [];
+  const flat=S.py.replaceAll("'",''), parts=syllables(S.py),out=[];
+  // 整词优先，然后前半句；选前半句后剩余拼音继续选。
+  for(let n=parts.length;n>0;n--){const k=parts.slice(0,n).join('');if(PY[k]){
+    let use=0,used=0;while(use<S.py.length&&used<k.length){if(S.py[use]!=="'")used++;use++}
+    PY[k].forEach(t=>{if(!out.some(x=>x.t===t))out.push({t,use})});
+  }}
+  if(!out.length&&flat.length>=2){Object.keys(PY).filter(k=>k.startsWith(flat)).slice(0,5).forEach(k=>out.push({t:PY[k][0],use:S.py.length}))}
+  out.push({t:S.py,use:S.py.length,raw:true});return out;
+}
+
+/* 九宫格：同一示例词库按数字匹配，模拟 librime + 雾凇 t9；筛选列真实来源是候选的拼音注释 */
+const K9={2:'abc',3:'def',4:'ghi',5:'jkl',6:'mno',7:'pqrs',8:'tuv',9:'wxyz'},L9={};
+Object.entries(K9).forEach(([d,s])=>[...s].forEach(c=>L9[c]=d));
+const code9=p=>[...p].map(c=>L9[c]).join('');
+const S9={};SYLL.forEach(s=>(S9[code9(s)]||(S9[code9(s)]=[])).push(s));
+const T9P=['@','.','/',':','_','-','#','1'];
+const T9L=['，','。','？','！','、','：','；','…','～','“','”'];
+const T9N=['+','-','*','/','=','%','@',':','(',')','#','~'];
+const pys=k=>(pys.c||(pys.c={}))[k]||(pys.c[k]=syllables(k));
+const t9on=()=>S.layout==='t9'&&S.lang==='zh';
+const t9has=()=>S.t9.d.length>0||S.t9.sel.length>0;
+function m9(parts,sel,d){
+  let j=0;
+  for(;j<sel.length&&j<parts.length;j++){const s=sel[j],p=parts[j];if(!(p===s||(s.length===1&&p[0]===s)))return null}
+  if(parts.length<=sel.length)return {n:parts.length,i:0,ab:0,pt:0,disp:[]};
+  let i=0,ab=0,pt=0;const disp=[];
+  for(;j<parts.length;j++){
+    if(d[i]==="'")i++;
+    if(i>=d.length)return null;
+    const p=parts[j],c=code9(p),rest=d.slice(i);
+    if(rest.startsWith(c)){i+=c.length;disp.push(p)}
+    else if(j===parts.length-1&&!rest.includes("'")&&c.startsWith(rest)){disp.push(p.slice(0,rest.length));i=d.length;pt=1}
+    else if(c[0]===d[i]){i++;ab++;disp.push(p[0])}
+    else return null;
+  }
+  return {n:sel.length,i,ab,pt,disp};
+}
+function t9Guess(d){
+  const out=[];let g=0;
+  while(d&&g++<30){
+    if(d[0]==="'"){d=d.slice(1);continue}
+    let best=null;
+    for(const k in PY){const m=m9(pys(k),[],d);if(m&&(!best||m.i>best.i||(m.i===best.i&&m.pt+m.ab<best.pt+best.ab)))best=m}
+    if(best){out.push(...best.disp);d=d.slice(best.i)}else{out.push(K9[d[0]][0]);d=d.slice(1)}
+  }
+  return out;
+}
+const t9Pre=()=>[...S.t9.sel,...t9Guess(S.t9.d)].join("'");
+function t9Cands(){
+  const {sel,d}=S.t9,out=[];
+  Object.keys(PY).forEach((k,ki)=>{const m=m9(pys(k),sel,d);if(!m||(!m.n&&!m.i))return;
+    const cov=m.n<sel.length?m.n:100+m.i;
+    PY[k].forEach((t,wi)=>out.push({t,n:m.n,i:m.i,py:m.disp,s:[-cov,m.pt,m.ab,ki,wi]}))});
+  out.sort((a,b)=>{for(let x=0;x<5;x++)if(a.s[x]!==b.s[x])return a.s[x]-b.s[x];return 0});
+  const seen=new Set(),res=out.filter(c=>!seen.has(c.t)&&seen.add(c.t));
+  res.push({t:t9Pre().replaceAll("'",''),n:sel.length,i:d.length,raw:true});
+  return res;
+}
+function t9Filters(){
+  const seg=S.t9.d.replace(/^'+/,'').split("'")[0];if(!seg)return [];
+  const out=[],add=p=>{if(p&&!out.includes(p))out.push(p)};
+  t9Cands().forEach(c=>{const p=c.py&&c.py[0];if(!c.raw&&c.n===S.t9.sel.length&&SYLL.has(p)&&seg.startsWith(code9(p)))add(p)});
+  for(let k=Math.min(6,seg.length);k>0;k--)(S9[seg.slice(0,k)]||[]).forEach(add);
+  [...K9[seg[0]]].forEach(add);
+  return out;
+}
+function t9Pick(p){const t=S.t9;t.d=t.d.replace(/^'+/,'').slice(code9(p).length).replace(/^'+/,'');t.sel.push(p);S.more=false}
+function t9Key(n){if(S.t9p!=null)choose(0);S.t9.d+=n;S.more=false}
+function t9One(){
+  if(t9has()){if(S.t9.d&&!S.t9.d.endsWith("'"))S.t9.d+="'";return}
+  if(S.t9p!=null){S.t9p=(S.t9p+1)%T9P.length;return}
+  if(!composing())S.t9p=0;
+}
+const composing=()=>S.py.length>0||S.picks.length>0||t9has()||S.t9p!=null;
+const compRaw=()=>S.picks.map(x=>x.t).join('')+(S.t9p!=null?T9P[S.t9p]:S.py||(t9has()?t9Pre().replaceAll("'",''):''));
+const insert=t=>{const a=[...S.host];S.cpos=Math.min(S.cpos,a.length);a.splice(S.cpos,0,...t);S.host=a.join('');S.cpos+=[...t].length};
+function delBack(){if(composing())return compBack();const a=[...S.host];if(S.cpos>0){a.splice(--S.cpos,1);S.host=a.join('')}}
+function clearComp(){S.py='';S.picks=[];S.t9={sel:[],d:''};S.t9p=null;S.more=false}
+function compBack(){
+  if(S.t9p!=null)S.t9p=null;
+  else if(S.py)S.py=S.py.slice(0,-1);
+  else if(S.t9.d)S.t9.d=S.t9.d.slice(0,-1);
+  else if(S.t9.sel.length)S.t9.d=code9(S.t9.sel.pop());
+  else if(S.picks.length){const p=S.picks.pop();if(p.t9)S.t9={sel:[...p.t9.sel],d:p.t9.d};else S.py=p.py}
+  if(!composing())S.more=false;
+}
+function choose(i){const c=candidates()[i];if(!c)return;
+  if(S.t9p!=null){insert(c.t);clearComp();return}
+  if(t9has()){const t=S.t9;
+    S.picks.push({t:c.t,t9:{sel:t.sel.slice(0,c.n),d:c.n<t.sel.length?'':t.d.slice(0,c.i)}});
+    if(c.n<t.sel.length)t.sel=t.sel.slice(c.n);else{t.sel=[];t.d=t.d.slice(c.i).replace(/^'+/,'')}
+    if(!t9has()){insert(S.picks.map(x=>x.t).join(''));clearComp()}
+    return;
+  }
+  S.picks.push({t:c.t,py:S.py.slice(0,c.use)});S.py=S.py.slice(c.use).replace(/^'+/,'');
+  if(!S.py){insert(S.picks.map(x=>x.t).join(''));clearComp()}
+}
+function confirmAll(){let guard=0;while((S.py||t9has()||S.t9p!=null)&&guard++<40)choose(0);if(S.picks.length){insert(S.picks.map(x=>x.t).join(''));clearComp()}}
+function typeLetter(a){if(S.lang==='zh'){S.py+=a.toLowerCase();S.more=false}else{insert(S.shift?a.toUpperCase():a);S.shift=false}}
+function space(){if(S.mode==='type'&&composing())choose(0);else insert(' ')}
+function punct(a){if(composing())confirmAll();insert(a)}
+function enter(){if(composing()){insert(compRaw());clearComp()}else insert('\n')}
+function setMode(m){S.mode=m;S.lastMode=m}
+function openKeyboard(){clearComp();S.page='abc';setMode(S.openMode==='last'?S.lastMode:S.openMode);S.voiceFrom=null;S.sysKb=false}
+function typeMic(){
+  if(!S.perm.full){S.notice={kind:'err',text:'打字可正常使用。语音需要「允许完全访问」。',act:['去设置','gosys']};return}
+  S.voiceFrom='type';setMode('voice');tapMic();
+}
+function backTyping(){if(S.kb!=='idle'){toast('先结束或关闭这一句');return}S.voiceFrom=null;setMode('type')}
+function clearInput(){
+  if(composing()){clearComp();toast('已清除拼音');return}
+  if(!S.perm.full){toast('清空需完全访问，以便保存到「最近」');return}
+  if(S.host){S.recent.unshift({text:S.host,ch:'已清空',at:new Date().toTimeString().slice(0,5)});S.recent=S.recent.slice(0,20)}
+  S.host='';S.cpos=0;toast('已清空 · 可在「最近」找回');
+}
+
+/* ---------- 听写状态机（沿用桌面规则） ---------- */
+const target=r=>SEGS[S.seg%SEGS.length][r.ci%4];
+function startNew(){
+  const chs=isMulti()?on():[on().find(c=>c.i===S.def)||on()[0]];
+  S.rows=chs.map(c=>({ci:c.i,done:'',cur:'',st:'listen',ms:null}));
+  S.seg=0;S.pend=null;
+  const k=S.rows.findIndex(r=>r.ci===S.lastPick);S.sel=k<0?0:k;
+  rec();
+}
+function rec(){
+  S.kb='rec';S.recT=Date.now();S.tok++;S.sess.last=Date.now();S.notice=null;
+  clearInterval(timer);
+  timer=setInterval(()=>{
+    for(const r of S.rows) if(r.st==='listen'){const t=target(r);if(r.cur.length<t.length&&Math.random()<RATE[r.ci%4])r.cur=t.slice(0,r.cur.length+1)}
+    S.level=Math.random();if(!hold)render();
+  },120);
+}
+function stop(){
+  clearInterval(timer);S.kb='fin';const tok=S.tok;
+  S.rows.forEach(r=>{if(r.st==='listen'){r.st='wait';fin(r,tok)}});
+}
+function fin(r,tok){
+  const lat=LAT[r.ci%4]+Math.round(Math.random()*200);
+  setTimeout(()=>{
+    if(tok!==S.tok||S.kb==='idle')return;
+    const bad=S.sim.net&&(S.rows.length===1||r.ci===1);
+    if(bad){r.st='error';r.cur=''}else{r.cur=target(r);r.st='final'}
+    r.ms=lat;settle();render();
+  },lat);
+}
+function settle(){
+  if(S.kb==='rec')return;
+  const all=S.rows.every(r=>r.st==='final'||r.st==='error');
+  if(!isMulti()){
+    const r=S.rows[0];
+    if(r.st==='final')return commit(r);
+    if(r.st==='error')S.kb='err';
+    return;
+  }
+  const s=S.rows[S.sel];
+  if(s&&s.st==='error'){const k=S.rows.findIndex(x=>x.st==='final');if(k>=0)S.sel=k;
+    if(S.pend!=null){S.pend=null;S.notice={kind:'err',text:'你选的渠道识别失败，已改选其他渠道，请再点一次确认。'}}}
+  if(S.pend!=null&&S.rows[S.pend]&&S.rows[S.pend].st==='final')return commit(S.rows[S.pend]);
+  if(all)S.kb='done';
+}
+function cont(){ // 识别中或候选框打开时：接着说，拼在原句后
+  S.tok++;
+  for(const r of S.rows){r.done+=(r.st==='error'?'':target(r));r.cur='';r.st='listen';r.ms=null}
+  S.seg++;S.pend=null;rec();
+}
+function commit(r){
+  const text=r.done+r.cur;
+  insert(text);S.lastPick=r.ci;S.recent.unshift({text,ch:S.ch[r.ci].n,at:new Date().toTimeString().slice(0,5)});S.recent=S.recent.slice(0,20);
+  reset();toast('已上屏 · '+S.ch[r.ci].n);
+}
+function reset(){clearInterval(timer);S.tok++;S.kb='idle';S.rows=[];S.pend=null;S.seg=0;if(S.voiceFrom==='type'){setMode('type');S.voiceFrom=null}}
+function retry(){const tok=S.tok;S.rows.forEach(r=>{if(r.st==='error'){r.st='wait';fin(r,tok)}});S.kb='fin';S.notice=null}
+function tapMic(){
+  if(!S.perm.full){S.notice={kind:'err',text:'未开启「允许完全访问」，键盘无法与 VoiceKey 主 App 通信。',act:['去设置','gosys']};return}
+  if(!S.sess.on)return openSession();
+  S.sess.last=Date.now();
+  if(S.kb==='idle'){if(S.sim.mic){S.notice={kind:'err',text:'麦克风被占用：可能正在通话或其他 App 在录音，结束后再试。'};return}startNew()}
+  else if(S.kb==='rec')stop();
+  else if(S.kb==='fin'||S.kb==='done')cont();
+  else if(S.kb==='err'){const from=S.voiceFrom;reset();S.voiceFrom=from;setMode('voice');startNew()}
+}
+function pick(i){
+  S.sel=i;const r=S.rows[i];
+  if(r.st==='error'){S.notice={kind:'err',text:S.ch[r.ci].n+' 没有结果，请选其他渠道或重试。'};return}
+  if(S.kb==='rec')stop();
+  if(r.st==='final'&&S.kb!=='rec')return commit(r);
+  S.pend=i;toast('定稿后上屏');
+}
+function openSession(){
+  S.scr='switch';render();
+  setTimeout(()=>{S.scr='app';S.tab='sess';S.from=true;
+    if(S.perm.mic){S.sess={on:true,t0:Date.now(),last:Date.now()};S.justOpened=true}
+    render()},700);
+}
+
+/* ---------- 视图 ---------- */
+function statusBar(){
+  const crumb=S.scr==='app'&&S.from?'<button class="crumb" data-act="crumb">◀ 聊天</button>':S.scr==='sys'?`<button class="crumb" data-act="sysback">◀ ${S.sysFrom==='host'?'聊天':'VoiceKey'}</button>`:'';
+  const live=S.sess.on&&S.scr!=='app';
+  const isl=live?`<div class="island live"><span class="vk ${S.kb==='rec'?'rec':''}"><i></i>VoiceKey</span><span>${S.kb==='rec'?'聆听中 '+mmss(Date.now()-S.recT):'会话中'}</span></div>`:'<div class="island"></div>';
+  return `<div class="sb"><div class="l">${crumb||'9:41'}</div>${isl}<div class="r">${S.kb==='rec'?'<span class="odot" title="系统录音指示"></span>':''}<span>5G</span><span class="batt"></span></div></div>`;
+}
+function vOnb(){
+  const st=S.onb,dots=`<div class="dots">${[0,1,2,3,4].map(i=>`<i class="${i===st?'on':''}"></i>`).join('')}</div>`;
+  let h='';
+  if(st===0)h=`<div class="appicon">${logo(56)}</div><h1 style="text-align:center">想说就说<br>想打就打</h1><p style="text-align:center">中文全拼 26 键或九宫格打字，点左上角麦克风就能说。勾选多个渠道时，可以在键盘里对比结果再选一条。</p><div class="fill"></div><div class="acts"><button class="btn" data-act="onb" data-a="1">开始设置（约 1 分钟）</button></div>`;
+  if(st===1){const k=S.perm.kbd,f=S.perm.full;
+    h=`<h1>添加 VoiceKey 键盘</h1><p>在系统设置里打开下面两项，回来后这里会自动更新。</p>
+    <div class="step"><span class="n ${k?'ok':''}">${k?'✓':1}</span><div>添加键盘<small>设置 › VoiceKey › 键盘 › 打开「VoiceKey」</small></div></div>
+    <div class="step"><span class="n ${f?'ok':''}">${f?'✓':2}</span><div>允许完全访问<small>用于语音和最近记录；没开启也能本地打字。普通打字不写入最近；主动清空的文字会保存在本机，方便恢复。</small></div></div>
+    <div class="fill"></div><div class="acts">${k&&f?'<button class="btn" data-act="onb" data-a="2">下一步</button>':'<button class="btn" data-act="gosys" data-a="onb">前往设置</button>'}<button class="lnk" data-act="onb" data-a="2">稍后再说</button></div>`}
+  if(st===2){const m=S.perm.mic;
+    h=`<h1>允许使用麦克风</h1><p>iOS 不允许键盘直接录音，所以录音在 VoiceKey 主 App 里进行：在键盘上点麦克风时，主 App 在后台收音并把文字送回键盘。</p>
+    <div class="step"><span class="n ${m===true?'ok':''}">${m===true?'✓':'🎙'}</span><div>麦克风 ${m===true?'<span class="pill ok">已允许</span>':m===false?'<span class="pill bad">已拒绝</span>':'<span class="pill">未请求</span>'}<small>${m===false?'已拒绝过，只能到系统设置里打开。':'只在你点麦克风说话时收音；会话期间顶部会显示录音指示。'}</small></div></div>
+    <div class="fill"></div><div class="acts">${m===true?'<button class="btn" data-act="onb" data-a="3">下一步</button>':m===false?'<button class="btn" data-act="gosys" data-a="onb">去设置开启</button>':'<button class="btn" data-act="askmic">允许麦克风</button>'}</div>`}
+  if(st===3)h=`<h1>选择识别渠道</h1><p>勾选 2 个以上会同时识别，在键盘里看着各渠道的结果选一条上屏。名字可以改。</p>${chList(true)}<div class="fill"></div><div class="acts"><button class="btn" data-act="onb" data-a="4" ${on().length?'':'disabled'}>下一步</button></div>`;
+  if(st===4)h=`<h1>怎么用</h1>
+    <div class="step"><span class="n">1</span><div>在任意 App 点输入框，按住 🌐 选「VoiceKey」</div></div>
+    <div class="step"><span class="n">2</span><div>打字，或点左上角麦克风<small>默认中文 26 键全拼，键盘顶部「26｜九键」可切九宫格。空心麦克风会先跳到 VoiceKey 开会话，再点左上角「◀」回到原 App。</small></div></div>
+    <div class="step"><span class="n">3</span><div>说完上屏，回到打字<small>会话就绪时点麦克风直接开始说，再点结束。多渠道时选一条上屏；⌨ 返回打字。</small></div></div>
+    <div class="fill"></div><div class="acts"><button class="btn" data-act="try">去试一试</button><button class="lnk" data-act="onbdone">完成</button></div>`;
+  return `<div class="onb">${dots}${h}</div>`;
+}
+function chList(compact){
+  return `<div class="grp" style="margin-top:16px">${S.ch.map((c,i)=>`<div class="cell"><div class="t"><span class="cname">${esc(c.n)}<button class="edit" data-act="rename" data-a="${i}">✎</button></span>${compact?'':`<small>云端识别${S.tests[i]?' · 测试 '+S.tests[i]:''}</small>`}</div>${compact?'':`<button class="lnk" data-act="test" data-a="${i}">测试</button>`}<button class="sw ${c.on?'on':''}" data-act="chtog" data-a="${i}"></button></div>`).join('')}</div>`;
+}
+function vSys(){
+  const back=`<div class="navb"><span class="lnk">‹ 设置</span><b>${S.sysPage==='kb'?'键盘':'VoiceKey'}</b><span style="width:50px"></span></div>`;
+  let h;
+  if(S.sysPage==='kb')h=`<div class="grp"><div class="cell"><div class="t">VoiceKey</div><button class="sw ${S.perm.kbd?'on':''}" data-act="systog" data-a="kbd"></button></div><div class="cell"><div class="t">允许完全访问</div><button class="sw ${S.perm.full?'on':''}" data-act="systog" data-a="full" ${S.perm.kbd?'':'disabled'}></button></div></div><div class="foot">（模拟系统设置页）</div>`;
+  else h=`<div class="sec">允许“VoiceKey”访问</div><div class="grp"><div class="cell"><div class="t">麦克风</div><button class="sw ${S.perm.mic?'on':''}" data-act="systog" data-a="mic" ${S.perm.mic==null?'disabled':''}></button></div><div class="cell" data-act="kbpage" style="cursor:pointer"><div class="t">键盘</div><span class="v">${S.perm.kbd?(S.perm.full?'已开启':'未开完全访问'):'关闭'}</span><span class="chev">›</span></div></div><div class="foot">（模拟系统设置页）${S.perm.mic==null?'麦克风开关在 App 首次请求后才会出现。':''}</div>`;
+  return `${back}<div class="scroll">${h}</div>`;
+}
+function vHost(){
+  const bubs=S.msgs.map(m=>`<div class="bub ${m.me?'me':''}">${esc(m.t)}</div>`).join('');
+  const chars=[...S.host],fld=S.host?esc(chars.slice(0,S.cpos).join(''))+'<i class="caret"></i>'+esc(chars.slice(S.cpos).join('')):'<i class="caret"></i><span class="ph">输入消息</span>';
+  return `<div class="host"><div class="hh"><span class="bk">‹</span><b>小林</b></div><div class="msgs">${bubs}</div><div class="inbar"><div class="field">${fld}</div><button class="send" data-act="send">↑</button></div>${S.sysKb?vSysKb():vKb()}</div>`;
+}
+function vSysKb(){
+  const r=s=>`<div class="rw">${[...s].map(c=>`<span>${c}</span>`).join('')}</div>`;
+  return `<div class="kb"><div class="syskb"><div class="sysmark">（示意：你原来的输入法）</div>${r('qwertyuiop')}${r('asdfghjkl')}${r('zxcvbnm')}</div><div class="krow"><button class="key f" data-act="globe">${GLOBE}</button><button class="key w">空格</button><button class="key f">换行</button></div></div>`;
+}
+function wave(){const n=22;return `<div class="wave">${Array.from({length:n},(_,i)=>{const h=S.kb==='rec'?4+Math.abs(Math.sin(i*1.3+Date.now()/160))*16*(.4+S.level*.6):4;return `<i style="height:${h}px"></i>`}).join('')}</div>`}
+function typeKeys(note){
+  if(t9on()&&S.page!=='sym')return t9Keys(note);
+  const key=(label,act,a,cls='',w)=>`<button class="tk ${cls}" data-act="${act}" ${a!=null?`data-a="${esc(a)}"`:''} ${w?`style="width:${w}px"`:''}>${label}</button>`;
+  const letters=s=>[...s].map(c=>key(S.shift&&S.lang==='en'?c.toUpperCase():c,'letter',c)).join('');
+  const bs=`<button class="tk f" style="width:42px;margin-left:10px" data-hold="bs" data-act="bs" aria-label="删除，按住连删，上滑清空">⌫</button>`;
+  let rows;
+  if(S.page==='abc')rows=`<div class="tr">${letters('qwertyuiop')}</div><div class="tr">${letters('asdfghjkl')}</div><div class="tr">${S.lang==='zh'?key("'",'letter',"'",'f',42):key(S.shift?'⬆':'⇧','shift',null,'f shift '+(S.shift?'on':''),42)}<span style="width:5px"></span>${letters('zxcvbnm')}${bs}</div>`;
+  else{
+    const cn=S.lang==='zh';
+    const num=[...'1234567890'],row2=cn?['，','。','？','！','、','：','；','（','）','@']:['-','/',':',';','(',')','$','&','@','"'];
+    const sym1=['[',']','{','}','#','%','^','*','+','='],sym2=['_','\\','|','~','<','>','€','£','¥','•'];
+    const row=s=>`<div class="tr">${s.map(c=>key(esc(c),'punct',c)).join('')}</div>`;
+    rows=row(S.page==='num'?num:sym1)+row(S.page==='num'?row2:sym2)+`<div class="tr">${key(S.page==='num'?'#+=':'123','page',S.page==='num'?'sym':'num','f',42)}<span style="width:5px"></span>${(cn?['…','—','《','》','“','”','·']:['. ',',','?','!','\'','-','…']).map(c=>key(esc(c),'punct',c)).join('')}${bs}</div>`;
+  }
+  const end=composing()?'确认':'换行';
+  const bottom=`<div class="tr">${key(S.page==='abc'?'123':'ABC','page',S.page==='abc'?'num':'abc','f',40)}${key(GLOBE,'globe',null,'f',31)}${key(S.lang==='zh'?'，':',','punct',S.lang==='zh'?'，':',','f',27)}<button class="tk sp" data-hold="space" data-act="space" aria-label="${composing()?'选择首选词':'空格，长按移动光标'}">${S.cursor?'移光标':composing()?'首选词':'空格'}</button>${key(S.lang==='zh'?'。':'.','punct',S.lang==='zh'?'。':'.','f',27)}${key(`<span class="lng">${S.lang==='zh'?'中<i>/英</i>':'<i>中/</i>英'}</span>`,'lang',null,'f',40)}${key(end,'enter',null,'f ent',48)}</div>`;
+  return `<div class="tkeys">${note}${rows}${bottom}</div>`;
+}
+function t9Keys(note){
+  const k=(label,act,a,cls='',w)=>`<button class="tk ${cls}" data-act="${act}" ${a!=null?`data-a="${esc(a)}"`:''} ${w?`style="width:${w}px;flex:none"`:''}>${label}</button>`;
+  const dk=(n,s)=>`<span class="d"><small>${n}</small>${s}</span>`;
+  const bs=`<button class="tk f" data-hold="bs" data-act="bs" aria-label="删除，按住连删，上滑清空">⌫</button>`;
+  const sp=`<button class="tk sp" data-hold="space" data-act="space" aria-label="${composing()?'选择首选词':'空格，长按移动光标'}">${S.cursor?'移光标':composing()?'首选词':'空格'}</button>`;
+  const ent=k(composing()?'确认':'换行','enter',null,'f ent');
+  const list=a=>a.map(c=>`<button data-act="punct" data-a="${esc(c)}">${esc(c)}</button>`).join('');
+  let h;
+  if(S.page==='num'){
+    const n=s=>[...s].map(c=>k(c,'punct',c)).join('');
+    h=`<div class="fl">${list(T9N)}</div>${n('123')}${bs}${n('456')}${k('.','punct','.','f')}${n('789')}${ent}
+    <div class="bot">${k('返回','page','abc','f',50)}${k(GLOBE,'globe',null,'f',31)}${k('符','page','sym','f',44)}${k('0','punct','0','sp')}${sp}</div>`;
+  }else{
+    const fs=t9has()?t9Filters():null;
+    const col=fs?(fs.length?fs.map(p=>`<button data-act="t9f" data-a="${p}">${p}</button>`).join(''):'<span class="emp">—</span>'):list(T9L);
+    const n=s=>[...s].map(c=>k(dk(c,K9[c].toUpperCase()),'t9',c)).join('');
+    h=`<div class="fl ${fs?'py':''}" aria-label="${fs?'拼音筛选':'常用标点'}">${col}</div>${k(dk(1,t9has()?'分词':'@/.'),'t9one')}${n('23')}${bs}${n('456')}${k('0','punct','0','f')}${n('789')}${ent}
+    <div class="bot">${k('123','page','num','f',50)}${k(GLOBE,'globe',null,'f',31)}${sp}${k('<span class="lng">中<i>/英</i></span>','lang',null,'f',50)}</div>`;
+  }
+  return `<div class="tkeys">${note}<div class="t9">${h}</div></div>`;
+}
+const preedit=()=>S.t9p!=null?esc(T9P[S.t9p]):t9has()?(S.t9.sel.length?`<u>${esc(S.t9.sel.join("'"))}</u>${S.t9.d?"'":''}`:'')+esc(t9Guess(S.t9.d).join("'")):esc(syllables(S.py).join("'"));
+function compBar(){const cs=candidates();return `<div class="kt comp"><div class="pyl"><b>${esc(S.picks.map(x=>x.t).join(''))}</b>${preedit()}<i class="caret" style="height:12px;vertical-align:-2px"></i></div><div class="cands">${cs.slice(0,8).map((c,i)=>`<button class="cd ${i===0?'first':''}" data-act="cand" data-a="${i}">${esc(c.t)}</button>`).join('')}</div><button class="more" data-act="more" aria-label="${S.more?'收起':'展开'}更多候选">${S.more?'⌃':'⌄'}</button></div>`}
+function allCandidates(){return `<div class="cgrid"><div class="all">${candidates().map((c,i)=>`<button class="${i===0?'first':''} ${c.raw?'raw':''}" data-act="cand" data-a="${i}">${esc(c.t)}</button>`).join('')}</div><div class="side"><button class="tk f" data-act="more">收起</button><button class="tk f" data-act="retype">重输</button><button class="tk f" data-hold="bs" data-act="bs">⌫</button></div></div>`}
+function vKb(){
+  const multi=isMulti(),chs=on();
+  const chip=multi?`<button class="chip" data-act="sheet"><i class="${S.sess.on?'on':''}"></i>多渠道 · ${chs.length}▾</button>`:`<button class="chip" data-act="sheet"><i class="${S.sess.on?'on':''}"></i>${esc((chs.find(c=>c.i===S.def)||chs[0]||{n:'无渠道'}).n)} ▾</button>`;
+  const stt=S.mode==='type'?(S.perm.full?(S.sess.on?'语音就绪':'点麦克风说话'):'本地打字'):!S.perm.full?'未开完全访问':!S.sess.on?'未开启会话':S.kb==='rec'?'聆听中 '+mmss(Date.now()-S.recT):S.kb==='fin'?'定稿中':S.kb==='done'?'选一条上屏':S.kb==='err'?'识别失败':'会话中';
+  let body='',bottom='';
+  const note=S.notice?`<div class="note ${S.notice.kind}"><span>${esc(S.notice.text)}</span>${S.notice.act?`<button class="a" data-act="${S.notice.act[1]}" data-a="host">${S.notice.act[0]}</button>`:''}<button class="x" data-act="nx">×</button></div>`:'';
+  const keysL=`<button class="key f" data-act="globe" title="切回原输入法">${GLOBE}</button>`;
+  const keysR=`<button class="key f" data-hold="bs" data-act="bs" aria-label="删除，按住连删，上滑清空">⌫</button>`;
+  if(multi&&S.kb!=='idle'){
+    const fz=S.rows.filter(r=>r.st==='final').length,allBad=S.rows.every(r=>r.st==='error');
+    const hs=S.kb==='rec'?'<span class="rd"></span>聆听中 · 点按结束':S.kb==='fin'?`<span class="spin"></span>定稿中 ${fz}/${S.rows.length}`:allBad?'<span style="color:var(--err)">全部失败</span> <button class="lnk" data-act="retry" style="font-size:12px">重试</button>':'<span style="color:var(--ok)">● 全部完成</span> · 点一条上屏';
+    body=`<div class="pick"><div class="ph2">${hs}<span class="sp"></span>${S.kb==='rec'?'<span style="color:var(--fg3)">可提前选</span>':''}<button class="cl" data-act="close" title="关闭候选（丢弃本句）">✕</button></div><div class="prs">${S.rows.map((r,i)=>{
+      const t=r.done+r.cur,cls=r.st==='error'?'bad':t?'':'m';
+      const txt=r.st==='error'?'识别失败（网络错误）':t?esc(t)+(r.st==='listen'?'<i class="caret" style="height:15px"></i>':''):'…';
+      return `<div class="pr ${i===S.sel?'sel':''}" data-act="pick" data-a="${i}"><span class="nm"><span class="sd ${r.st}"></span>${esc(S.ch[r.ci].n)}</span><div class="tx ${cls}">${txt}${S.pend===i?'<span class="pend">定稿后上屏</span>':''}</div><span class="ms">${r.st==='wait'?'<span class="spin"></span>':r.ms?(r.ms/1000).toFixed(2)+'s':''}</span></div>`}).join('')}</div></div>`;
+    const lb=S.kb==='rec'?['■ 点按结束','r']:S.kb==='fin'?['🎙 接着说','f2']:['🎙 继续听','f2'];
+    bottom=`<div class="krow">${keysL}<button class="key act ${lb[1]}" data-act="mic">${lb[0]}</button>${keysR}</div>`;
+  }else{
+    let center;
+    if(S.kb==='idle'){
+      const ok=S.perm.full&&S.sess.on;
+      center=`<button class="mic ${ok?'':'outline'} ${S.perm.full?'':'off'}" data-act="mic">${mic(32,ok)}</button><div class="mlbl">${!S.perm.full?'需要完全访问':S.sess.on?'点按说话':'点按开启会话'}</div><div class="msub">${!S.perm.full?'':S.sess.on?'再点一下结束 · 识别中再点＝接着说':'会先跳到 VoiceKey 开启会话，再点左上角「◀ 聊天」回来'}</div>`;
+    }else{
+      const r=S.rows[0],t=r.done+r.cur;
+      const box=S.kb==='err'?`<div class="live-box bad">识别失败：网络不可用。录音已保留。<div style="margin-top:6px;display:flex;gap:8px"><button class="a lnk" data-act="retry">重试</button><button class="lnk" data-act="close" style="color:var(--fg2)">丢弃</button></div></div>`:`<div class="live-box">${t?`<span class="${r.st==='listen'?'':'d'}">${esc(t)}</span>`:'<span class="d">请说话…</span>'}${S.kb==='rec'?'<i class="caret"></i>':''}</div>`;
+      const m=S.kb==='rec'?`<button class="mic recn" data-act="mic" style="width:62px;height:62px">${STOP}</button><div class="mlbl">点按结束</div>`:S.kb==='fin'?`<button class="mic fin" data-act="mic" style="width:62px;height:62px">${mic(26,true)}</button><div class="mlbl"><span class="spin"></span> 定稿中 · 点按接着说</div>`:`<button class="mic fin" data-act="mic" style="width:62px;height:62px">${mic(26,true)}</button><div class="mlbl">点按重新说</div>`;
+      center=`${box}${S.kb==='rec'?wave():''}${m}`;
+    }
+    body=center;
+    bottom=`<div class="krow">${keysL}<button class="key f" data-act="key" data-a="，">，</button><button class="key w sp" data-hold="space" data-act="space">${S.cursor?'移光标':'空格'}</button><button class="key f" data-act="key" data-a="。">。</button>${keysR}<button class="key f" data-act="key" data-a="nl">换行</button></div>`;
+  }
+  const sheet=S.sheet?`<div class="sheet"><div class="hd"><span>识别渠道</span><button class="lnk" data-act="sheet">完成</button></div><div class="grp"><div class="cell"><div class="t">多渠道候选<small>同时识别，选一条上屏</small></div><button class="sw ${S.multi?'on':''}" data-act="multi" ${chs.length<2?'disabled':''}></button></div></div><div class="sec" style="margin-top:10px">${S.multi&&chs.length>=2?'参与识别（在主 App 里增减）':'单渠道时使用'}</div><div class="grp">${chs.map(c=>`<div class="cell" ${S.multi&&chs.length>=2?'':`data-act="def" data-a="${c.i}" style="cursor:pointer"`}><div class="t">${esc(c.n)}</div>${S.multi&&chs.length>=2?'<span class="chk">✓</span>':c.i===S.def?'<span class="chk">✓</span>':''}</div>`).join('')}</div></div>`:'';
+  const ok=S.perm.full&&S.sess.on;
+  const toggle=S.mode==='type'?`<button class="tmic ${ok?'':'outline'} ${S.perm.full?'':'off'}" data-act="typemic" title="${ok?'点按说话':'点按开启语音会话'}" aria-label="${ok?'点按说话':'点按开启语音会话'}">${mic(19,ok)}</button>`:'<button class="tkb" data-act="typing" title="返回打字" aria-label="返回打字">⌨</button>';
+  const top=S.mode==='type'&&composing()?compBar():`<div class="kt">${toggle}${chip}<span class="st">${stt}</span>${S.mode==='type'&&S.lang==='zh'?`<span class="lay" aria-label="中文键盘布局">${[['26','26'],['t9','九键']].map(([v,l])=>`<button class="${S.layout===v?'on':''}" data-act="layout" data-a="${v}">${l}</button>`).join('')}</span>`:''}<button class="gear" data-act="history" title="最近上屏" aria-label="最近上屏">${HISTORY}</button><button class="gear" data-act="openapp" title="打开 VoiceKey">${GEAR}</button></div>`;
+  const history=S.recentSheet?`<div class="sheet"><div class="hd"><span>最近上屏</span><button class="lnk" data-act="history">完成</button></div>${S.recent.length?'<div class="foot" style="margin:0 4px 8px">点一条插入到光标处</div>':''}<div style="overflow:auto"><div class="grp">${S.recent.length?S.recent.map((r,i)=>`<div class="cell" data-act="restore" data-a="${i}" style="cursor:pointer"><div class="t">${esc(r.text)}<small>${r.at} · ${esc(r.ch)}</small></div><span class="v">插入</span></div>`).join(''):'<div class="cell"><div class="t" style="color:var(--fg3)">还没有记录。语音结果和清空的文字可在这里找回。</div></div>'}</div></div></div>`:'';
+  const tip=S.clr?`<div class="ctip ${S.clr.armed?'armed':''}" style="left:${S.clr.x}px;top:${S.clr.y}px">${S.clr.armed?(composing()?'松手清拼音':'松手清空'):'上滑清空'}</div>`:'';
+  return `<div class="kb ${S.cursor?'cur':''}">${top}${S.mode==='type'?(S.more?allCandidates():typeKeys(note)):`<div class="kbody">${note}${body}</div>${bottom}`}${sheet}${history}${tip}</div>`;
+}
+function vApp(){
+  let h='';
+  if(S.tab==='sess'){
+    const s=S.sess,idle=S.idleMin?`无操作 ${S.idleMin} 分钟后自动结束`:'不会自动结束，需手动结束';
+    h=`<div class="lt">会话</div>`;
+    if(S.justOpened&&S.from)h+=`<div class="banner">✓<span>会话已开启。点左上角<b>「◀ 聊天」</b>回到刚才的输入框，再点麦克风说话。</span></div>`;
+    if(S.perm.mic!==true)h+=`<div class="banner err">!<span>需要麦克风权限才能开启会话。<button class="lnk" data-act="${S.perm.mic===false?'gosys':'askmic'}" data-a="app">${S.perm.mic===false?'去设置开启':'允许麦克风'}</button></span></div>`;
+    h+=`<div class="hero ${s.on?'on':''}"><div class="top"><span class="ic">${mic(24,s.on)}</span><div><b>${s.on?'会话中':'未开启'}</b><small>${s.on?`已保持 ${mmss(Date.now()-s.t0)} · ${idle}`:'在键盘上点麦克风会自动开启'}</small></div></div>${s.on?'<button class="btn sec2" data-act="sessoff" style="background:var(--line)">结束会话</button>':`<button class="btn" data-act="sesson" ${S.perm.mic?'':'disabled'}>开启会话</button>`}</div>
+    <div class="sec">会话</div><div class="grp"><div class="cell" style="flex-direction:column;align-items:stretch;gap:8px"><div class="t">无操作自动结束</div><div class="seg2">${[[5,'5 分钟'],[10,'10 分钟'],[30,'30 分钟'],[0,'不自动']].map(([v,l])=>`<button class="${S.idleMin===v?'on':''}" data-act="idle" data-a="${v}">${l}</button>`).join('')}</div></div>
+    <div class="cell"><div class="t">回到原 App 后直接开始听<span class="tag">待定</span><small>关闭时回来后需再点一次麦克风</small></div><button class="sw ${S.autoStart?'on':''}" data-act="auto"></button></div></div>
+    <div class="foot">会话期间 VoiceKey 在后台保持收音能力，顶部显示会话状态；快结束时键盘里会提醒。</div>
+    <div class="sec">最近上屏</div><div class="grp">${S.recent.length?S.recent.map((r,i)=>`<div class="cell" data-act="copy" data-a="${i}" style="cursor:pointer"><div class="t">${esc(r.text)}<small>${r.at} · ${esc(r.ch)}</small></div><span class="v">复制</span></div>`).join(''):'<div class="cell"><div class="t" style="color:var(--fg3)">还没有记录。上屏失败或没插进去时，可以在这里找回。</div></div>'}</div>`;
+  }
+  if(S.tab==='ch'){
+    const chs=on();
+    h=`<div class="lt">渠道</div><div class="foot" style="margin:0 6px">默认显示真实渠道名：微信、千问、讯飞、百度。可自定义显示名；不使用品牌 logo。</div>${chList(false)}
+    <div class="sec">多渠道</div><div class="grp"><div class="cell"><div class="t">多渠道候选<small>${chs.length<2?'至少打开 2 个渠道':'同时识别，在键盘里选一条上屏；默认选中上次用的'}</small></div><button class="sw ${S.multi&&chs.length>=2?'on':''}" data-act="multi" ${chs.length<2?'disabled':''}></button></div></div>
+    <div class="sec">单渠道时使用</div><div class="grp">${chs.map(c=>`<div class="cell" data-act="def" data-a="${c.i}" style="cursor:pointer"><div class="t">${esc(c.n)}</div><span class="radio ${c.i===S.def?'on':''}"></span></div>`).join('')||'<div class="cell"><div class="t" style="color:var(--err)">没有可用渠道</div></div>'}</div>`;
+  }
+  if(S.tab==='set'){
+    const p=S.perm,row=(n,ok,act,sub)=>`<div class="cell"><div class="t">${n}<small>${sub}</small></div>${ok?'<span class="pill ok">已开启</span>':`<button class="lnk" data-act="${act}" data-a="app">去开启</button>`}</div>`;
+    h=`<div class="lt">设置</div><div class="sec">权限</div><div class="grp">${row('VoiceKey 键盘',p.kbd,'gosys','设置 › VoiceKey › 键盘')}${row('允许完全访问',p.full,'gosys','键盘与主 App 通信、联网识别')}${row('麦克风',p.mic===true,p.mic===false?'gosys':'askmic','只在说话时收音')}</div>
+    <div class="sec">键盘</div><div class="grp"><div class="cell" style="flex-direction:column;align-items:stretch;gap:8px"><div class="t">中文键盘<small>键盘顶部「26｜九键」随时切，切过就记住（待定）</small></div><div class="seg2">${[['26','26 键全拼'],['t9','九宫格']].map(([v,l])=>`<button class="${S.layout===v?'on':''}" data-act="layout" data-a="${v}">${l}</button>`).join('')}</div></div><div class="cell" style="flex-direction:column;align-items:stretch;gap:8px"><div class="t">打开键盘时<span class="tag">待定</span></div><div class="seg2">${[['type','打字（建议）'],['voice','语音'],['last','上次用的']].map(([v,l])=>`<button class="${S.openMode===v?'on':''}" data-act="openmode" data-a="${v}">${l}</button>`).join('')}</div></div></div><div class="foot">原型默认打字。工具条「重开键盘」可验证。只切换面板，不自动录音；从打字发起语音，上屏后回打字。</div>
+    <div class="sec">通用</div><div class="grp"><div class="cell"><div class="t">重新查看引导</div><button class="lnk" data-act="reonb">打开</button></div></div>
+    <div class="sec">关于</div><div class="grp"><div class="cell"><div class="t">版本</div><span class="v">0.1.0（TestFlight 内部测试）</span></div></div>`;
+  }
+  const tabs=[['sess','会话'],['ch','渠道'],['set','设置']].map(([k,l])=>`<button class="${S.tab===k?'on':''}" data-act="tab" data-a="${k}">${TABI[k]}${l}</button>`).join('');
+  return `<div class="scroll">${h}</div><div class="tabs">${tabs}</div>`;
+}
+function vAlert(){
+  if(!S.alert)return '';
+  const A={mic:['“VoiceKey”想访问你的麦克风','用于把你说的话转成文字。只在你点麦克风说话时收音。','不允许','好'],
+           full:['允许“VoiceKey”键盘完全访问？','完全访问允许键盘的开发者传输你在此键盘上输入的任何内容……（系统固定文案）','不允许','允许']}[S.alert];
+  return `<div class="alert"><div class="box"><div class="c"><b>${A[0]}</b><p>${A[1]}</p></div><div class="bs"><button data-act="alert" data-a="0">${A[2]}</button><button data-act="alert" data-a="1">${A[3]}</button></div></div></div>`;
+}
+function render(){
+  let v='';
+  if(S.scr==='onb')v=vOnb();
+  else if(S.scr==='sys')v=vSys();
+  else if(S.scr==='host')v=vHost();
+  else if(S.scr==='app')v=vApp();
+  else if(S.scr==='switch')v=`<div class="switching"><div style="text-align:center"><div class="appicon">${logo(56)}</div><div style="color:var(--fg2)">正在打开 VoiceKey 开启会话…</div></div></div>`;
+  $('scr').innerHTML=statusBar()+`<div class="body">${v}</div>`+vAlert()+(S.toast?`<div class="toast">${esc(S.toast)}</div>`:'')+'<div class="home"></div>';
+  renderNotes();renderTb();
+}
+
+/* ---------- 右侧标注 ---------- */
+const N={
+  onb0:['引导 · 欢迎','说明 VoiceKey 是什么、设置要几步。',['开始设置'],['仅首次打开显示；之后可在 设置 › 重新查看引导 打开']],
+  onb1:['引导 · 添加键盘','引导去系统设置添加键盘并打开完全访问，回来后自动刷新勾选状态。',['前往设置（跳到系统设置里 VoiceKey 的页面）','稍后再说（可跳过，键盘里会再提示）'],['两项都未开 / 只加了键盘 / 全部完成','「键盘已添加」靠检测已启用的输入法推断，「完全访问」由键盘写回共享区；真机待验证']],
+  onb2:['引导 · 麦克风','说明为什么要主 App 收音，并请求麦克风权限。',['允许麦克风 → 系统弹窗','被拒绝后只能去设置开启'],['未请求 / 已允许 / 已拒绝']],
+  onb3:['引导 · 渠道','选参与识别的渠道；≥2 个自动进入多渠道候选。',['开关渠道','✎ 改显示名'],['至少保留 1 个才能下一步']],
+  onb4:['引导 · 怎么用','用 3 步讲清「首次跳转开会话 → 返回 → 点按说话」。',['去试一试（进入示意聊天 App）','完成（进入主 App）'],['—']],
+  sys:['系统设置（模拟）','真实 iOS 界面，VoiceKey 不能自定义，这里只为演示流程。',['打开键盘 / 完全访问 / 麦克风开关','左上角「◀」回到来源 App'],['完全访问开启时系统会弹固定文案的确认框']],
+  switch:['跳转中','键盘用打开 URL 的方式拉起主 App。',['无'],['约 0.5 秒过场']],
+  app_sess:['主 App · 会话','显示会话是否开着、还能保持多久，并能手动开 / 关；找回最近上屏的文字。',['开启 / 结束会话','设置无操作自动结束时间','从键盘跳来时提示点「◀ 聊天」返回','最近上屏：点击复制'],['未开启 / 会话中（计时）/ 缺麦克风权限','「回到原 App 后直接开始听」为待定项']],
+  app_ch:['主 App · 渠道','管理参与识别的渠道和显示名，选多渠道或单渠道。',['开关渠道、✎ 改名、测试','多渠道候选开关（≥2 个渠道才可开）','单渠道时使用哪个'],['真实渠道名：微信、千问、讯飞、百度；不放第三方品牌 logo']],
+  app_set:['主 App · 设置','集中看权限；默认打开哪种键盘可在原型中试选。',['去开启 → 系统设置 / 系统弹窗','打开键盘：打字 / 语音 / 上次用的（待定）','重新查看引导'],['建议默认打字，只打开面板、不自动录音']],
+  kb_type:['键盘 · 中文全拼','默认打字，26 键全拼；没有完全访问也能本地打字。',['试敲 nihao / mingtian / kaihui / shi','顶部「26｜九键」切到九宫格（设置里选默认）','左上角麦克风：进入语音并开始说（无会话先跳主 App）','顶部渠道、最近、⚙ 照旧','123 数字符号；中/英切换；🌐 切其他输入法','长按空格左右移光标；删除长按连删，上滑清空'],['语音空心＝要跳转；实心＝会话就绪','只是示例词库，不是完整输入法引擎；生词可按确认上屏字母']],
+  kb_py:['键盘 · 拼音组合中','拼音在键盘上方显示；候选栏临时替换顶部工具栏，避免上下多加一行。',['点候选或空格选首词；可分段选词','⌄ 更多候选','⌫ 先删拼音；按住上滑只清拼音，不动正文','确认：上屏原始字母；标点：选首词后上屏标点','中/英：保留输入串为英文字母；🌐 丢弃未上屏拼音'],['组合中不提供语音入口（避免拼音插入点冲突）','空格长按不移光标，仍选首词；先选完或清拼音再移']],
+  kb_more:['键盘 · 更多拼音候选','展开候选替换字母区，可上下滚动；不同于语音多渠道候选框。',['点词上屏 / 分段继续选','收起：回字母键','重输：只清组合串','⌫：删拼音'],['敲 shi 可看多行候选；示例词库没有学习/模糊音/简拼']],
+  kb_t9:['键盘 · 中文九宫格','九宫格拼音（引擎定为 librime + 雾凇 t9 方案）。只换按键区，顶部麦克风、渠道、最近、⚙ 与 26 键相同。',['试按 64426 → 你好；6464 8426 → 明天；524 484 → 开会','2–9 打字母；1 键空闲出 @ . / : 等符号（雾凇 t9 的 1 键序列）','左列空闲＝常用中文标点，点即上屏；右列 ⌫ / 0 / 换行','123 进数字九宫格；中/英 切到英文 26 键','顶部「26｜九键」切布局；设置里选默认','长按空格移光标；⌫ 长按连删、上滑清空（先存最近）'],['英文不做九宫格，切英文即 QWERTY','示例词库，不是完整引擎；真实候选、简拼、排序以雾凇为准']],
+  kb_t9py:['键盘 · 九宫格组字中','顶部换成候选栏；拼音预览取候选的拼音注释（引擎侧 preedit 依赖 comment）。左列变成拼音筛选。',['按 64：左列 ni / mi / o / m / n；选 ni 后候选只剩 ni 开头的词，后面的数字继续筛','1 ＝ 分词（插入 \' ）','点候选或空格选首词，可分段选；⌄ 更多候选','⌫ 先删数字 → 再撤销已选拼音 → 再退回已选的词；上滑只清拼音','确认：上屏预览里的拼音字母；0 / 标点：先上屏首选再输入'],['组字中长按空格不移光标，仍选首词（同 26 键）','组字中无语音入口、无布局切换（工具栏让位候选栏）','筛选列真实数据＝候选拼音注释去重；原型用音节表补齐，模拟大词库']],
+  kb_t9p:['键盘 · 1 键符号','空闲按 1 进入符号序列，候选栏列出可选符号。',['再按 1 轮换；点候选上屏','空格上屏当前项；接着按 2–9 会先上屏再打字','⌫ 取消'],['序列来自方案 punctuator 配置，可改顺序']],
+  kb_t9num:['键盘 · 九宫格数字','数字按电话键盘排，左列放运算和常用符号；「符」进完整符号页。',['1–9、0、. 直接上屏','左列 + - * / = % 等','返回：回九宫格字母；符：符号页，其中 123 回本页','⌫ 长按连删、上滑清空；长按空格移光标'],['组字中切到本页，按数字会先上屏首选（同 26 键标点规则）']],
+  kb_en:['键盘 · 英文','英文字母直接插到光标处，不走拼音候选。',['⇧ 单次大写','123 数字与符号','中/英 回中文','麦克风仍在左上角'],['v1 基础英文，不画词预测/自动纠错']],
+  kb_num:['键盘 · 数字与符号','数字、标点与符号分两页；保留空格、换行、中英、🌐。',['#+= 切更多符号；123 回数字页','ABC 回字母页','删除长按连删，上滑清空'],['符号页不会自动跳回字母；输入中切页保留拼音']],
+  kb_full:['键盘 · 缺完全访问','键盘没有完全访问就无法与主 App 通信，麦克风变灰。',['点麦克风 → 提示条「去设置」','🌐 切回原输入法'],['麦克风禁用']],
+  kb_nosess:['键盘 · 无会话','空心麦克风＝点了会先跳主 App 开会话。',['点麦克风 → 跳 VoiceKey 开会话 → 点「◀ 聊天」返回','顶部芯片：切渠道 / 多渠道','⚙ 打开主 App','🌐 切回原输入法'],['空心麦克风：要跳转','实心麦克风：会话中，点了直接说']],
+  kb_idle:['键盘 · 会话中待命','实心麦克风，点一下直接开始，不再跳转。',['点麦克风开始','标点 / 空格 / 删除 / 换行可直接用','🌐 切回原输入法'],['灵动岛显示「会话中」（拟，基于实时活动）']],
+  kb_rec:['键盘 · 聆听中（单渠道）','边说边在键盘里出字，结束后定稿上屏。',['点按＝结束'],['红色停止键 + 声波 + 计时','顶部出现系统录音指示（橙点）']],
+  kb_fin:['键盘 · 定稿中（单渠道）','等最终结果，到了自动插入光标处。',['点按＝接着说，下一段拼在同一句后面'],['定稿成功 → 自动上屏回到待命','失败 → 识别失败']],
+  kb_err:['键盘 · 识别失败（单渠道）','告诉用户哪一步失败，不丢录音。',['重试：用同一段录音再识别','丢弃','点麦克风＝重新说'],['可用工具条「网络出错」开关复现']],
+  kb_pick_rec:['键盘 · 候选 · 聆听中','各渠道同时实时出字，候选框嵌在键盘里。',['底部大键＝结束','点某一行＝结束录音并在它定稿后上屏（可提前选）','✕ 关闭候选（丢弃本句）'],['默认选中上次用的渠道','状态点：红=听 / 黄=定稿中 / 绿=完成 / 红字=失败']],
+  kb_pick_fin:['键盘 · 候选 · 定稿中','逐条定稿并显示耗时。',['底部大键＝接着说，拼在原句后','点已定稿的行＝立即上屏','点未定稿的行＝定稿后上屏','✕ 关闭'],['定稿中 n/总数']],
+  kb_pick_done:['键盘 · 候选 · 全部完成','候选框保持打开等用户选。',['点一行上屏','底部大键＝继续听，接在原句后','只能用 ✕ 关闭，麦克风不会关闭候选'],['所选渠道失败时自动改选第一条成功的']],
+  kb_sys:['原输入法（示意）','用户点 🌐 切到原来的输入法，再点 🌐 回到 VoiceKey。',['🌐 切换'],['长按 🌐 是系统的输入法列表，键盘无法自定义']],
+};
+function nkey(){
+  if(S.scr==='onb')return 'onb'+S.onb;
+  if(S.scr==='sys'||S.scr==='switch')return S.scr;
+  if(S.scr==='app')return 'app_'+S.tab;
+  if(S.sysKb)return 'kb_sys';
+  if(S.mode==='type'){const t9=t9on();if(S.more)return 'kb_more';if(composing())return S.t9p!=null?'kb_t9p':t9&&S.page==='abc'?'kb_t9py':'kb_py';if(S.page!=='abc')return t9&&S.page==='num'?'kb_t9num':'kb_num';return S.lang==='zh'?(t9?'kb_t9':'kb_type'):'kb_en'}
+  if(!S.perm.full)return 'kb_full';
+  if(!S.sess.on&&S.kb==='idle')return 'kb_nosess';
+  if(S.kb==='idle')return 'kb_idle';
+  if(isMulti())return 'kb_pick_'+(S.kb==='rec'?'rec':S.kb==='fin'?'fin':'done');
+  return 'kb_'+S.kb;
+}
+function renderNotes(){
+  const k=nkey(),n=N[k]||['—','',[],[]];
+  const cur=S.scr==='host'&&!S.sysKb?(S.kb==='idle'?0:S.kb==='rec'?1:S.kb==='fin'?2:S.kb==='done'?3:-1):-1;
+  const rules=[['待命','开始说'],['聆听中','结束'],['定稿中（未上屏）','接着说，拼成同一句'],['候选框打开（已全部定稿）','继续听，接在原句后；关闭只能点 ✕']];
+  $('notes').innerHTML=`<div class="card"><h4>${n[0]}</h4><p>${n[1]}</p><div class="k">主要操作</div><ul>${n[2].map(x=>`<li>${x}</li>`).join('')}</ul><div class="k">状态</div><ul>${n[3].map(x=>`<li>${x}</li>`).join('')}</ul></div>
+  <div class="card"><h4>点麦克风规则（沿用桌面）</h4><table class="rules"><tr><th>当前</th><th>点一下</th></tr>${rules.map((r,i)=>`<tr class="${i===cur?'cur':''}"><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table></div>
+  <div class="card"><h4>打字 / 语音共存（建议）</h4><ul><li>默认打字；空闲工具栏左侧固定麦克风，语音面板同一位置是 ⌨ 返回打字。用明示按钮，不靠隐藏滑动手势。</li><li>语音就绪时点一下直接说；首次跳主 App → 系统「◀」返回 → 再点说。上屏后回打字；多渠道须选结果后才回。</li><li>聆听 / 定稿 / 待选结果时不让 ⌨ / 🌐 偷偷丢内容，提示先结束或关闭本句；✕ 丢弃后回打字。</li><li>顶部保留渠道、最近、设置；敲拼音时让位于候选栏。最近只收语音上屏和「已清空」，不记录每个打字词。</li><li>九宫格与 26 键只换按键区：语音面板、多渠道候选框仍整块替换按键区；⌨ 返回时回到当前布局。组字中 ⌫ 只删拼音、长按空格不移光标，两种布局一致。</li><li>长按空格保留移光标；不学豆包的空格按住说话，避免手势冲突。上滑清空先存最近，没完全访问时不提供正文清空。</li></ul></div>
+  <div class="card"><h4>竞品参考与待拍板</h4><ul><li><a href="https://www.typeless.com/help/release-notes/ios/swipe-to-type" target="_blank" rel="noopener">Typeless 官方示范</a>：每次默认语音、左右滑动循环到语言键盘；已看官方 GIF 的英文 QWERTY（三行字母、⇧、⌫、123、空格、回车、🌐，输入时出词建议）。中文拼音布局未查到，不能照称已支持。</li><li><a href="https://apps.apple.com/cn/app/id1618175312" target="_blank" rel="noopener">微信输入法</a>：打字+无需长按的语音入口。<a href="https://apps.apple.com/cn/app/id6752316550" target="_blank" rel="noopener">豆包输入法</a>：26键+点击/按住语音，空格按住说话。只借鉴同键盘共存。</li><li><span class="tag">待定</span> 默认打字 / 语音 / 记住上次？建议打字，麦克风一触即达。设置页可比较。</li><li><span class="tag">待定</span> 麦克风放工具栏左侧还是空格旁？建议工具栏，完整保留空格和中英键。</li><li>九宫格参考 <a href="https://github.com/iDvel/rime-ice" target="_blank" rel="noopener">雾凇 t9</a>（1 键分词 / 空闲出符号、超级简拼）、<a href="https://mintimate.cc/zh/demo/t9Input.html" target="_blank" rel="noopener">薄荷 t9</a>（1 键分隔）、<a href="https://ihsiao.com/apps/hamster/docs/guides/chinese-ninekey-configuration/" target="_blank" rel="noopener">仓输入法九键</a>（左列拼音筛选与雾凇九宫格方案耦合，预编辑靠候选 comment）。仓的上滑隐藏手势不照搬，用明示按键。</li><li><span class="tag">待定</span> 键盘里切布局是否同步改默认？建议同步（原型如此），设置页只是同一开关的另一入口。</li><li><span class="tag">待定</span> 九宫格 1 键空闲出英文符号（雾凇默认）还是中文标点？建议用雾凇默认，中文标点已放左列。</li><li><span class="tag">待定</span> 英文是否也做九宫格？建议不做，切英文即 26 键。</li><li>双拼、模糊音、手写后续，不画。</li></ul></div>
+  <div class="card"><h4>怎么看这份稿</h4><ul><li>点「键盘·九宫格」→ 按 64 → 左列选 mi / ni 看候选收窄 → 继续 426 → 选你好。</li><li>点「键盘·打字」→ 敲 nihao → 选你好 → 点麦克风说话 → 结束 → 多渠道选一条 → 回打字；选单渠道可试自动上屏回打字。</li><li>工具条「模拟」可复现权限/会话/错误；「移光标」「清空」可辅助试手势，真手势为长按拖动。</li><li>这是可点击设计稿和示例词库，不是已上线的 iOS 工程；宿主聊天和系统设置也是示意。iOS 宿主的光标/清空能力须真机验收。</li></ul></div>`;
+}
+function renderTb(){
+  const b=(l,a,arg,act)=>`<button class="${act?'on':''}" data-act="${a}" ${arg!=null?`data-a="${arg}"`:''}>${l}</button>`;
+  $('tb').innerHTML=`<b>VoiceKey iOS 设计稿</b>
+  <span class="g"><span>场景</span>${b('首次引导','go','onb',S.scr==='onb')}${b('键盘·打字','go','type',S.scr==='host'&&S.mode==='type'&&S.layout==='26')}${b('键盘·九宫格','go','t9',S.scr==='host'&&S.mode==='type'&&S.layout==='t9')}${b('键盘·单渠道','go','single')}${b('键盘·多渠道','go','multi')}${b('主 App','go','app',S.scr==='app')}</span>
+  <span class="g"><span>模拟</span>${b('会话快过期','sim','warn')}${b('会话过期','sim','expire')}${b('网络出错','sim','net',S.sim.net)}${b('麦克风被占用','sim','mic',S.sim.mic)}${b('关完全访问','sim','full',!S.perm.full&&S.scr!=='onb')}</span>
+  <span class="g"><span>手势辅助</span>${b('移光标','sim','cursor')}${b('清空','sim','clear')}${b('重开键盘','reopen')}${b('深色','dark',null,document.body.classList.contains('dark'))}${b('重置','reset')}</span>`;
+}
+
+/* ---------- 事件 ---------- */
+const ACT={
+  onb:a=>{S.onb=+a},
+  gosys:a=>{S.sysFrom=a||'app';S.sysPage=(S.perm.kbd&&!S.perm.full)||a==='host'?'kb':'root';if(S.onb===2&&S.scr==='onb')S.sysPage='root';S.scr='sys';S.notice=null},
+  kbpage:()=>{S.sysPage='kb'},
+  sysback:()=>{S.scr=S.sysFrom==='onb'?'onb':S.sysFrom==='host'?'host':'app'},
+  systog:a=>{if(a==='full'&&!S.perm.full){S.alert='full';return}if(a==='kbd'){S.perm.kbd=!S.perm.kbd;if(!S.perm.kbd)S.perm.full=false}else if(a==='full')S.perm.full=false;else if(a==='mic'){S.perm.mic=!S.perm.mic;if(!S.perm.mic){S.sess.on=false;reset()}}},
+  askmic:()=>{S.alert='mic'},
+  alert:a=>{if(S.alert==='mic')S.perm.mic=a==='1';if(S.alert==='full'&&a==='1')S.perm.full=true;S.alert=null},
+  try:()=>{S.scr='host';openKeyboard()},
+  onbdone:()=>{S.scr='app';S.tab='sess';S.from=false},
+  reonb:()=>{S.scr='onb';S.onb=0},
+  mic:tapMic, pick:a=>pick(+a), close:()=>{reset();S.notice=null}, retry,
+  typemic:typeMic, typing:backTyping, letter:typeLetter, t9:t9Key, t9one:t9One, t9f:t9Pick,
+  layout:a=>{clearComp();S.layout=a;S.page='abc';if(S.scr==='host')toast(a==='t9'?'已切到九宫格 · 下次打开沿用':'已切到 26 键 · 下次打开沿用')}, cand:a=>choose(+a), more:()=>{S.more=!S.more},
+  retype:clearComp, lang:()=>{if(composing()){insert(compRaw());clearComp()}S.lang=S.lang==='zh'?'en':'zh';S.shift=false},
+  page:a=>{S.page=a},shift:()=>{S.shift=!S.shift},enter,punct,space,bs:delBack,
+  openmode:a=>{S.openMode=a},reopen:()=>{if(S.kb!=='idle'){toast('先结束或关闭这一句');return}S.scr='host';S.sheet=false;S.recentSheet=false;openKeyboard()},
+  history:()=>{if(S.recentSheet){S.recentSheet=false;return}if(!S.perm.full){S.notice={kind:'err',text:'需要「允许完全访问」才能读取最近上屏。',act:['去设置','gosys']};return}S.recentSheet=true},
+  restore:a=>{if(S.kb==='rec'||S.kb==='fin'){toast('先结束或关闭这一句');return}insert(S.recent[a].text);S.recentSheet=false;toast('已插入')},
+  sheet:()=>{if(!S.perm.full){S.notice={kind:'err',text:'需要「允许完全访问」才能切换渠道。',act:['去设置','gosys']};return}S.sheet=!S.sheet}, multi:()=>{if(S.kb==='idle')S.multi=!S.multi;else toast('说完这句再切换')},
+  def:a=>{S.def=+a;if(S.sheet)S.sheet=false},
+  chtog:a=>{if(S.kb!=='idle')reset();S.ch[a].on=!S.ch[a].on;if(!S.ch[S.def].on&&on().length)S.def=on()[0].i},
+  rename:a=>{const v=prompt('渠道显示名',S.ch[a].n);if(v&&v.trim())S.ch[a].n=v.trim().slice(0,8)},
+  test:a=>{S.tests[a]='…';render();setTimeout(()=>{S.tests[a]=S.sim.net?'失败':(LAT[a%4]/1000).toFixed(2)+'s';render()},LAT[a%4])},
+  openapp:()=>{S.scr='app';S.from=true;S.justOpened=false},
+  crumb:()=>{S.scr='host';S.from=false;S.justOpened=false;if(S.autoStart&&S.sess.on&&S.perm.full)startNew()},
+  tab:a=>{S.tab=a;S.justOpened=false},
+  sesson:()=>{S.sess={on:true,t0:Date.now(),last:Date.now()}},
+  sessoff:()=>{S.sess.on=false;reset()},
+  idle:a=>{S.idleMin=+a}, auto:()=>{S.autoStart=!S.autoStart},
+  copy:a=>toast('已复制'),
+  send:()=>{if(composing()){toast('先选择候选或确认字母');return}if(S.host.trim()){S.msgs.push({t:S.host,me:true});S.host='';S.cpos=0}},
+  key:a=>{if(a==='bs')delBack();else insert(a==='nl'?'\n':a)},
+  globe:()=>{if(S.kb!=='idle'){toast('先结束或关闭这一句');return}clearComp();S.sysKb=!S.sysKb},
+  nx:()=>{S.notice=null},
+  dark:()=>document.body.classList.toggle('dark'),
+  reset:()=>{reset();S=init()},
+  go:a=>{reset();clearComp();S.page='abc';S.lang='zh';S.shift=false;S.notice=null;S.host='';S.cpos=0;S.sheet=false;S.recentSheet=false;S.sysKb=false;
+    if(a==='onb'){S.scr='onb';S.onb=0;return}
+    S.perm={kbd:true,full:true,mic:true};
+    if(a==='app'){S.scr='app';S.tab='sess';S.from=false;return}
+    S.scr='host';S.sess={on:false,t0:0,last:0};
+    if(a==='type'||a==='t9'){S.layout=a==='t9'?'t9':'26';setMode('type');S.sess={on:true,t0:Date.now(),last:Date.now()};return}
+    setMode('voice');S.voiceFrom='type';
+    if(a==='single'){S.multi=false}else{S.multi=true;S.ch.forEach((c,i)=>c.on=i<3)}},
+  sim:a=>{
+    if(a==='cursor'){if(composing()){toast('先选词或清拼音，再移光标');return}if(S.kb!=='idle'){toast('先结束或关闭这一句');return}S.cpos=Math.max(0,S.cpos-1);toast('光标左移一字 · 真手势：长按空格左右拖');return}
+    if(a==='clear'){if(S.kb!=='idle'){toast('先结束或关闭这一句');return}clearInput();return}
+    if(a==='net'||a==='mic'){S.sim[a]=!S.sim[a];toast((a==='net'?'网络出错':'麦克风被占用')+(S.sim[a]?'：开':'：关'));return}
+    if(S.scr!=='host'){S.scr='host';S.sysKb=false;S.perm={kbd:true,full:true,mic:true}}
+    if(a==='full'){S.perm.full=!S.perm.full;if(!S.perm.full)reset();S.notice=null;return}
+    if(!S.sess.on){S.sess={on:true,t0:Date.now(),last:Date.now()}}
+    if(a==='warn'){S.notice={kind:'warn',text:'会话 0:30 后结束 · 现在说话会自动续期'}}
+    if(a==='expire'){reset();S.sess.on=false;S.notice={kind:'info',text:`会话已结束（${S.idleMin||10} 分钟未使用）。点麦克风会重新开启。`}}
+  },
+};
+
+/* 手势用窗口级监听，录音/计时重新渲染也不会丢掉拖动状态。 */
+let hold=null,holdClickUntil=0;
+document.addEventListener('pointerdown',e=>{
+  const el=e.target.closest('[data-hold]');if(!el)return;
+  e.preventDefault();
+  const k=document.querySelector('.kb').getBoundingClientRect(),r=el.getBoundingClientRect(),z=k.width/368;
+  hold={id:e.pointerId,kind:el.dataset.hold,x:e.clientX,y:e.clientY,z,cur:S.cpos,comp:composing(),moved:false,armed:false,
+    tip:{x:Math.min(264,Math.max(4,(r.left-k.left+r.width/2)/z-48)),y:(r.top-k.top)/z-38}};
+  if(hold.kind==='space'){
+    if(hold.comp)return;
+    hold.t=setTimeout(()=>{if(!hold)return;S.cursor=true;render()},300);
+  }else{
+    delBack();render();
+    hold.t=setTimeout(()=>{if(!hold)return;S.clr={...hold.tip,armed:false};hold.rep=setInterval(()=>{if(hold&&!hold.moved){delBack();render()}},80);render()},450);
+  }
+});
+addEventListener('pointermove',e=>{
+  if(!hold||e.pointerId!==hold.id)return;
+  if(hold.kind==='space'&&S.cursor){S.cpos=Math.max(0,Math.min([...S.host].length,hold.cur+Math.round((e.clientX-hold.x)/(12*hold.z))));render()}
+  if(hold.kind==='bs'&&!hold.comp&&e.clientY<hold.y-15*hold.z){hold.moved=true;clearInterval(hold.rep)}
+  if(hold.kind==='bs'&&e.clientY<hold.y-15*hold.z){
+    hold.moved=true;clearInterval(hold.rep);hold.armed=e.clientY<hold.y-48*hold.z;
+    S.clr={...hold.tip,armed:hold.armed};render();
+  }else if(hold.kind==='bs'&&hold.moved){hold.armed=false;if(S.clr)S.clr.armed=false;render()}
+});
+function releaseHold(e){
+  if(!hold||e.pointerId!==hold.id)return;
+  clearTimeout(hold.t);clearInterval(hold.rep);
+  if(e.type==='pointerup'){
+    if(hold.kind==='space'&&!S.cursor)space();
+    if(hold.kind==='bs'&&hold.armed){if(hold.comp){clearComp();toast('已清除拼音')}else clearInput()}
+  }
+  holdClickUntil=Date.now()+350;hold=null;S.cursor=false;S.clr=null;render();
+}
+addEventListener('pointerup',releaseHold);addEventListener('pointercancel',releaseHold);
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');if(!el||el.disabled)return;
+  if(el.dataset.hold&&Date.now()<holdClickUntil)return;
+  const f=ACT[el.dataset.act];if(!f)return;
+  e.stopPropagation();f(el.dataset.a);render();
+});
+setInterval(()=>{if(!hold&&S.sess.on&&S.scr==='app'&&S.tab==='sess')render()},1000);
+function fit(){const h=innerHeight-$('tb').offsetHeight-44;document.querySelector('.phone').style.zoom=Math.min(1,h/866)}
+addEventListener('resize',fit);
+render();fit();
+</script>
+</body>
+</html>

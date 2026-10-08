@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16172A"/>
+      <stop offset="0.55" stop-color="#08090F"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="wave" gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="425" y2="0">
+      <stop offset="0" stop-color="#00F0FF"/>
+      <stop offset="0.4" stop-color="#1A86FF"/>
+      <stop offset="0.68" stop-color="#9A2DE6"/>
+      <stop offset="1" stop-color="#FF2F5E"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g transform="translate(512 512) scale(2.1) translate(-256.5 -277)" fill="none" stroke="url(#wave)" stroke-linecap="round" stroke-linejoin="round">
+    <path opacity="0.28" stroke-width="11" d="M88 254 C112 252 128 236 150 238 C180 241 200 300 232 302 C268 304 300 238 334 236 C360 235 376 256 425 256"/>
+    <path opacity="0.45" stroke-width="13" d="M88 254 C112 252 126 230 148 230 C176 230 198 324 230 326 C266 328 280 196 306 196 C334 196 356 264 384 264 C402 264 412 256 425 256"/>
+    <path stroke-width="24" d="M88 254 C112 252 126 226 148 226 C182 226 204 364 240 364 C278 364 298 192 330 192 C360 192 376 256 400 256 L425 256"/>
+  </g>
+</svg>
