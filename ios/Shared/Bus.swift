@@ -7,20 +7,26 @@ enum Bus {
     /// 实际使用的 App Group。自签/重签工具常把组名改写（如加队伍 ID 后缀），
     /// 因此先试默认组名，打不开再从包内描述文件里找能打开的组；App 与键盘按同一规则选，结果一致。
     static let group: String = {
-        let fm = FileManager.default
-        if fm.containerURL(forSecurityApplicationGroupIdentifier: defaultGroup) != nil { return defaultGroup }
-        var bundles = [Bundle.main.bundleURL]
-        if Bundle.main.bundleURL.pathExtension == "appex" {   // 扩展再参考宿主 App 的描述文件
-            bundles.append(Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent())
+        resolveGroup(canOpen: { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil }) {
+            var bundles = [Bundle.main.bundleURL]
+            if Bundle.main.bundleURL.pathExtension == "appex" {   // 扩展再参考宿主 App 的描述文件
+                bundles.append(Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent())
+            }
+            return bundles.flatMap(provisionedGroups)
         }
+    }()
+
+    /// 默认组能打开就用；否则候选去重后按（以默认组开头 > 含 voicekey > 字典序）取第一个能打开的，都不行回到默认组
+    static func resolveGroup(canOpen: (String) -> Bool, candidates: () -> [String]) -> String {
+        if canOpen(defaultGroup) { return defaultGroup }
         var seen = Set<String>()
-        let candidates = bundles.flatMap(provisionedGroups).filter { seen.insert($0).inserted }
+        let unique = candidates().filter { seen.insert($0).inserted }
         func rank(_ g: String) -> Int {
             g.hasPrefix(defaultGroup) ? 0 : g.lowercased().contains("voicekey") ? 1 : 2
         }
-        let sorted = candidates.sorted { (rank($0), $0) < (rank($1), $1) }
-        return sorted.first { fm.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil } ?? defaultGroup
-    }()
+        let sorted = unique.sorted { (rank($0), $0) < (rank($1), $1) }
+        return sorted.first(where: canOpen) ?? defaultGroup
+    }
 
     /// 包内 embedded.mobileprovision 声明的 App Group
     static func provisionedGroups(in bundleURL: URL) -> [String] {
