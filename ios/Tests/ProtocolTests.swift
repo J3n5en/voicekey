@@ -54,7 +54,7 @@ final class ProtocolTests: XCTestCase {
 
     func testConfigChannelResolution() {
         var c = Config.initial
-        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "千问", "讯飞", "百度"])
+        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "千问", "讯飞", "百度", "豆包"])
         XCTAssertEqual(c.active.map(\.engine), ["wetype"])
         XCTAssertFalse(c.isMulti)
         c.channels[1].on = true
@@ -65,7 +65,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(c.active.map(\.id), ["b"])
         XCTAssertEqual(c.resolve(["c", "a"]).map(\.id), ["a"])
         XCTAssertEqual(c.resolve([]).map(\.id), ["b"])
-        XCTAssertFalse(c.channels.contains { $0.engine == "doubao" })
+        XCTAssertEqual(c.channels.last, Channel(id: "e", engine: "doubao", name: "豆包", on: false))
+        XCTAssertTrue(c.resolve(["e"]).isEmpty)
+        c.channels[4].on = true
+        XCTAssertEqual(c.resolve(["e"]).map(\.engine), ["doubao"])
+        c.defaultChannel = "e"
+        XCTAssertEqual(c.active.map(\.engine), ["doubao"])
     }
 
     func testConfigMigratesLegacyDefaultNames() {
@@ -75,10 +80,65 @@ final class ProtocolTests: XCTestCase {
         old.channels[2].name = "渠道 C"
         old.channels[2].on = true
         let c = old.migrated()
-        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "我的千问", "讯飞", "百度"])
-        XCTAssertEqual(c.channels.map { $0.on }, [true, false, true, false])
+        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "我的千问", "讯飞", "百度", "豆包"])
+        XCTAssertEqual(c.channels.map { $0.on }, [true, false, true, false, false])
         let h = try! JSONDecoder().decode([HistoryItem].self, from: Data(#"[{"text":"x","channel":"渠道 D","at":1},{"text":"y","channel":"我的","at":2}]"#.utf8))
         XCTAssertEqual(h.map(\.channel), ["百度", "我的"])
+    }
+
+    func testConfigUpgradeAddsDisabledDoubaoWithoutChangingChoices() throws {
+        let json = #"{"channels":[{"id":"a","engine":"wetype","name":"我的微信","on":false},{"id":"b","engine":"qwen","name":"千问","on":true},{"id":"c","engine":"iflytek","name":"讯飞","on":true},{"id":"d","engine":"baidu","name":"百度","on":false}],"multi":false,"defaultChannel":"c","idleMinutes":30,"lastPick":"b","standby":"mic"}"#
+        let old = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+        let upgraded = old.migrated()
+        var expected = old
+        expected.channels.append(Channel(id: "e", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(upgraded, expected)
+        XCTAssertEqual(upgraded.active, old.active)
+        XCTAssertEqual(upgraded.enabled, old.enabled)
+        XCTAssertEqual(upgraded.migrated(), upgraded)
+        let saved = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(upgraded))
+        XCTAssertEqual(saved.migrated(), upgraded)
+        XCTAssertEqual(Config.initial.migrated(), Config.initial)
+    }
+
+    func testConfigMigrationPreservesExistingDoubaoChoices() {
+        for on in [false, true] {
+            var old = Config.initial
+            old.channels = [Channel(id: "custom", engine: "doubao", name: "我的豆包", on: on)]
+            old.multi = false
+            old.defaultChannel = "custom"
+            old.lastPick = "custom"
+            let upgraded = old.migrated()
+            XCTAssertEqual(upgraded, old)
+            XCTAssertEqual(upgraded.migrated(), old)
+        }
+        var old = Config.initial
+        old.channels[4].on = true
+        old.channels[4].name = "渠道 E"
+        let upgraded = old.migrated()
+        XCTAssertEqual(upgraded.channels[4].name, "豆包")
+        XCTAssertTrue(upgraded.channels[4].on)
+        XCTAssertEqual(upgraded.channels.count, 5)
+        XCTAssertEqual(upgraded.migrated(), upgraded)
+
+        old.channels = [Channel(id: "a", engine: "doubao", name: "渠道 A", on: true)]
+        XCTAssertEqual(old.migrated().channels, [Channel(id: "a", engine: "doubao", name: "豆包", on: true)])
+    }
+
+    func testConfigMigrationAvoidsChannelIDCollisions() {
+        var old = Config.initial
+        old.channels = [
+            Channel(id: "e", engine: "qwen", name: "渠道 E", on: true),
+            Channel(id: "e1", engine: "baidu", name: "我的百度", on: false),
+        ]
+        old.defaultChannel = "e"
+        let upgraded = old.migrated()
+        var expected = old.channels
+        expected[0].name = "千问"
+        XCTAssertEqual(Array(upgraded.channels.prefix(2)), expected)
+        XCTAssertEqual(upgraded.channels.last, Channel(id: "e2", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(upgraded.active.map(\.id), old.active.map(\.id))
+        XCTAssertEqual(upgraded.migrated(), upgraded)
     }
 
     func testCommandQueueOrdersPending() {

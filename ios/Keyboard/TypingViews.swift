@@ -374,6 +374,7 @@ final class KeyPad: UIView {
 
     private func began(_ touch: UITouch) {
         rollover()
+        layoutIfNeeded()
         let p = touch.location(in: self)
         guard !inList(p), let it = nearest(p), it.key != .globe else { return }
         let t = Track(it, touch: touch)

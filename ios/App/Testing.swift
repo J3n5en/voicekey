@@ -7,25 +7,35 @@ final class ChannelTest: ObservableObject {
     @Published private(set) var results: [String: String] = [:]
 
     func run(_ ch: Channel) {
+        // -selftest doubao（或渠道 id，逗号分隔）；省略参数仍测全部，不修改渠道开关
+        if let value = Launch.value("-selftest"), !value.hasPrefix("-"), !value.isEmpty {
+            let selected = value.split(separator: ",").map(String.init)
+            guard selected.contains(ch.engine) || selected.contains(ch.id) else { return }
+        }
         guard let path = Bundle.main.path(forResource: "sample", ofType: "wav"),
               let engine = RecognitionEngine(rawValue: ch.engine) else { return }
         results[ch.id] = "测试中…"
         let t0 = Date()
         var first: Double?
-        try? RecognitionSession.recognize(file: URL(fileURLWithPath: path), engine: engine) { e in
-            DispatchQueue.main.async {
-                let me = ChannelTest.shared
-                let t = Date().timeIntervalSince(t0)
-                switch e {
-                case .partial: if first == nil { first = t }
-                case .final(let s):
-                    me.results[ch.id] = s.isEmpty ? "无结果" : String(format: "首字 %.2fs · 完成 %.2fs", first ?? t, t)
-                    Bus.log("test \(ch.id)/\(ch.engine) ok first=\(first ?? -1) total=\(t): \(s)")
-                case .failure(let m):
-                    me.results[ch.id] = "失败：\(SessionManager.friendly(m))"
-                    Bus.log("test \(ch.id)/\(ch.engine) failed: \(m)")
+        do {
+            try RecognitionSession.recognize(file: URL(fileURLWithPath: path), engine: engine) { e in
+                DispatchQueue.main.async {
+                    let me = ChannelTest.shared
+                    let t = Date().timeIntervalSince(t0)
+                    switch e {
+                    case .partial: if first == nil { first = t }
+                    case .final(let s):
+                        me.results[ch.id] = s.isEmpty ? "无结果" : String(format: "首字 %.2fs · 完成 %.2fs", first ?? t, t)
+                        Bus.log("test \(ch.id)/\(ch.engine) ok first=\(first ?? -1) total=\(t): \(s)")
+                    case .failure(let m):
+                        me.results[ch.id] = "失败：\(SessionManager.friendly(m))"
+                        Bus.log("test \(ch.id)/\(ch.engine) failed: \(m)")
+                    }
                 }
             }
+        } catch {
+            results[ch.id] = "失败：\(SessionManager.friendly(error.localizedDescription))"
+            Bus.log("test \(ch.id)/\(ch.engine) failed: \(error)")
         }
     }
 }

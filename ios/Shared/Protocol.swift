@@ -25,8 +25,9 @@ enum VK {
         static let history = "history.json"
         static let keyboard = "keyboard.json"
         static let typing = "typing.json"
-        /// 最近一次 hotkey 的时刻（秒），键盘据此忽略迟到的旧信号
+        /// 最近一次 hotkey 请求及已响应的请求 ID
         static let hotkey = "hotkey.json"
+        static let hotkeyAck = "hotkey-ack.json"
     }
 
     static var now: Double { Date().timeIntervalSince1970 }
@@ -64,6 +65,7 @@ struct Config: Codable, Equatable {
     var standby: Standby?
 
     static let idleChoices = [5, 10, 30, 0]
+    private static let doubao = Channel(id: "e", engine: "doubao", name: "豆包", on: false)
 
     static let initial = Config(
         channels: [
@@ -71,6 +73,7 @@ struct Config: Codable, Equatable {
             Channel(id: "b", engine: "qwen", name: "千问", on: false),
             Channel(id: "c", engine: "iflytek", name: "讯飞", on: false),
             Channel(id: "d", engine: "baidu", name: "百度", on: false),
+            doubao,
         ],
         multi: true, defaultChannel: "a", idleMinutes: 10, lastPick: nil, standby: .pip)
 
@@ -92,11 +95,20 @@ struct Config: Codable, Equatable {
 
     static func load() -> Config { Bus.read(Config.self, VK.File.config)?.migrated() ?? .initial }
 
-    /// 旧版默认名「渠道 A/B/C/D」换成新默认名，用户改过的名字不动
+    /// 旧默认名换成真实名称；缺少的豆包默认关闭，已有设置不动
     func migrated() -> Config {
         var c = self
         for i in c.channels.indices where c.channels[i].name == "渠道 \(c.channels[i].id.uppercased())" {
-            c.channels[i].name = Config.renamed(c.channels[i].name)
+            c.channels[i].name = Self.initial.channels.first { $0.engine == c.channels[i].engine }?.name ?? c.channels[i].name
+        }
+        if !c.channels.contains(where: { $0.engine == Self.doubao.engine }) {
+            var channel = Self.doubao
+            var suffix = 0
+            while c.channels.contains(where: { $0.id == channel.id }) {
+                suffix += 1
+                channel.id = "\(Self.doubao.id)\(suffix)"
+            }
+            c.channels.append(channel)
         }
         return c
     }

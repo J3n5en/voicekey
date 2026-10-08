@@ -105,6 +105,7 @@ final class KeyboardViewController: UIInputViewController {
     private var spaceX: CGFloat = 0
     /// 已写进输入框的拼音（marked text）
     private var marked = ""
+    private var typingDocument: UUID?
     /// 本轮刚覆盖拼音上屏过：宿主会合并同一轮的写入并可能乱序，下一段拼音挪到下一轮再写
     private var committedThisTurn = false
     private var walk: CursorWalk?
@@ -155,6 +156,7 @@ final class KeyboardViewController: UIInputViewController {
         composer.layout = prefs.t9 ? .t9 : .qwerty
         composer.clear()
         marked = ""
+        typingDocument = textDocumentProxy.documentIdentifier
         PinyinLoader.warm(composer.layout)
         mode = .type
         page = .abc
@@ -205,7 +207,25 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        if reconcileTypingDocument() { render() }
         if let typer, !typer.synced { resync() }
+    }
+
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        if reconcileTypingDocument() { render() }
+    }
+
+    @discardableResult
+    private func reconcileTypingDocument() -> Bool {
+        let id = textDocumentProxy.documentIdentifier
+        defer { typingDocument = id }
+        guard let typingDocument, typingDocument != id else { return false }
+        // 焦点已换：只丢弃本地组字，不向新输入框清除旧 mark。
+        composer.clear()
+        marked = ""
+        expanded = false
+        return true
     }
 
     // MARK: 与主 App 通信
@@ -933,7 +953,10 @@ final class KeyboardViewController: UIInputViewController {
 
     /// 操作按钮 / 快捷指令：只有正在显示的键盘响应；同点麦克风（开始、说话中则结束）
     private func hotkey() {
-        guard visible, hasFullAccess, let at = Bus.read(Double.self, VK.File.hotkey), now - at < 2 else { return }
+        guard visible, hasFullAccess, let request = Bus.read(HotkeyRequest.self, VK.File.hotkey),
+              request.accepts(now: now, visible: visible, fullAccess: hasFullAccess,
+                              acknowledged: Bus.read(String.self, VK.File.hotkeyAck)) else { return }
+        Bus.write(request.id, VK.File.hotkeyAck)
         Bus.post(VK.Note.hotkeyAck)
         closeSheet()
         tapTypeMic()
@@ -996,6 +1019,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func press(_ key: KeyPad.Key) {
+        reconcileTypingDocument()
         switch key {
         case .letter(let c):
             guard !zh else { return timed { insert(composer.type(c)) } }
@@ -1043,6 +1067,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func insert(_ s: String) {
+        guard !reconcileTypingDocument() else { return }
         guard !s.isEmpty else { return }
         guard !marked.isEmpty else { return textDocumentProxy.insertText(s) }
         // 覆盖输入框里的拼音上屏：Apple 文档的做法，改成最终文字再 unmark，同一次写完（标点也并进来）
@@ -1055,6 +1080,7 @@ final class KeyboardViewController: UIInputViewController {
 
     /// 组字变化后把拼音同步到输入框；不再组字时清掉
     private func syncMarked() {
+        guard !reconcileTypingDocument() else { return }
         var want = ""
         if prefs.inlinePinyin, mode == .type, zh, composer.isComposing {
             let p = composer.preedit
@@ -1083,6 +1109,7 @@ final class KeyboardViewController: UIInputViewController {
 
     /// 组字类按键：计时（引擎 / 刷新界面并布局），测试时显示到键盘上
     private func timed(_ body: () -> Void) {
+        reconcileTypingDocument()
         TypingStats.begin()
         body()
         syncMarked()

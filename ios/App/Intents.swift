@@ -18,7 +18,7 @@ enum HotkeyError: Error, CustomLocalizedStringResourceConvertible {
     case noKeyboard
 
     var localizedStringResource: LocalizedStringResource {
-        "当前没有在用 VoiceKey 键盘：先点一个输入框并切到 VoiceKey，再按。"
+        "请先允许 VoiceKey 键盘完全访问，点一个输入框并切到 VoiceKey，再按。"
     }
 }
 
@@ -32,25 +32,30 @@ struct VoiceKeyShortcuts: AppShortcutsProvider {
 /// 发信号给正在显示的键盘，等它回 ack
 @MainActor
 enum Hotkey {
-    private static var waiting: CheckedContinuation<Bool, Never>?
+    private static var waiting: (id: String, continuation: CheckedContinuation<Bool, Never>)?
     private static var observing = false
 
     static func fire(timeout: Double = 0.8) async -> Bool {
         if !observing {
             observing = true
-            Bus.observe(VK.Note.hotkeyAck) { Hotkey.finish(true) }
+            Bus.observe(VK.Note.hotkeyAck) {
+                guard let id = Bus.read(String.self, VK.File.hotkeyAck) else { return }
+                Hotkey.finish(true, id: id)
+            }
         }
-        finish(false)
-        Bus.write(VK.now, VK.File.hotkey)
+        if let waiting { finish(false, id: waiting.id) }
+        let request = HotkeyRequest()
+        Bus.write(request, VK.File.hotkey)
         return await withCheckedContinuation { c in
-            waiting = c
+            waiting = (request.id, c)
             Bus.post(VK.Note.hotkey)
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { Hotkey.finish(false) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { Hotkey.finish(false, id: request.id) }
         }
     }
 
-    private static func finish(_ ok: Bool) {
-        waiting?.resume(returning: ok)
-        waiting = nil
+    private static func finish(_ ok: Bool, id: String) {
+        guard let waiting, waiting.id == id else { return }
+        Self.waiting = nil
+        waiting.continuation.resume(returning: ok)
     }
 }
