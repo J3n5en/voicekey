@@ -113,10 +113,10 @@ struct SessionView: View {
             List {
                 if session.openedFromKeyboard && session.active {
                     Banner(text: Text(pipOn
-                        ? "会话已开启。把 VoiceKey 小窗拖到屏幕边藏起来，再点左上角的 **「◀ 原 App」** 回到输入框，点麦克风开始说话。"
+                        ? "会话已开启，VoiceKey 在后台待命，不占麦克风。点屏幕左上角的 **「◀ 原 App」** 回到输入框，点麦克风开始说话。"
                         : "会话已开启。点屏幕左上角的 **「◀ 原 App」** 回到刚才的输入框，再点一次麦克风开始说话。"))
                 } else if pipOn && !pipHintSeen {
-                    Banner(text: Text("VoiceKey 小窗已打开：拖到屏幕左右边缘就能藏起来。待机不占麦克风，点键盘麦克风才录音。"),
+                    Banner(text: Text("VoiceKey 在后台待命，不占麦克风，点键盘麦克风才录音。在多任务里划掉 VoiceKey，待命就停了。"),
                            action: ("知道了", { pipHintSeen = true }))
                 }
                 if !perms.micGranted {
@@ -133,7 +133,7 @@ struct SessionView: View {
                     .labelsHidden()
                 } header: { Text("待机方式") } footer: {
                     Text(session.config.standbyMode == .pip
-                         ? "会话期间显示 VoiceKey 小窗，拖到屏幕边可藏起来。待机不开麦克风，点键盘麦克风才录音，说完马上关闭。"
+                         ? "会话期间 VoiceKey 在后台待命，不占麦克风，点键盘麦克风才录音，说完马上关闭。在多任务里划掉 VoiceKey，待命就停了。"
                          : "会话期间一直开着麦克风，屏幕顶部持续显示录音指示。")
                 }
                 Section {
@@ -145,7 +145,7 @@ struct SessionView: View {
                         .pickerStyle(.segmented)
                     }
                 } header: { Text("会话") } footer: {
-                    Text("结束会话后关闭小窗和麦克风。快到时间时键盘里会提醒，说话会自动续期。")
+                    Text("结束会话后停止待命、关闭麦克风。快到时间时键盘里会提醒，说话会自动续期。")
                 }
                 Section {
                     if session.history.isEmpty {
@@ -221,7 +221,7 @@ struct SessionView: View {
         switch session.endReason {
         case .idle: return "因长时间无操作已自动结束。在键盘上点麦克风会重新开启"
         case .interrupted: return "被通话或其他 App 打断后未能恢复。点下面重新开启"
-        case .pipClosed: return "小窗已关闭，会话随之结束。点下面重新开启"
+        case .pipClosed: return "后台待命已停止，会话随之结束。点下面重新开启"
         case .bgDenied: return "后台没能开麦，会话已结束。重新开启后本次改为常开麦"
         case .failed: return "麦克风启动失败，请稍后重试"
         default: return "在键盘上点麦克风会自动开启"
@@ -461,7 +461,7 @@ struct OnboardingView: View {
             stepRow("1", "在任意 App 点输入框，按住 🌐 选「VoiceKey」", nil)
             stepRow("2", "打字，或点左上角麦克风", "默认中文 26 键全拼，键盘顶部「26｜九键」可切九宫格。空心麦克风会先跳到 VoiceKey 开会话，再点左上角「◀」回到原 App。")
             stepRow("3", "说完上屏，回到打字", "会话就绪时点麦克风直接开始说，再点结束。多渠道时选一条上屏；⌨ 返回打字。")
-            stepRow("4", "把小窗藏到屏幕边", "开会话后会出现 VoiceKey 小窗，拖到屏幕左右边缘藏起来就行。待机不占麦克风，点麦克风才录音。")
+            stepRow("4", "VoiceKey 在后台待命", "开会话后 VoiceKey 在后台待命，不占麦克风，点麦克风才录音。在多任务里划掉 VoiceKey，待命就停了。")
         }
     }
 

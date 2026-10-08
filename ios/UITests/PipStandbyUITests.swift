@@ -1,6 +1,6 @@
 import XCTest
 
-/// 真机：画中画待机。主 App 开会话后退到后台只留小窗，在备忘录里点麦克风由主 App 后台开麦（-fakemic 只替换音频数据，开麦流程是真的）
+/// 真机：画中画待机。主 App 开会话后退到后台只留画中画（全透明、高度约为 0），在备忘录里点麦克风由主 App 后台开麦（-fakemic 只替换音频数据，开麦流程是真的）
 final class PipStandbyUITests: XCTestCase {
     private let app = XCUIApplication()
     private let notes = XCUIApplication(bundleIdentifier: "com.apple.mobilenotes")
@@ -53,9 +53,15 @@ final class PipStandbyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["语音就绪"].waitForExistence(timeout: 8), "会话没开好")
         shot("app")
         notes.launch()
+        // 登了 iCloud 时停在文件夹列表，新建会先弹账户选择；先进「我的iPhone」的备忘录文件夹
+        if notes.navigationBars["文件夹"].waitForExistence(timeout: 2) {
+            notes.cells.matching(NSPredicate(format: "label == '备忘录'")).allElementsBoundByIndex.last?.tap()
+        }
         let compose = notes.buttons.matching(NSPredicate(format: "label == '新备忘录' OR label CONTAINS '新建'")).firstMatch
         XCTAssertTrue(compose.waitForExistence(timeout: 5))
         if compose.isEnabled { compose.tap() } else { field.tap() }
+        if !notes.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
+        _ = notes.keyboards.firstMatch.waitForExistence(timeout: 5)
         notes.showVoiceKey(mic)
         XCTAssertTrue(mic.exists, "备忘录里没找到 VoiceKey 键盘")
         XCTAssertTrue(notes.staticTexts["语音就绪"].waitForExistence(timeout: 5), "画中画待机时应是实心麦克风")
@@ -94,19 +100,16 @@ final class PipStandbyUITests: XCTestCase {
         XCTAssertTrue(wait(15) { self.ready.exists || self.mic.exists }, "\(name)：结束后应回到待命")
     }
 
-    /// 屏幕上的小窗
+    /// 屏幕上的画中画窗口（不含系统放在屏幕外的占位）
     private var pip: CGRect? {
         guard let s = try? springboard.snapshot() else { return nil }
+        let w = s.frame.width
         func find(_ n: XCUIElementSnapshot) -> CGRect? {
-            if n.identifier == "PIP-SBInteractionPassThroughView", n.frame.width > 60, n.frame.height > 30 { return n.frame }
+            if n.identifier == "PIP-SBInteractionPassThroughView", n.frame.width > 60, n.frame.minX < w { return n.frame }
             for c in n.children { if let f = find(c) { return f } }
             return nil
         }
         return find(s)
-    }
-
-    private func screen(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate {
-        springboard.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y))
     }
 
     /// 连说 5 句：后台开麦、出字、停顿自动结束
@@ -118,43 +121,17 @@ final class PipStandbyUITests: XCTestCase {
         }
     }
 
-    /// 小窗拖到屏幕边藏起来后照常能用
-    func testStashedPip() {
+    /// 画中画看不见：窗口高度约为 0，主屏截图里没有窗口和把手，照常能用
+    func testPipInvisible() {
         standby()
-        guard let w = pip else { return XCTFail("没找到小窗") }
-        let c = screen(w.midX, w.midY)
-        c.press(forDuration: 0.1, thenDragTo: c.withOffset(CGVector(dx: 420, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        guard let w = pip else { return XCTFail("画中画没开") }
+        XCTAssertLessThan(w.height, 1, "画中画窗口应看不见")
+        XCUIDevice.shared.press(.home)
         sleep(2)
-        shot("stashed")
-        XCTAssertTrue(pip.map { $0.minX > 300 } ?? true, "小窗应已藏到屏幕边")
-        say("stashed-1")
-        say("stashed-2")
-    }
-
-    /// 关掉小窗：键盘变空心麦克风，点了跳主 App，回来能接着用
-    func testClosingPipFallsBackToApp() {
-        standby()
-        guard let w = pip else { return XCTFail("没找到小窗") }
-        screen(w.midX, w.midY).tap()
-        sleep(1)
-        shot("pip-controls")
-        screen(w.minX + w.width * 0.07, w.minY + w.height * 0.1).tap()
-        reopenFromKeyboard("pip-closed")
-    }
-
-    /// 点小窗的「还原」回到主 App：小窗自动重开，回去照常能用
-    func testRestoreFromPip() {
-        standby()
-        guard let w = pip else { return XCTFail("没找到小窗") }
-        screen(w.midX, w.midY).tap()
-        sleep(1)
-        screen(w.maxX - w.width * 0.07, w.minY + w.height * 0.1).tap()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 6), "没有回到 VoiceKey")
-        XCTAssertTrue(wait(6) { self.pip != nil }, "回到 App 后小窗应重新打开")
-        shot("restored")
+        shot("home")
         notes.activate()
         XCTAssertTrue(ready.waitForExistence(timeout: 6))
-        say("after-restore")
+        say("invisible-1")
     }
 
     /// 主 App 被杀：键盘变空心麦克风，点了冷启动主 App 重开小窗

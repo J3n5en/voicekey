@@ -697,9 +697,6 @@ final class SessionManager: ObservableObject {
             utterance: utt?.wire(level: min(1, lv * 8)))
         Bus.write(s, VK.File.state)
         Bus.post(VK.Note.state)
-        if active, standby == .pip {
-            pip.show(interrupted ? "暂停" : utt?.phase == .recording ? "聆听中" : utt?.phase == .finalizing ? "识别中" : "待命")
-        }
     }
 
     /// 识别错误原文只进日志，界面只给简短原因

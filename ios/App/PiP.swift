@@ -1,7 +1,7 @@
 import AVKit
 import UIKit
 
-/// 画中画待机小窗：小窗可见时系统给 App 挂 PIPVisible，后台可按需开麦。内容为 VoiceKey 图标 + 状态
+/// 画中画待机：画中画开着时系统给 App 挂 PIPVisible，后台可按需开麦。小窗内容全透明且高度约为 0，用户看不到
 final class PiPStandby: NSObject {
     /// App 在后台时小窗被关掉、被系统收回或没能自动打开
     var onLost: ((String) -> Void)?
@@ -15,13 +15,11 @@ final class PiPStandby: NSObject {
     private var pending = false
     private var restoring = false
     private var retrying = false
-    private var label = "待命"
     private let display = AVSampleBufferDisplayLayer()
     private let host = UIView(frame: CGRect(x: 0, y: 0, width: 32, height: 18))
     private var controller: AVPictureInPictureController?
     private var possible: NSKeyValueObservation?
     private var deadline: DispatchWorkItem?
-    private static let size = CGSize(width: 480, height: 270)
 
     override init() {
         super.init()
@@ -80,13 +78,6 @@ final class PiPStandby: NSObject {
         host.removeFromSuperview()
     }
 
-    /// 更新小窗里的状态文字
-    func show(_ text: String) {
-        guard text != label else { return }
-        label = text
-        if controller != nil { draw() }
-    }
-
     private func kick() {
         guard pending, let c = controller, !c.isPictureInPictureActive else { return }
         // 从键盘跳过来时 App 还在 inactive，这时开会报 -1001，等 active 再开
@@ -116,57 +107,19 @@ final class PiPStandby: NSObject {
 
     // MARK: 画面
 
+    /// 启动时送全透明的极扁画面：窗口高度约为 0，看不到窗口和把手（iPhone 13 / iOS 17.3.1 实测）
     private func draw() {
-        guard let buf = Self.sample(Self.image(label)) else { return Bus.log("pip: frame failed") }
+        guard let buf = Self.frame else { return Bus.log("pip: frame failed") }
         if display.status == .failed { display.flush() }
         display.enqueue(buf)
     }
 
-    /// 深色底 + 渐变声波图标 + 状态
-    private static func image(_ text: String) -> UIImage {
-        let f = UIGraphicsImageRendererFormat()
-        f.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: f).image { ctx in
-            let cg = ctx.cgContext
-            UIColor(red: 0.09, green: 0.1, blue: 0.18, alpha: 1).setFill()
-            cg.fill(CGRect(origin: .zero, size: size))
-            let colors = [UIColor(red: 0.13, green: 0.76, blue: 1, alpha: 1), UIColor(red: 0.48, green: 0.36, blue: 1, alpha: 1), UIColor(red: 1, green: 0.24, blue: 0.55, alpha: 1)]
-            let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors.map(\.cgColor) as CFArray, locations: [0, 0.5, 1])!
-            // 图标：与 Logo 相同的 5 根声波条
-            let s: CGFloat = 150, ox: CGFloat = 50, oy = (size.height - s) / 2
-            let w = s * 0.09, gap = s * 0.08
-            let total = w * 5 + gap * 4
-            let path = UIBezierPath()
-            for (i, h) in ([6, 14, 20, 12, 4] as [CGFloat]).enumerated() {
-                let bh = s * h / 32 + w
-                let x = ox + (s - total) / 2 + CGFloat(i) * (w + gap)
-                path.append(UIBezierPath(roundedRect: CGRect(x: x, y: oy + (s - bh) / 2, width: w, height: bh), cornerRadius: w / 2))
-            }
-            cg.saveGState()
-            path.addClip()
-            cg.drawLinearGradient(grad, start: CGPoint(x: ox, y: 0), end: CGPoint(x: ox + s, y: 0), options: [])
-            cg.restoreGState()
-            // 底部渐变细条
-            cg.saveGState()
-            cg.clip(to: CGRect(x: 0, y: size.height - 6, width: size.width, height: 6))
-            cg.drawLinearGradient(grad, start: .zero, end: CGPoint(x: size.width, y: 0), options: [])
-            cg.restoreGState()
-            let tx = ox + s + 30
-            ("VoiceKey" as NSString).draw(at: CGPoint(x: tx, y: 82), withAttributes: [.font: UIFont.systemFont(ofSize: 30, weight: .semibold), .foregroundColor: UIColor(white: 1, alpha: 0.55)])
-            (text as NSString).draw(at: CGPoint(x: tx, y: 124), withAttributes: [.font: UIFont.systemFont(ofSize: 56, weight: .bold), .foregroundColor: UIColor.white])
-        }
-    }
-
-    private static func sample(_ img: UIImage) -> CMSampleBuffer? {
-        guard let cg = img.cgImage else { return nil }
+    private static var frame: CMSampleBuffer? {
         var pb: CVPixelBuffer?
-        let attrs = [kCVPixelBufferIOSurfacePropertiesKey: [:], kCVPixelBufferCGImageCompatibilityKey: true, kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary
-        guard CVPixelBufferCreate(nil, cg.width, cg.height, kCVPixelFormatType_32BGRA, attrs, &pb) == kCVReturnSuccess, let pb else { return nil }
+        let attrs = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        guard CVPixelBufferCreate(nil, 4680, 1, kCVPixelFormatType_32BGRA, attrs, &pb) == kCVReturnSuccess, let pb else { return nil }
         CVPixelBufferLockBaseAddress(pb, [])
-        let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: cg.width, height: cg.height, bitsPerComponent: 8,
-                            bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: CGColorSpaceCreateDeviceRGB(),
-                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-        ctx?.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        memset(CVPixelBufferGetBaseAddress(pb), 0, CVPixelBufferGetDataSize(pb))
         CVPixelBufferUnlockBaseAddress(pb, [])
         var fmt: CMVideoFormatDescription?
         guard CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt) == noErr, let fmt else { return nil }
@@ -187,7 +140,6 @@ extension PiPStandby: AVPictureInPictureControllerDelegate {
         pending = false
         deadline?.cancel()
         Bus.log("pip: active state=\(UIApplication.shared.applicationState.rawValue)")
-        draw()
     }
 
     func pictureInPictureController(_ c: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {

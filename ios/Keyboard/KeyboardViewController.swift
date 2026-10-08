@@ -625,7 +625,7 @@ final class KeyboardViewController: UIInputViewController {
             bigSub.text = "再点一下结束 · 识别中再点＝接着说"
         } else if sessionOn {
             bigLabel.text = "点按回 VoiceKey"
-            bigSub.text = "画中画待机被打断，回 VoiceKey 重新开启小窗"
+            bigSub.text = "后台待命已停止，回 VoiceKey 重新开启"
         } else {
             bigLabel.text = "点按开启会话"
             bigSub.text = "会先跳到 VoiceKey 开启会话，再点左上角「◀」回来"
@@ -669,7 +669,7 @@ final class KeyboardViewController: UIInputViewController {
             let m = s.idleMinutes
             return Notice(kind: .info, text: "会话已结束（\(m > 0 ? "\(m) 分钟" : "长时间")未使用）。点麦克风会重新开启。")
         case .interrupted: return Notice(kind: .info, text: "会话被通话或其他 App 打断后已结束。点麦克风会重新开启。")
-        case .pipClosed: return Notice(kind: .info, text: "画中画小窗已关闭，会话已结束。点麦克风回 VoiceKey 重新开启。")
+        case .pipClosed: return Notice(kind: .info, text: "VoiceKey 后台待命已停止，会话已结束。点麦克风回 VoiceKey 重新开启。")
         case .bgDenied: return Notice(kind: .info, text: "后台没能开麦，会话已结束。点麦克风回 VoiceKey，本次改为常开麦。")
         case .micDenied: return Notice(kind: .err, text: "麦克风权限已关闭，点麦克风到 VoiceKey 里开启。")
         default: return nil

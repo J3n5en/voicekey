@@ -119,13 +119,12 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 ## 会话规则（主 App 实现）
 
 - 待机方式（会话页可选，默认画中画；会话中在前台切换立即生效，不结束会话）：
-  - **画中画待机**：开会话时设 PlayAndRecord 类别（不激活）并打开画中画小窗（`AVPictureInPictureController` + `AVSampleBufferDisplayLayer`，显示图标与「待命 / 聆听中 / 识别中」），同时设为进后台自动开。小窗可拖到屏幕边藏起来。待机时**不激活音频会话、不跑引擎**（系统 MediaSafetyNet 为 `Mic(Cold)`，无橙点）。小窗可见时系统给 App 挂 `PIPVisible`，收到 `start` 后在后台：设类别 → `setActive(true)` → 启动引擎 → 开录；一段录音结束（`stop`、1.5 秒停顿、被打断、`close`）立即停引擎并 `setActive(false, notifyOthersOnDeactivation)`，橙点熄灭。`continue` 再按需开麦。开关步骤见 `MicPlan`。
+  - **画中画待机**：开会话时设 PlayAndRecord 类别（不激活）并打开画中画（`AVPictureInPictureController` + `AVSampleBufferDisplayLayer`），同时设为进后台自动开。启动时送一帧全透明的 4680×1 画面（参考 Typeless 日志中的宽高比），窗口高度约为 0，屏幕上看不到窗口和把手；不送帧则 `startPictureInPicture` 一直报 -1003 起不来（iPhone 13 / iOS 17.3.1 实测，iOS 18 / 26 未验证）。待机时**不激活音频会话、不跑引擎**（系统 MediaSafetyNet 为 `Mic(Cold)`，无橙点）。画中画开着时系统给 App 挂 `PIPVisible`，收到 `start` 后在后台：设类别 → `setActive(true)` → 启动引擎 → 开录；一段录音结束（`stop`、1.5 秒停顿、被打断、`close`）立即停引擎并 `setActive(false, notifyOthersOnDeactivation)`，橙点熄灭。`continue` 再按需开麦。开关步骤见 `MicPlan`。
   - **常开麦**：会话期间麦克风常开保活（橙点常亮），即 v1 行为。
 - 画中画回落（都写日志，含错误码）：
   - 后台开麦失败：错误码 `!pri` 561017449 / `!int` 560557684 / `siri` 1936290409 视为被占用 → `interrupted: true`，这句 `micBusy`，键盘空心麦克风，点了拉起主 App，回前台清掉 `interrupted`；其他（如 `!rec` 561145187、`what` 2003329396）→ 这句 `bgDenied`、会话结束 `endReason: bgDenied`，键盘自动拉起主 App，本次改为常开麦。
   - 小窗被关掉、被系统收回、进后台 2 秒内没自动打开、后台时心跳发现小窗不在：结束会话 `endReason: pipClosed`。后台收到 `start` 时小窗不在：这句 `noSession` 并结束会话（`pipClosed`），键盘拉起主 App 重开小窗。
   - 前台 5 秒内打不开小窗（或系统不支持画中画）：本次会话改为常开麦。
-  - 用户点小窗回到 App：小窗随会话常驻，回前台后重新打开。
 - 闲置超时：默认 10 分钟，主 App 会话页可选 5 / 10 / 30 分钟 / 不自动；说话或定稿中不计时。到点关麦（画中画同时关小窗）、`active` 变 false、`endReason: idle`。键盘可在 `expiresAt - now < 30` 时提醒「说话会自动续期」。
 - 蓝牙耳机：不走 HFP，待命和说话都用手机自带麦克风，耳机保持 A2DP 音质。
 - 打断（来电、Siri、其他录音 App）：`interrupted: true`，正在说的句子按 `stopReason: interrupted` 进入定稿（画中画同时关麦）。常开麦：打断结束后自动重新拿麦克风（立即、1 秒、3 秒各试一次），都失败且在后台则结束会话（`endReason: interrupted`），键盘下次点麦克风时会拉起主 App 重开；键盘在 `interrupted` 时发 `start`，主 App 会再试一次，仍失败返回 `micBusy`。画中画：打断结束或回到前台即清掉 `interrupted`，下次录音再开麦；`interrupted` 期间键盘空心麦克风，点了拉起主 App。
@@ -144,6 +143,6 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 
 日志同 SPIKE.md（iOS 17 设备从 App 自己容器的 `Library/Caches/log.txt` 拉）。画中画相关：`pip: active/stopped/failed`、`mic Hot in Nms (各步耗时)`、`mic Cold`、`first audio tap->rec=…ms`（点麦克风到第一块音频）、心跳 `alive … standby= mic=Cold|Hot pip=`。测延迟时不要同时开 `idevicesyslog` 全量抓日志，会把开麦拖慢到 0.5–1 秒。
 
-键盘真机冒烟（手机须解锁，已添加 VoiceKey 键盘并开完全访问）：`xcodebuild test -project VoiceKeyIOS.xcodeproj -scheme VoiceKeyUITests -destination id=<UDID> -allowProvisioningUpdates`。用 `-fakemic` 在引导「试一试」和备忘录里点键盘，核对输入框文字与最近上屏一致、改字/移光标后停止改写、多渠道候选、会话到期提醒、无会话跳主 App（这些按 `-standby mic` 跑）。`PipStandbyUITests` 覆盖画中画：备忘录里后台开录 5 次、小窗藏边、关小窗、杀主 App、闲置到点、锁屏解锁、长待机（`TEST_RUNNER_VK_STANDBY_MIN=15`）。`-fakemic` 只替换音频数据，后台开麦流程是真的。会装上 Debug 包，测完用 `build.sh <UDID>` 换回 Release。
+键盘真机冒烟（手机须解锁，已添加 VoiceKey 键盘并开完全访问）：`xcodebuild test -project VoiceKeyIOS.xcodeproj -scheme VoiceKeyUITests -destination id=<UDID> -allowProvisioningUpdates`。用 `-fakemic` 在引导「试一试」和备忘录里点键盘，核对输入框文字与最近上屏一致、改字/移光标后停止改写、多渠道候选、会话到期提醒、无会话跳主 App（这些按 `-standby mic` 跑）。`PipStandbyUITests` 覆盖画中画：备忘录里后台开录 5 次、画中画看不见（窗口高度约为 0）、杀主 App、闲置到点、锁屏解锁、长待机（`TEST_RUNNER_VK_STANDBY_MIN=15`）。`-fakemic` 只替换音频数据，后台开麦流程是真的。会装上 Debug 包，测完用 `build.sh <UDID>` 换回 Release。
 
 引导真机测试（会改设置里的键盘与完全访问开关，默认跳过）：先 `xcrun devicectl device uninstall app --device <UDID> do.j3.voicekey.ios`，再 `TEST_RUNNER_VK_ONBOARDING=1 xcodebuild test … -only-testing:VoiceKeyUITests/OnboardingUITests/testGrantAll`（逐项授权，跑完键盘、完全访问、麦克风都已打开）或 `testSkipAll`（全不授权也能走完）。每个用例前都要重新卸载。
