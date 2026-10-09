@@ -107,6 +107,7 @@ struct SessionView: View {
     @AppStorage("pipHintSeen") private var pipHintSeen = false
 
     private var pipOn: Bool { session.active && session.standby == .pip }
+    private var idleMode: Standby { session.active ? session.standby : session.config.standbyMode }
 
     var body: some View {
         NavigationStack {
@@ -137,15 +138,21 @@ struct SessionView: View {
                          : "会话期间一直开着麦克风，屏幕顶部持续显示录音指示。")
                 }
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("无操作自动结束")
-                        Picker("无操作自动结束", selection: $session.config.idleMinutes) {
-                            ForEach(Config.idleChoices, id: \.self) { Text($0 == 0 ? "不自动" : "\($0) 分钟").tag($0) }
+                    if idleMode == .pip {
+                        LabeledContent("无操作自动结束", value: "不自动结束")
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("无操作自动结束")
+                            Picker("无操作自动结束", selection: $session.config.idleMinutes) {
+                                ForEach(Config.idleChoices, id: \.self) { Text($0 == 0 ? "不自动" : "\($0) 分钟").tag($0) }
+                            }
+                            .pickerStyle(.segmented)
                         }
-                        .pickerStyle(.segmented)
                     }
                 } header: { Text("会话") } footer: {
-                    Text("结束会话后停止待命、关闭麦克风。快到时间时键盘里会提醒，说话会自动续期。")
+                    Text(idleMode == .pip
+                         ? "画中画待机不因闲置自动结束；闲置时长仅适用于常开麦，原设置会保留。可手动结束会话，在多任务里划掉 VoiceKey 也会停止待命。"
+                         : "结束会话后停止待命、关闭麦克风。快到时间时键盘里会提醒，说话会自动续期。")
                 }
                 Section {
                     if session.history.isEmpty {
@@ -214,7 +221,7 @@ struct SessionView: View {
     private var subtitle: String {
         if session.active {
             if session.interrupted { return pipOn ? "被通话或其他 App 打断，结束后自动恢复" : "麦克风被通话或其他 App 占用，结束后自动恢复" }
-            let m = session.config.idleMinutes
+            let m = pipOn ? 0 : session.config.idleMinutes
             let note = session.standby != session.config.standbyMode ? "画中画没能用，本次改为常开麦 · " : ""
             return note + "已保持 \(mmss(VK.now - (session.since ?? VK.now))) · " + (m > 0 ? "无操作 \(m) 分钟后自动结束" : "不会自动结束，需手动结束")
         }

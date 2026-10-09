@@ -700,7 +700,7 @@ final class KeyboardViewController: UIInputViewController {
     /// 没有手动提示时，按会话状态给出提醒
     private func sessionNotice(_ u: LiveState.Utterance?) -> Notice? {
         guard hasFullAccess, u == nil, !starting, let s = st?.session else { return nil }
-        if sessionOn, let e = s.expiresAt, e > now, e - now < 30, e != Self.dismissedExpiry {
+        if sessionOn, let e = s.idleExpiry, e > now, e - now < 30, e != Self.dismissedExpiry {
             return Notice(kind: .warn, text: "会话 \(mmss(e - now)) 后结束 · 现在说话会自动续期")
         }
         guard !s.active, let end = s.endedAt, now - end < 3600, end != Self.dismissedEnd else { return nil }
@@ -819,7 +819,7 @@ final class KeyboardViewController: UIInputViewController {
         note.onClose = { [weak self] in
             guard let self else { return }
             if self.notice == nil, let s = self.st?.session {
-                if s.active { Self.dismissedExpiry = s.expiresAt } else { Self.dismissedEnd = s.endedAt }
+                if s.active { Self.dismissedExpiry = s.idleExpiry } else { Self.dismissedEnd = s.endedAt }
             }
             self.notice = nil
             self.render()

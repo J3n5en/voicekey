@@ -26,7 +26,7 @@ final class SessionManager: ObservableObject {
     var expiresAt: Double? {
         guard active else { return nil }
         let busy = utt.map { $0.phase == .recording || $0.phase == .finalizing } ?? false
-        return Idle.expiry(lastActivity: lastActivity, seconds: idleSeconds, busy: busy, now: VK.now)
+        return Idle.expiry(lastActivity: lastActivity, seconds: idleSeconds, standby: standby, busy: busy, now: VK.now)
     }
 
     private let launch = UUID().uuidString
@@ -64,7 +64,7 @@ final class SessionManager: ObservableObject {
         ackSeq = max(old?.ackSeq ?? 0, Bus.read(CommandQueue.self, VK.File.cmd)?.maxSeq ?? 0)
         nextUtt = (old?.utterance?.id ?? 0) + 1
         if let o = old?.session, o.active {
-            if let e = o.expiresAt, e <= VK.now {
+            if let e = o.idleExpiry, e <= VK.now {
                 endReason = .idle
                 endedAt = e
             } else {
@@ -188,6 +188,7 @@ final class SessionManager: ObservableObject {
             try run(MicPlan.steps(.disarm, standby, hot: hot))
             standby = m
             try run(MicPlan.steps(.arm, m, hot: false))
+            if m == .mic { touch() }
         } catch {
             Bus.log("standby switch failed: \(error)")
             disarm(.failed)
@@ -284,6 +285,7 @@ final class SessionManager: ObservableObject {
             try run(MicPlan.steps(.disarm, .pip, hot: hot))
             standby = .mic
             try run(MicPlan.steps(.arm, .mic, hot: false))
+            touch()
             Bus.log("fallback to mic standby")
             publish()
         } catch {

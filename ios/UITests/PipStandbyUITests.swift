@@ -141,12 +141,26 @@ final class PipStandbyUITests: XCTestCase {
         reopenFromKeyboard("killed", fake: false)
     }
 
-    /// 闲置到点：关小窗、结束会话，键盘变空心
-    func testIdleEndClosesPip() {
+    /// 超过原闲置时长仍待命，无到期提醒；手动结束仍关闭画中画
+    func testIdleDoesNotEndPipButManualEndDoes() {
         standby(["-idlesec", "40"])
         XCTAssertNotNil(pip)
-        XCTAssertTrue(wait(60) { self.pip == nil }, "闲置到点应关掉小窗")
-        reopenFromKeyboard("idle")
+        let notice = notes.staticTexts.matching(NSPredicate(format: "label CONTAINS '后结束'"))
+        for _ in 0..<60 {
+            XCTAssertTrue(ready.exists, "超过原闲置时长仍应待命")
+            XCTAssertFalse(notice.firstMatch.exists, "画中画不应显示闲置倒计时")
+            sleep(1)
+        }
+        XCTAssertNotNil(pip)
+        app.activate()
+        for _ in 0..<2 where !app.buttons["结束会话"].exists {
+            XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 5))
+            app.buttons["完成"].tap()
+        }
+        XCTAssertTrue(app.buttons["结束会话"].waitForExistence(timeout: 5))
+        app.buttons["结束会话"].tap()
+        XCTAssertTrue(app.staticTexts["未开启"].waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(5) { self.pip == nil })
     }
 
     /// 锁屏再解锁后还能用

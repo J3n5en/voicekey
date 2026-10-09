@@ -75,7 +75,7 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
   "session": {
     "active": true,
     "since": 1791399000,
-    "expiresAt": 1791400600,   // 无操作到这个时刻自动结束；null = 不自动或未开
+    "expiresAt": null,         // 常开麦无操作到此时刻自动结束；画中画始终 null
     "idleMinutes": 10,
     "interrupted": false,      // 来电 / Siri / 其他录音 App 占着麦克风
     "endReason": null,         // 未开启时：user | idle | interrupted | micDenied | failed | pipClosed | bgDenied
@@ -129,7 +129,7 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
   - 后台开麦失败：错误码 `!pri` 561017449 / `!int` 560557684 / `siri` 1936290409 视为被占用 → `interrupted: true`，这句 `micBusy`，键盘空心麦克风，点了拉起主 App，回前台清掉 `interrupted`；其他（如 `!rec` 561145187、`what` 2003329396）→ 这句 `bgDenied`、会话结束 `endReason: bgDenied`，键盘自动拉起主 App，本次改为常开麦。
   - 小窗被关掉、被系统收回、进后台 2 秒内没自动打开、后台时心跳发现小窗不在：结束会话 `endReason: pipClosed`。后台收到 `start` 时小窗不在：这句 `noSession` 并结束会话（`pipClosed`），键盘拉起主 App 重开小窗。
   - 前台 5 秒内打不开小窗（或系统不支持画中画）：本次会话改为常开麦。
-- 闲置超时：默认 10 分钟，主 App 会话页可选 5 / 10 / 30 分钟 / 不自动；说话或定稿中不计时。到点关麦（画中画同时关小窗）、`active` 变 false、`endReason: idle`。键盘可在 `expiresAt - now < 30` 时提醒「说话会自动续期」。
+- 闲置超时仅适用于常开麦：默认 10 分钟，主 App 会话页可选 5 / 10 / 30 分钟 / 不自动；说话或定稿中不计时。到点关麦、`active` 变 false、`endReason: idle`。键盘可在 `expiresAt - now < 30` 时提醒「说话会自动续期」。画中画不因闲置结束、无到期提醒，升级后也忽略旧画中画会话的 `expiresAt`；原 `idleMinutes` 保留，切回常开麦仍有效。
 - 蓝牙耳机：不走 HFP，待命和说话都用手机自带麦克风，耳机保持 A2DP 音质。
 - 打断（来电、Siri、其他录音 App）：`interrupted: true`，正在说的句子按 `stopReason: interrupted` 进入定稿（画中画同时关麦）。常开麦：打断结束后自动重新拿麦克风（立即、1 秒、3 秒各试一次），都失败且在后台则结束会话（`endReason: interrupted`），键盘下次点麦克风时会拉起主 App 重开；键盘在 `interrupted` 时发 `start`，主 App 会再试一次，仍失败返回 `micBusy`。画中画：打断结束或回到前台即清掉 `interrupted`，下次录音再开麦；`interrupted` 期间键盘空心麦克风，点了拉起主 App。
 - 被杀后冷启动：上次会话没到期的，主 App 一启动（包括被键盘拉起）就自动重开。
@@ -142,11 +142,11 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 - `-onboarded` 跳过引导；`-arm` 开会话；`-enable a,b,c` 只打开这些渠道；`-multi 0|1`；`-standby pip|mic` 待机方式
 - `-fakemic` 用内置录音（后接 3 秒静音循环）代替麦克风
 - `-script "start a,b 1.5;wait 6;stop;wait 6;continue;wait 4;stop;wait 6;commit b"` 按键盘方式发命令并把每步后的 state 写进日志（`start` 参数：渠道或 `-`、静音秒数）
-- `-idlesec N` 把闲置超时改成 N 秒
+- `-idlesec N` 把常开麦闲置超时改成 N 秒（画中画忽略）
 - `-selftest` 用内置录音测全部渠道
 
 日志同 SPIKE.md（iOS 17 设备从 App 自己容器的 `Library/Caches/log.txt` 拉）。画中画相关：`pip: active/stopped/failed`、`mic Hot in Nms (各步耗时)`、`mic Cold`、`first audio tap->rec=…ms`（点麦克风到第一块音频）、心跳 `alive … standby= mic=Cold|Hot pip=`。测延迟时不要同时开 `idevicesyslog` 全量抓日志，会把开麦拖慢到 0.5–1 秒。
 
-键盘真机冒烟（手机须解锁，已添加 VoiceKey 键盘并开完全访问）：`xcodebuild test -project VoiceKeyIOS.xcodeproj -scheme VoiceKeyUITests -destination id=<UDID> -allowProvisioningUpdates`。用 `-fakemic` 在引导「试一试」和备忘录里点键盘，核对输入框文字与最近上屏一致、改字/移光标后停止改写、多渠道候选、会话到期提醒、无会话跳主 App（这些按 `-standby mic` 跑）。`PipStandbyUITests` 覆盖画中画：备忘录里后台开录 5 次、画中画看不见（窗口高度约为 0）、杀主 App、闲置到点、锁屏解锁、长待机（`TEST_RUNNER_VK_STANDBY_MIN=15`）。`-fakemic` 只替换音频数据，后台开麦流程是真的。会装上 Debug 包，测完用 `build.sh <UDID>` 换回 Release。
+键盘真机冒烟（手机须解锁，已添加 VoiceKey 键盘并开完全访问）：`xcodebuild test -project VoiceKeyIOS.xcodeproj -scheme VoiceKeyUITests -destination id=<UDID> -allowProvisioningUpdates`。用 `-fakemic` 在引导「试一试」和备忘录里点键盘，核对输入框文字与最近上屏一致、改字/移光标后停止改写、多渠道候选、会话到期提醒、无会话跳主 App（这些按 `-standby mic` 跑）。`PipStandbyUITests` 覆盖画中画：备忘录里后台开录 5 次、画中画看不见（窗口高度约为 0）、杀主 App、超过原闲置时长仍待命且无倒计时、手动结束、锁屏解锁、长待机（`TEST_RUNNER_VK_STANDBY_MIN=15`）。`-fakemic` 只替换音频数据，后台开麦流程是真的。会装上 Debug 包，测完用 `build.sh <UDID>` 换回 Release。
 
 引导真机测试（会改设置里的键盘与完全访问开关，默认跳过）：先 `xcrun devicectl device uninstall app --device <UDID> do.j3.voicekey.ios`，再 `TEST_RUNNER_VK_ONBOARDING=1 xcodebuild test … -only-testing:VoiceKeyUITests/OnboardingUITests/testGrantAll`（逐项授权，跑完键盘、完全访问、麦克风都已打开）或 `testSkipAll`（全不授权也能走完）。每个用例前都要重新卸载。

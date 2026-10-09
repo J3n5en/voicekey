@@ -47,9 +47,63 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testIdleExpiry() {
-        XCTAssertNil(Idle.expiry(lastActivity: 100, seconds: 0, busy: false, now: 200))
-        XCTAssertEqual(Idle.expiry(lastActivity: 100, seconds: 600, busy: false, now: 200), 700)
-        XCTAssertEqual(Idle.expiry(lastActivity: 100, seconds: 600, busy: true, now: 200), 800)
+        XCTAssertNil(Idle.expiry(lastActivity: 100, seconds: 0, standby: .mic, busy: false, now: 200))
+        XCTAssertEqual(Idle.expiry(lastActivity: 100, seconds: 600, standby: .mic, busy: false, now: 200), 700)
+        XCTAssertEqual(Idle.expiry(lastActivity: 100, seconds: 600, standby: .mic, busy: true, now: 200), 800)
+    }
+
+    func testPipNeverExpiresEvenPastSavedIdleLimit() {
+        for minutes in Config.idleChoices {
+            for busy in [false, true] {
+                for now in [200.0, 399, 400, 699, 700, 1900, 86400] {
+                    XCTAssertNil(Idle.expiry(lastActivity: 100, seconds: Double(minutes * 60), standby: .pip, busy: busy, now: now))
+                }
+            }
+        }
+    }
+
+    func testMicExpiresAtSavedIdleLimit() throws {
+        for minutes in Config.idleChoices where minutes > 0 {
+            let deadline = Double(100 + minutes * 60)
+            for now in [deadline - 1, deadline, deadline + 1] {
+                let expiry = try XCTUnwrap(Idle.expiry(lastActivity: 100, seconds: Double(minutes * 60), standby: .mic, busy: false, now: now))
+                XCTAssertEqual(expiry <= now, now >= deadline)
+            }
+        }
+    }
+
+    func testPipUpgradeAndModeSwitchPreserveSavedSettings() throws {
+        for minutes in Config.idleChoices {
+            var old = Config.initial
+            old.idleMinutes = minutes
+            old.channels[1].on = true
+            old.channels[4].on = true
+            old.multi = false
+            old.defaultChannel = "b"
+            old.lastPick = "e"
+            var c = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(old)).migrated()
+            XCTAssertEqual(c, old)
+            for mode in [Standby.mic, .pip, .mic] {
+                c.standby = mode
+                c = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(c))
+                let expiry = Idle.expiry(lastActivity: 100, seconds: Double(c.idleMinutes * 60), standby: c.standbyMode, busy: false, now: 86400)
+                XCTAssertEqual(expiry, mode == .mic && minutes > 0 ? Double(100 + minutes * 60) : nil)
+                var expected = old
+                expected.standby = mode
+                XCTAssertEqual(c, expected)
+            }
+        }
+    }
+
+    func testLegacyPipDeadlineIgnoredForRecoveryAndKeyboard() throws {
+        let json = #"{"active":true,"expiresAt":700,"idleMinutes":10,"interrupted":false,"standby":"pip"}"#
+        var s = try JSONDecoder().decode(LiveState.Session.self, from: Data(json.utf8))
+        XCTAssertNil(s.idleExpiry, "旧画中画倒计时不应触发恢复时过期或键盘提醒")
+        XCTAssertTrue(s.micReady)
+        s.standby = .mic
+        XCTAssertEqual(s.idleExpiry, 700)
+        s.standby = nil
+        XCTAssertEqual(s.idleExpiry, 700, "v1 常开麦会话保留原到期时间")
     }
 
     func testConfigChannelResolution() {
@@ -182,6 +236,7 @@ final class ProtocolTests: XCTestCase {
         let upgraded = try JSONDecoder().decode(Config.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(upgraded.standbyMode, .pip, "旧版配置升级后默认画中画")
         XCTAssertEqual(upgraded.channels, Config.initial.channels, "升级不丢渠道设置")
+        XCTAssertNil(Idle.expiry(lastActivity: 100, seconds: Double(upgraded.idleMinutes * 60), standby: upgraded.standbyMode, busy: false, now: 86400))
         var c = Config.initial
         c.standby = .mic
         let back = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(c))
@@ -216,7 +271,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(MicPlan.steps(.recordEnd, .pip, hot: true), [.engineOff, .deactivate], "先停引擎再关会话")
         XCTAssertEqual(MicPlan.steps(.recordEnd, .pip, hot: false), [])
         XCTAssertEqual(MicPlan.steps(.disarm, .pip, hot: true), [.engineOff, .deactivate, .pipOff])
-        XCTAssertEqual(MicPlan.steps(.disarm, .pip, hot: false), [.pipOff], "闲置到点：关小窗结束会话")
+        XCTAssertEqual(MicPlan.steps(.disarm, .pip, hot: false), [.pipOff], "手动结束仍关小窗")
 
         // 模拟一轮：开会话 → 说 → 停 → 接着说 → 停 → 结束，录音之外麦克风都关着
         var hot = false

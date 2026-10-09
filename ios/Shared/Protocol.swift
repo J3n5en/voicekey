@@ -57,7 +57,7 @@ struct Config: Codable, Equatable {
     var multi: Bool
     /// 单渠道时使用
     var defaultChannel: String
-    /// 无操作自动结束会话的分钟数，0 = 不自动
+    /// 常开麦无操作自动结束会话的分钟数，0 = 不自动；画中画不使用此设置
     var idleMinutes: Int
     /// 多渠道候选默认选中上次上屏的渠道
     var lastPick: String?
@@ -235,6 +235,9 @@ struct LiveState: Codable, Equatable {
         /// 本次会话实际待机方式；v1 主 App 不写，按常开麦
         var standby: Standby?
 
+        /// 兼容旧版本留下的画中画到期时间，升级后也不再因闲置结束
+        var idleExpiry: Double? { standby == .pip ? nil : expiresAt }
+
         /// 键盘点麦克风可直接开始说；否则跳主 App（画中画待机被打断时须回主 App 重开）
         var micReady: Bool { active && !(standby == .pip && interrupted) }
     }
@@ -361,9 +364,9 @@ struct SilenceDetector {
 // MARK: - 闲置超时
 
 enum Idle {
-    /// 会话到期时刻；seconds = 0 不自动结束，busy（正在说或定稿中）时从现在算起
-    static func expiry(lastActivity: Double, seconds: Double, busy: Bool, now: Double) -> Double? {
-        guard seconds > 0 else { return nil }
+    /// 画中画或 seconds = 0 不自动结束；常开麦 busy（正在说或定稿中）时从现在算起
+    static func expiry(lastActivity: Double, seconds: Double, standby: Standby, busy: Bool, now: Double) -> Double? {
+        guard standby == .mic, seconds > 0 else { return nil }
         return (busy ? now : lastActivity) + seconds
     }
 }
