@@ -112,6 +112,48 @@ final class PipStandbyUITests: XCTestCase {
         return find(s)
     }
 
+    /// AX frames and hittability are evidence, not a substitute for the paired screenshot.
+    private func captureSystemPip(_ name: String) {
+        let pegasus = XCUIApplication(bundleIdentifier: "com.apple.Pegasus")
+        var lines = ["\(name) wall=\(Date().timeIntervalSince1970) content=\(String(describing: pip))"]
+        var roots = springboard.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'PIP' OR identifier CONTAINS 'Pegasus'")).allElementsBoundByIndex
+        if pegasus.state != .notRunning { roots.append(pegasus) }
+        lines.append("roots=\(roots.count); no AX controls exposed does NOT prove overlay hidden")
+        for root in roots {
+            lines.append("root=\(root.identifier) frame=\(root.frame)")
+            let controls = root.descendants(matching: .button).allElementsBoundByIndex + root.descendants(matching: .slider).allElementsBoundByIndex
+            for control in controls {
+                lines.append("control type=\(control.elementType.rawValue) frame=\(control.frame) hittable=\(control.isHittable)")
+            }
+        }
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "\(name)-system-controls"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        shot(name)
+    }
+
+    /// Simulator-only diagnostic: no Notes, keyboard input, recording or session restart.
+    func testSystemOverlayTimeline() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Diagnostic automation is restricted to Simulator")
+        #else
+        app.launchArguments = ["-onboarded", "YES", "-standby", "pip", "-arm", "-fakemic", "-piptrace"]
+        app.launch()
+        let armed = app.staticTexts["画中画待命"].waitForExistence(timeout: 10)
+        XCUIDevice.shared.press(.home)
+        captureSystemPip("home-initial")
+        XCTAssertTrue(armed, "PiP standby did not arm; inspect supported/mode in pip-state.txt")
+        guard wait(8, { self.pip != nil }) else { throw XCTSkip("Simulator exposes no PiP surface; overlay remains unverified") }
+        var previous = 0
+        for seconds in [0, 2, 5, 15, 30, 60] {
+            sleep(UInt32(seconds - previous))
+            captureSystemPip("home-\(seconds)s")
+            previous = seconds
+        }
+        #endif
+    }
+
     /// 连说 5 句：后台开麦、出字、停顿自动结束
     func testRecordsInBackgroundFiveTimes() {
         standby()
@@ -121,17 +163,40 @@ final class PipStandbyUITests: XCTestCase {
         }
     }
 
-    /// 画中画看不见：窗口高度约为 0，主屏截图里没有窗口和把手，照常能用
+    /// 保留内容高度断言；系统控件是否可见须结合单独的 frame/截图证据判断。
     func testPipInvisible() {
         standby()
         guard let w = pip else { return XCTFail("画中画没开") }
-        XCTAssertLessThan(w.height, 1, "画中画窗口应看不见")
+        XCTAssertLessThan(w.height, 1, "画中画内容应保持极扁；不代表系统控件隐藏")
         XCUIDevice.shared.press(.home)
         sleep(2)
-        shot("home")
+        captureSystemPip("home")
         notes.activate()
         XCTAssertTrue(ready.waitForExistence(timeout: 6))
         say("invisible-1")
+    }
+
+    func testPipSurvivesRepeatedForegroundAndRestart() {
+        standby()
+        for i in 1...3 {
+            app.activate()
+            XCTAssertTrue(app.staticTexts["语音就绪"].waitForExistence(timeout: 6))
+            notes.activate()
+            XCTAssertTrue(ready.waitForExistence(timeout: 6))
+            XCTAssertTrue(wait(5) { self.pip.map { $0.height < 1 } ?? false })
+            shot("foreground-\(i)")
+        }
+        app.activate()
+        for _ in 0..<2 where !app.buttons["结束会话"].exists {
+            XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 5))
+            app.buttons["完成"].tap()
+        }
+        app.buttons["结束会话"].tap()
+        XCTAssertTrue(app.staticTexts["未开启"].waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(5) { self.pip == nil })
+        notes.activate()
+        reopenFromKeyboard("restart")
+        XCTAssertTrue(wait(5) { self.pip.map { $0.height < 1 } ?? false })
     }
 
     /// 主 App 被杀：键盘变空心麦克风，点了冷启动主 App 重开小窗

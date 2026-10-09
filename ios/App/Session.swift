@@ -126,6 +126,7 @@ final class SessionManager: ObservableObject {
             return false
         }
         let mode: Standby = micFallback || !PiPStandby.supported ? .mic : config.standbyMode
+        pip.beginSessionTrace(mode: mode)
         do {
             if mode == .pip, UIApplication.shared.applicationState == .background {
                 throw NSError(domain: "VoiceKey", code: 2, userInfo: [NSLocalizedDescriptionKey: "pip needs foreground"])
@@ -159,6 +160,7 @@ final class SessionManager: ObservableObject {
     /// 结束会话并关麦（橙点熄灭）；定稿中的识别继续回结果
     func disarm(_ reason: LiveState.EndReason) {
         guard active else { return }
+        pip.diagnose("session.disarm reason=\(reason.rawValue)")
         if utt?.phase == .recording { stopSegment(.interrupted) }
         try? run(MicPlan.steps(.disarm, standby, hot: hot))
         if reason != .bgDenied { micFallback = false }
@@ -223,7 +225,7 @@ final class SessionManager: ObservableObject {
                 hot = false
             case .deactivate:
                 do { try s.setActive(false, options: .notifyOthersOnDeactivation) } catch { Bus.log("deactivate failed: \(error)") }
-            case .pipOn: pip.start()
+            case .pipOn: pip.start(source: "micPlan.pipOn")
             case .pipOff: pip.stop()
             }
         }
@@ -411,7 +413,7 @@ final class SessionManager: ObservableObject {
         }
         if active, standby == .pip {
             if interrupted { resume(attempt: 0) }
-            pip.start()
+            pip.start(source: "session.didBecomeActive")
         } else if active, interrupted || !audio.isRunning {
             interrupted = true
             resume(attempt: 0)

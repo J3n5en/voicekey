@@ -1,7 +1,7 @@
 import AVKit
 import UIKit
 
-/// 画中画待机：画中画开着时系统给 App 挂 PIPVisible，后台可按需开麦。小窗内容全透明且高度约为 0，用户看不到
+/// 画中画待机：系统挂 PIPVisible，后台可按需开麦。内容透明不代表系统 overlay 隐藏。
 final class PiPStandby: NSObject {
     /// App 在后台时小窗被关掉、被系统收回或没能自动打开
     var onLost: ((String) -> Void)?
@@ -14,12 +14,35 @@ final class PiPStandby: NSObject {
     private var wanted = false
     private var pending = false
     private var restoring = false
-    private var retrying = false
+    private var retry: DispatchWorkItem?
     private let display = AVSampleBufferDisplayLayer()
-    private let host = UIView(frame: CGRect(x: 0, y: 0, width: 32, height: 18))
+    private let host = UIView(frame: CGRect(x: 0, y: 0, width: 369, height: 369.0 / 4680))
     private var controller: AVPictureInPictureController?
     private var possible: NSKeyValueObservation?
+    private var rendering: NSKeyValueObservation?
     private var deadline: DispatchWorkItem?
+    private var sessionGeneration = 0
+    private var controllerGeneration = 0
+    private var startSource = "none"
+    private let trace: PiPTrace? = ProcessInfo.processInfo.arguments.contains("-piptrace")
+        ? PiPTrace(url: URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches/pip-state.txt")) : nil
+
+    func diagnose(_ event: String, controller c: AVPictureInPictureController? = nil, throttle: Bool = false) {
+        guard trace != nil else { return }
+        if !Thread.isMainThread {
+            let at = ProcessInfo.processInfo.systemUptime
+            DispatchQueue.main.async { [weak self] in
+                self?.diagnose("\(event) callbackUp=\(at) deferredSnapshot=true", controller: c, throttle: throttle)
+            }
+            return
+        }
+        trace?.record("event=\(event) session=\(sessionGeneration) controller=\(controllerGeneration) current=\(c == nil || c === controller) source=\(startSource) app=\(UIApplication.shared.applicationState.rawValue) wanted=\(wanted) pending=\(pending) running=\(running) restoring=\(restoring) active=\(controller?.isPictureInPictureActive ?? false) possible=\(controller?.isPictureInPicturePossible ?? false) auto=\(controller?.canStartPictureInPictureAutomaticallyFromInline ?? false) status=\(display.status.rawValue) host=\(host.bounds) display=\(display.bounds)", throttle: throttle)
+    }
+
+    func beginSessionTrace(mode: Standby) {
+        sessionGeneration += 1
+        diagnose("session.arm mode=\(mode.rawValue)")
+    }
 
     override init() {
         super.init()
@@ -27,7 +50,16 @@ final class PiPStandby: NSObject {
         display.videoGravity = .resizeAspect
         host.layer.addSublayer(display)
         host.isUserInteractionEnabled = false
+        diagnose("init build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?") os=\(UIDevice.current.systemVersion) supported=\(Self.supported)")
+        if trace != nil {
+            for name in [UIApplication.willResignActiveNotification, UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.diagnose("app.\(name.rawValue)")
+                }
+            }
+        }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.diagnose("app.didEnterBackground")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 guard let self, self.wanted, !self.running, UIApplication.shared.applicationState == .background else { return }
                 self.onLost?("not running in background")
@@ -36,19 +68,26 @@ final class PiPStandby: NSObject {
     }
 
     /// 打开小窗（须在前台）；窗口还没建好时等下次回到前台再开
-    func start() {
+    func start(source: String) {
+        diagnose("start.request from=\(source)")
         wanted = true
         guard !running, attach() else {
             if !running { Bus.log("pip: no window yet") }
             return
         }
+        guard !pending else { return }
+        startSource = source
         if controller == nil {
+            controllerGeneration += 1
             let c = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: display, playbackDelegate: self))
             c.delegate = self
-            c.canStartPictureInPictureAutomaticallyFromInline = true
+            c.canStartPictureInPictureAutomaticallyFromInline = false
             c.requiresLinearPlayback = true
             controller = c
             possible = c.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.kick() }
+            }
+            rendering = display.observe(\.status, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async { self?.kick() }
             }
         }
@@ -57,8 +96,10 @@ final class PiPStandby: NSObject {
         deadline?.cancel()
         let d = DispatchWorkItem { [weak self] in
             guard let self, self.pending else { return }
-            self.pending = false
-            self.onFailed?("start timeout possible=\(self.controller?.isPictureInPicturePossible ?? false)")
+            let reason = "start timeout possible=\(self.controller?.isPictureInPicturePossible ?? false) status=\(self.display.status.rawValue)"
+            self.diagnose("start.timeout")
+            self.stop()
+            self.onFailed?(reason)
         }
         deadline = d
         DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: d)
@@ -66,33 +107,43 @@ final class PiPStandby: NSObject {
     }
 
     func stop() {
+        diagnose("stop.request")
         wanted = false
         pending = false
         deadline?.cancel()
+        deadline = nil
+        retry?.cancel()
+        retry = nil
         possible = nil
+        rendering = nil
         controller?.canStartPictureInPictureAutomaticallyFromInline = false
         controller?.stopPictureInPicture()
         controller = nil
         running = false
+        restoring = false
         display.flushAndRemoveImage()
         host.removeFromSuperview()
     }
 
     private func kick() {
         guard pending, let c = controller, !c.isPictureInPictureActive else { return }
-        // 从键盘跳过来时 App 还在 inactive，这时开会报 -1001，等 active 再开
-        if c.isPictureInPicturePossible, UIApplication.shared.applicationState == .active {
-            Bus.log("pip: start")
-            c.startPictureInPicture()
-        }
-        // 首帧解码前 startPictureInPicture 会静默失败（status 0），没起来就隔一会儿再试，直到超时
-        guard !retrying else { return }
-        retrying = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        let ready = display.status == .rendering
+        c.canStartPictureInPictureAutomaticallyFromInline = ready
+        // KVO 不重复发起启动；仍保留定时重试，rendering 后也可能静默失败而没有 delegate 回调
+        guard retry == nil else { return }
+        let r = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.retrying = false
+            self.retry = nil
             guard self.pending, !self.running else { return }
             self.kick()
+        }
+        retry = r
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: r)
+        // 从键盘跳过来时 App 还在 inactive，这时开会报 -1001，等 active 再开
+        if ready, c.isPictureInPicturePossible, UIApplication.shared.applicationState == .active {
+            diagnose("start.api")
+            Bus.log("pip: start status=\(display.status.rawValue) size=\(display.bounds.size)")
+            c.startPictureInPicture()
         }
     }
 
@@ -107,7 +158,7 @@ final class PiPStandby: NSObject {
 
     // MARK: 画面
 
-    /// 启动时送全透明的极扁画面：窗口高度约为 0，看不到窗口和把手（iPhone 13 / iOS 17.3.1 实测）
+    /// 启动时送全透明的极扁画面；系统控件的布局与可见性须另行观察。
     private func draw() {
         guard let buf = Self.frame else { return Bus.log("pip: frame failed") }
         if display.status == .failed { display.flush() }
@@ -135,27 +186,44 @@ final class PiPStandby: NSObject {
 }
 
 extension PiPStandby: AVPictureInPictureControllerDelegate {
+    func pictureInPictureControllerWillStartPictureInPicture(_ c: AVPictureInPictureController) {
+        diagnose("willStart", controller: c)
+    }
+
+    func pictureInPictureControllerWillStopPictureInPicture(_ c: AVPictureInPictureController) {
+        diagnose("willStop", controller: c)
+    }
+
     func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
+        diagnose("didStart", controller: c)
+        guard c === controller, wanted else {
+            c.stopPictureInPicture()
+            return
+        }
         running = true
         pending = false
         deadline?.cancel()
+        retry?.cancel()
+        retry = nil
         Bus.log("pip: active state=\(UIApplication.shared.applicationState.rawValue)")
     }
 
     func pictureInPictureController(_ c: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        diagnose("failed code=\((error as NSError).code)", controller: c)
+        guard c === controller else { return }
         let e = error as NSError
         Bus.log("pip: failed to start \(e.domain) \(e.code) \(e.localizedDescription)")
         running = false
         guard wanted else { return }
-        if pending {
-            // 启动阶段失败继续重试，超时才算打不开
-            kick()
-        } else if UIApplication.shared.applicationState == .background {
+        // pending 时由 retry 重试，避免失败回调同步重入 start
+        if !pending, UIApplication.shared.applicationState == .background {
             onLost?("auto start failed \(e.domain) \(e.code)")
         }
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) {
+        diagnose("didStop", controller: c)
+        guard c === controller else { return }
         let st = UIApplication.shared.applicationState
         Bus.log("pip: stopped state=\(st.rawValue) restoring=\(restoring) wanted=\(wanted)")
         running = false
@@ -163,10 +231,14 @@ extension PiPStandby: AVPictureInPictureControllerDelegate {
         restoring = false
         guard wanted else { return }
         if restored {
+            let scheduledSession = sessionGeneration
+            let scheduledController = controllerGeneration
+            diagnose("restore.schedule")
             // 用户点小窗回到 App：小窗随会话常驻，回前台后重新打开
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.diagnose("restore.fire scheduledSession=\(scheduledSession) scheduledController=\(scheduledController)")
                 guard let self, self.wanted, !self.running, UIApplication.shared.applicationState != .background else { return }
-                self.start()
+                self.start(source: "restore.0.6s")
             }
         } else if st == .background {
             onLost?("stopped in background")
@@ -174,19 +246,26 @@ extension PiPStandby: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureController(_ c: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        diagnose("restore", controller: c)
+        guard c === controller, wanted else { return completionHandler(false) }
         restoring = true
         completionHandler(true)
     }
 }
 
 extension PiPStandby: AVPictureInPictureSampleBufferPlaybackDelegate {
-    func pictureInPictureController(_ c: AVPictureInPictureController, setPlaying playing: Bool) {}
+    func pictureInPictureController(_ c: AVPictureInPictureController, setPlaying playing: Bool) {
+        diagnose("setPlaying=\(playing)", controller: c, throttle: true)
+    }
     func pictureInPictureControllerTimeRangeForPlayback(_ c: AVPictureInPictureController) -> CMTimeRange {
         CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
     }
     func pictureInPictureControllerIsPlaybackPaused(_ c: AVPictureInPictureController) -> Bool { false }
-    func pictureInPictureController(_ c: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+    func pictureInPictureController(_ c: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {
+        diagnose("renderSize=\(newRenderSize.width)x\(newRenderSize.height)", controller: c, throttle: true)
+    }
     func pictureInPictureController(_ c: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completion completionHandler: @escaping () -> Void) {
+        diagnose("skip=\(skipInterval.seconds)", controller: c)
         completionHandler()
     }
 }
