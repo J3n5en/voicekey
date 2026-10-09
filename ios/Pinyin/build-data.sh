@@ -1,11 +1,11 @@
 #!/bin/bash
-# 雾凇拼音 base+8105 → 全拼/九宫格方案，用与 librime 同版本的 rime_deployer 在 Mac 上预编译，产物打进键盘包
+# 雾凇拼音全套词库 + 补充词（流行新词、人工智能）→ 全拼/九宫格方案，用与 librime 同版本的 rime_deployer 在 Mac 上预编译
 set -euo pipefail
 cd "$(dirname "$0")"
 source versions.env
 CACHE=$PWD/.cache
 OUT=Sources/Pinyin/RimeData
-STAMP="librime $LIBRIME_VERSION ($LIBRIME_COMMIT) rime-ice $RIME_ICE_TAG $(cat rime/*.yaml | shasum -a 256 | cut -c1-16)"
+STAMP="librime $LIBRIME_VERSION ($LIBRIME_COMMIT) rime-ice $RIME_ICE_TAG $(cat rime/* | shasum -a 256 | cut -c1-16)"
 [ "$(cat "$OUT/VERSION" 2>/dev/null)" = "$STAMP" ] && exit 0
 mkdir -p "$CACHE"
 
@@ -23,7 +23,17 @@ DEPLOYER=$(find "$MAC" -name rime_deployer -type f | head -1)
 WORK=$CACHE/data
 rm -rf "$WORK" && mkdir -p "$WORK"
 cp rime/*.yaml "$WORK/"
-unzip -q -o "$CACHE/rime-ice-$RIME_ICE_TAG.zip" cn_dicts/8105.dict.yaml cn_dicts/base.dict.yaml -d "$WORK"
+unzip -q -o "$CACHE/rime-ice-$RIME_ICE_TAG.zip" \
+  cn_dicts/8105.dict.yaml cn_dicts/base.dict.yaml cn_dicts/ext.dict.yaml \
+  cn_dicts/tencent.dict.yaml cn_dicts/others.dict.yaml -d "$WORK"
+# 只补雾凇没有的词，权重对齐雾凇里手调热词（破防、社死为 9999）
+{
+  printf '%s\n' '---' 'name: extra' 'version: "2026.10.09"' 'sort: by_weight' '...' ''
+  awk -F'\t' '
+    FILENAME ~ /cn_dicts\// { if (index($0, "\t") && $0 !~ /^#/) have[$1] = 1; next }
+    NF >= 2 && $0 !~ /^#/ && !($1 in have) { have[$1] = 1; print $1 "\t" $2 "\t9999" }
+  ' "$WORK"/cn_dicts/*.dict.yaml rime/*.txt
+} > "$WORK/extra.dict.yaml"
 DYLD_LIBRARY_PATH=$(dirname "$DEPLOYER")/../lib "$DEPLOYER" --build "$WORK" "$WORK" "$WORK/build" >/dev/null 2>&1
 
 rm -rf "$OUT" && mkdir -p "$OUT/build"

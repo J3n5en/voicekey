@@ -3,6 +3,11 @@ name: vk
 version: "1"
 sort: by_weight
 import_tables:
-  - cn_dicts/8105
-  - cn_dicts/base
+  # 重复词条保留先出现的那条。补充词放最后，只补前面没有的词
+  - cn_dicts/8105     # 字表
+  - cn_dicts/base     # 基础词库
+  - cn_dicts/ext      # 扩展词库
+  - cn_dicts/tencent  # 腾讯词向量
+  - cn_dicts/others   # 杂项
+  - extra             # 流行新词与人工智能（仅雾凇未收录）
 ...

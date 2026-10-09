@@ -1,0 +1,1453 @@
+# 搜狗细胞词库，人工智能
+# 人工智能专业术语【官方推荐】 id=72476 https://pinyin.sogou.com/dict/detail/index/72476
+# 人工智能常用词库 id=97640 https://pinyin.sogou.com/dict/detail/index/97640
+# 人工智能词库（待补充） id=97638 https://pinyin.sogou.com/dict/detail/index/97638
+# 深度学习 id=79782 https://pinyin.sogou.com/dict/detail/index/79782
+# Vibe coding（AI编程）词库 id=176192 https://pinyin.sogou.com/dict/detail/index/176192
+# 已去掉两条提示词套话：你是一位高级软件工程师、作为全栈开发者
+一次性学习	yi ci xing xue xi
+一致性	yi zhi xing
+一致性挑战	yi zhi xing tiao zhan
+万亿参数	wan yi can shu
+万普尼克泽范兰杰斯理论	wan pu ni ke ze fan lan jie si li lun
+上报机制	shang bao ji zhi
+上采样	shang cai yang
+下采样	xia cai yang
+不可变数据	bu ke bian shu ju
+不合度量	bu he du liang
+不敏感损失	bu min gan sun shi
+专业技能	zhuan ye ji neng
+专利申请	zhuan li shen qing
+专家模式	zhuan jia mo shi
+世界模型	shi jie mo xing
+个人信息保护	ge ren xin xi bao hu
+个体	ge ti
+个体学习器	ge ti xue xi qi
+个体编码	ge ti bian ma
+个性化	ge xing hua
+中介者	zhong jie zhe
+中国	zhong guo
+中国法规	zhong guo fa gui
+中央处理器	zhong yang chu li qi
+中英双语	zhong ying shuang yu
+为善	wei shan
+主成分分析	zhu cheng fen fen xi
+乐观主义	le guan zhu yi
+乘幂尺度变换	cheng mi chi du bian huan
+事件循环	shi jian xun huan
+事件溯源	shi jian su yuan
+事件驱动	shi jian qu dong
+二分法	er fen fa
+二分类	er fen lei
+二分类任务	er fen lei ren wu
+二叉树	er cha shu
+二次学习	er ci xue xi
+二进制编码基因	er jin zhi bian ma ji yin
+二项检验	er xiang jian yan
+云函数	yun han shu
+云服务	yun fu wu
+互信息	hu xin xi
+互动编程	hu dong bian cheng
+互动艺术	hu dong yi shu
+交叉	jiao cha
+交叉概率	jiao cha gai lv
+交叉熵	jiao cha shang
+交叉算子	jiao cha suan zi
+交叉验证	jiao cha yan zheng
+交叉验证法	jiao cha yan zheng fa
+产业发展	chan ye fa zhan
+产品	chan pin
+产品背包	chan pin bei bao
+产学研	chan xue yan
+享元	xiang yuan
+亲和矩阵	qin he ju zhen
+人人程序员	ren ren cheng xu yuan
+人工智能	ren gong zhi neng
+人工智能研究所	ren gong zhi neng yan jiu suo
+人工生命	ren gong sheng ming
+人工神经网络	ren gong shen jing wang luo
+人才计划	ren cai ji hua
+人机共创	ren ji gong chuang
+人类伙伴	ren lei huo ban
+人类反馈	ren lei fan kui
+人类进化	ren lei jin hua
+人脸识别	ren lian shi bie
+仓库模式	cang ku mo shi
+付费生成	fu fei sheng cheng
+代价敏感学习	dai jia min gan xue xi
+代价曲线	dai jia qu xian
+代币激励	dai bi ji li
+代沟	dai gou
+代理	dai li
+代码分享	dai ma fen xiang
+代码审查	dai ma shen cha
+代码执行	dai ma zhi xing
+代码生成	dai ma sheng cheng
+代码艺术	dai ma yi shu
+代码规范	dai ma gui fan
+代码风格	dai ma feng ge
+价值对齐	jia zhi dui qi
+价函数	jia han shu
+仿射层	fang she ceng
+企业支持	qi ye zhi chi
+企业部署	qi ye bu shu
+众包	zhong bao
+优先级	you xian ji
+优先队列	you xian dui lie
+优化性能	you hua xing neng
+优缺点	you que dian
+会员特权	hui yuan te quan
+会话代理	hui hua dai li
+会话智能体	hui hua zhi neng ti
+伦理委员会	lun li wei yuan hui
+伪标记	wei biao ji
+伴侣	ban lv
+位运算	wei yun suan
+低代码	di dai ma
+低延迟	di yan chi
+低碳计算	di tan ji suan
+余弦相似度	yu xian xiang si du
+作者	zuo zhe
+使用	shi yong
+依赖倒置	yi lai dao zhi
+依赖安装	yi lai an zhuang
+依赖检查	yi lai jian cha
+依赖管理	yi lai guan li
+信号量	xin hao liang
+信息增益	xin xi zeng yi
+信息熵	xin xi shang
+倒位概率	dao wei gai lv
+倒位算子	dao wei suan zi
+值对象	zhi dui xiang
+假反例	jia fan li
+假正例	jia zheng li
+假正例率	jia zheng li lv
+假正类	jia zheng lei
+假设	jia she
+假设验证	jia she yan zheng
+假负类	jia fu lei
+偏差	pian cha
+偏置	pian zhi
+偏见消除	pian jian xiao chu
+元学习器	yuan xue xi qi
+元宇宙	yuan yu zhou
+元宇宙演唱	yuan yu zhou yan chang
+元遗传算法	yuan yi chuan suan fa
+先验	xian yan
+免费试用	mian fei shi yong
+免费额度	mian fei e du
+入门指南	ru men zhi nan
+全局优化	quan ju you hua
+全局捕获	quan ju bu huo
+全局搜索	quan ju sou suo
+全局最小	quan ju zui xiao
+全球发展	quan qiu fa zhan
+全球社区	quan qiu she qu
+公平使用	gong ping shi yong
+公平性	gong ping xing
+公益项目	gong yi xiang mu
+六边形架构	liu bian xing jia gou
+共享函数	gong xiang han shu
+共创美好	gong chuang mei hao
+共情能力	gong qing neng li
+共现	gong xian
+共生关系	gong sheng guan xi
+共适应	gong shi ying
+关联分析	guan lian fen xi
+关键信息	guan jian xin xi
+兴趣小组	xing qu xiao zu
+具身智能	ju shen zhi neng
+兼容性	jian rong xing
+内存模型	nei cun mo xing
+内容推荐	nei rong tui jian
+内联变量	nei lian bian liang
+再生核希尔伯特空间	zai sheng he xi er bo te kong jian
+再缩放	zai suo fang
+军备赛	jun bei sai
+冯诺伊曼架构	feng nuo yi man jia gou
+冲突	chong tu
+决策树	jue ce shu
+决策树桩	jue ce shu zhuang
+决策能力	jue ce neng li
+决策边界	jue ce bian jie
+冷启动	leng qi dong
+准确率	zhun que lv
+凌乱遗传算法	ling luan yi chuan suan fa
+几率	ji lv
+凸二次规划	tu er ci gui hua
+凸性	tu xing
+函数单一	han shu dan yi
+函数式编程	han shu shi bian cheng
+函数最优化	han shu zui you hua
+分享会	fen xiang hui
+分享成果	fen xiang cheng guo
+分层架构	fen ceng jia gou
+分层采样	fen ceng cai yang
+分布	fen bu
+分布式系统	fen bu shi xi tong
+分布式计算	fen bu shi ji suan
+分布随机近邻嵌入	fen bu sui ji jin lin qian ru
+分批标准化	fen pi biao zhun hua
+分支	fen zhi
+分析需求	fen xi xu qiu
+分治	fen zhi
+分离超平面	fen li chao ping mian
+分类	fen lei
+分类与回归树	fen lei yu hui gui shu
+分类器	fen lei qi
+分类器系统	fen lei qi xi tong
+分解型并行算法	fen jie xing bing xing suan fa
+切分变量	qie fen bian liang
+切断算子	qie duan suan zi
+列名属性	lie ming shu xing
+列联表	lie lian biao
+创业	chuang ye
+创作自由	chuang zuo zi you
+创意放大	chuang yi fang da
+创意爆发	chuang yi bao fa
+创新中心	chuang xin zhong xin
+创造本质	chuang zao ben zhi
+初始群体	chu shi qun ti
+判别器	pan bie qi
+判别模型	pan bie mo xing
+判定树	pan ding shu
+前向分步算法	qian xiang fen bu suan fa
+前沿动态	qian yan dong tai
+前端框架	qian duan kuang jia
+前馈神经网络	qian kui shen jing wang luo
+前馈网络	qian kui wang luo
+剪枝	jian zhi
+副业思路	fu ye si lu
+割平面法	ge ping mian fa
+功能神经元	gong neng shen jing yuan
+加性学习	jia xing xue xi
+加权投票法	jia quan tou piao fa
+加权调和平均	jia quan tiao he ping jun
+加速卡	jia su ka
+动态参数编码	dong tai can shu bian ma
+动态类型	dong tai lei xing
+动态融合	dong tai rong he
+动态规划	dong tai gui hua
+动量	dong liang
+势函数	shi han shu
+包外估计	bao wai gu ji
+包容增长	bao rong zeng zhang
+包容性	bao rong xing
+区块链	qu kuai lian
+千亿参数	qian yi can shu
+升级依赖	sheng ji yi lai
+半朴素贝叶斯分类器	ban pu su bei ye si fen lei qi
+半监督学习	ban jian du xue xi
+半监督支持向量机	ban jian du zhi chi xiang liang ji
+协作开发	xie zuo kai fa
+协同过滤	xie tong guo lv
+协程	xie cheng
+单位阶跃函数	dan wei jie yue han shu
+单例	dan li
+单倍体	dan bei ti
+单元测试	dan yuan ce shi
+单元测试框架	dan yuan ce shi kuang jia
+单变量决策树	dan bian liang jue ce shu
+单峰值函数	dan feng zhi han shu
+单指令流多数据流	dan zhi ling liu duo shu ju liu
+单点交叉	dan dian jiao cha
+博弈论	bo yi lun
+即插即用生成网络	ji cha ji yong sheng cheng wang luo
+卷积神经网络	juan ji shen jing wang luo
+原创性	yuan chuang xing
+原型	yuan xing
+原子操作	yuan zi cao zuo
+去中心化	qu zhong xin hua
+参数	can shu
+参数估计	can shu gu ji
+参数规模	can shu gui mo
+参数调节	can shu tiao jie
+参考模型	can kao mo xing
+双倍体	shuang bei ti
+双刃剑	shuang ren jian
+双向长短期记忆	shuang xiang chang duan qi ji yi
+双点交叉	shuang dian jiao cha
+反例	fan li
+反向传播	fan xiang chuan bo
+反复迭代	fan fu die dai
+反类	fan lei
+反馈循环	fan kui xun huan
+发布笔记	fa bu bi ji
+受试者工作特征	shou shi zhe gong zuo te zheng
+受限玻尔兹曼机	shou xian bo er zi man ji
+变分推断	bian fen tui duan
+变异	bian yi
+变异概率	bian yi gai lv
+变异算子	bian yi suan zi
+变异频率	bian yi pin lv
+变更日志	bian geng ri zhi
+变革力量	bian ge li liang
+召回率	zhao hui lv
+可微分神经计算机	ke wei fen shen jing ji suan ji
+可持续发展	ke chi xu fa zhan
+可持续开发	ke chi xu kai fa
+可理解性	ke li jie xing
+可见性	ke jian xing
+可视化工具	ke shi hua gong ju
+可解释性	ke jie shi xing
+可追溯	ke zhui su
+可重复采样	ke chong fu cai yang
+可靠性工程	ke kao xing gong cheng
+合作	he zuo
+合作伙伴	he zuo huo ban
+合页损失函数	he ye sun shi han shu
+吉布斯采样	ji bu si cai yang
+同义词集	tong yi ci ji
+同态加密	tong tai jia mi
+同步定位与地图构建	tong bu ding wei yu di tu gou jian
+同现	tong xian
+同质	tong zhi
+后剪枝	hou jian zhi
+后台框架	hou tai kuang jia
+后续检验	hou xu jian yan
+后门	hou men
+向后兼容	xiang hou jian rong
+启发式算法	qi fa shi suan fa
+命令	ming ling
+命名实体识别	ming ming shi ti shi bie
+命名规范	ming ming gui fan
+和平利用	he ping li yong
+哈希表	ha xi biao
+响应式	xiang ying shi
+哑结点	ya jie dian
+哨兵	shao bing
+哲学	zhe xue
+商业模式	shang ye mo shi
+商业许可	shang ye xu ke
+噪音对比估计	zao yin dui bi gu ji
+回归	hui gui
+回溯	hui su
+回滚策略	hui gun ce lue
+回顾	hui gu
+因子分解	yin zi fen jie
+因果推理	yin guo tui li
+固有值	gu you zhi
+国产替代	guo chan ti dai
+国产模型	guo chan mo xing
+国产芯片	guo chan xin pian
+国家战略	guo jia zhan lue
+国际交流	guo ji jiao liu
+国际公约	guo ji gong yue
+国际合作	guo ji he zuo
+国际学习理论会议	guo ji xue xi li lun hui yi
+国际机器学习会议	guo ji ji qi xue xi hui yi
+国际机器学习大会	guo ji ji qi xue xi da hui
+国际神经信息处理系统会议	guo ji shen jing xin xi chu li xi tong hui yi
+图形处理单元	tu xing chu li dan yuan
+图形处理器	tu xing chu li qi
+图灵机	tu ling ji
+图算法	tu suan fa
+图论	tu lun
+图遍历	tu bian li
+在策略	zai ce lue
+在线培训	zai xian pei xun
+在线学习	zai xian xue xi
+在线性能	zai xian xing neng
+场景理解	chang jing li jie
+均值聚类	jun zhi ju lei
+均匀交叉	jun yun jiao cha
+均匀变异	jun yun bian yi
+均方误差	jun fang wu cha
+垂直领域	chui zhi ling yu
+埋点分析	mai dian fen xi
+基于委员会的学习	ji yu wei yuan hui de xue xi
+基于能量的模型	ji yu neng liang de mo xing
+基因	ji yin
+基因块假设	ji yin kuai jia she
+基因型	ji yin xing
+基因座	ji yin zuo
+基因组	ji yin zu
+基因隐性	ji yin yin xing
+基学习器	ji xue xi qi
+基学习算法	ji xue xi suan fa
+基尼指数	ji ni zhi shu
+基本变异	ji ben bian yi
+基本遗传算法	ji ben yi chuan suan fa
+基础设施	ji chu she shi
+增强智能	zeng qiang zhi neng
+增强现实	zeng qiang xian shi
+增益率	zeng yi lv
+增量学习	zeng liang xue xi
+增长黑客	zeng zhang hei ke
+备忘录	bei wang lu
+外观	wai guan
+多代理协作	duo dai li xie zuo
+多任务	duo ren wu
+多倍体	duo bei ti
+多元线性回归	duo yuan xian xing hui gui
+多分类	duo fen lei
+多分类任务	duo fen lei ren wu
+多参数编码	duo can shu bian ma
+多变量线性回归	duo bian liang xian xing hui gui
+多响应线性回归	duo xiang ying xian xing hui gui
+多层前馈神经网络	duo ceng qian kui shen jing wang luo
+多层感知器	duo ceng gan zhi qi
+多层感知机	duo ceng gan zhi ji
+多峰值函数	duo feng zhi han shu
+多感官	duo gan guan
+多指令流多数据流	duo zhi ling liu duo shu ju liu
+多文档摘要	duo wen dang zhai yao
+多样性	duo yang xing
+多样性度量	duo yang xing du liang
+多模态函数	duo mo tai han shu
+多模态学习	duo mo tai xue xi
+多步推理	duo bu tui li
+多点交叉	duo dian jiao cha
+多环境	duo huan jing
+多目标最优化	duo mu biao zui you hua
+多线程	duo xian cheng
+多维缩放	duo wei suo fang
+多臂老虎机	duo bi lao hu ji
+多语言支持	duo yu yan zhi chi
+多释原则	duo shi yuan ze
+多项式核函数	duo xiang shi he han shu
+大会	da hui
+大数据	da shu ju
+大数据量	da shu ju liang
+大模型	da mo xing
+太极	tai ji
+奇异值分解	qi yi zhi fen jie
+奖励模型	jiang li mo xing
+奥卡姆剃刀	ao ka mu ti dao
+子代群体	zi dai qun ti
+子空间	zi kong jian
+字符串处理	zi fu chuan chu li
+字节跳动	zi jie tiao dong
+存在意义	cun zai yi yi
+存在风险	cun zai feng xian
+学习	xue xi
+学习向量量化	xue xi xiang liang liang hua
+学习器	xue xi qi
+学习曲线	xue xi qu xian
+学习率	xue xi lv
+学习适应	xue xi shi ying
+学校课程	xue xiao ke cheng
+安全	an quan
+安全合规	an quan he gui
+安全多方计算	an quan duo fang ji suan
+安全实验室	an quan shi yan shi
+安全审计	an quan shen ji
+安全对齐	an quan dui qi
+安全扫描	an quan sao miao
+安全测试	an quan ce shi
+安全研究	an quan yan jiu
+宏查全率	hong cha quan lv
+宏查准率	hong cha zhun lv
+定义完成	ding yi wan cheng
+定制解决方案	ding zhi jie jue fang an
+实体	shi ti
+实时响应	shi shi xiang ying
+实时通信	shi shi tong xin
+实验	shi yan
+实验室	shi yan shi
+审查	shen cha
+审计	shen ji
+容器化	rong qi hua
+容器编排	rong qi bian pai
+密度估计	mi du gu ji
+密度聚类	mi du ju lei
+密钥提供	mi yue ti gong
+对偶问题	dui ou wen ti
+对抗样本	dui kang yang ben
+对抗网络	dui kang wang luo
+对数似然	dui shu si ran
+对数几率	dui shu ji lv
+对数线性回归	dui shu xian xing hui gui
+对齐	dui qi
+对齐问题	dui qi wen ti
+寻求澄清	xun qiu cheng qing
+封装集合	feng zhuang ji he
+小生境	xiao sheng jing
+小程序	xiao cheng xu
+局部搜索	ju bu sou suo
+局部最小	ju bu zui xiao
+局部马尔可夫性	ju bu ma er ke fu xing
+局限	ju xian
+层次聚类	ceng ci ju lei
+展览展示	zhan lan zhan shi
+属性	shu xing
+属性代价	shu xing dai jia
+属性值	shu xing zhi
+属性条件独立性假设	shu xing tiao jian du li xing jia she
+属性空间	shu xing kong jian
+岛屿模型	dao yu mo xing
+峰会论坛	feng hui lun tan
+嵌入	qian ru
+工作方法	gong zuo fang fa
+工具	gong ju
+工具使用	gong ju shi yong
+工具调用	gong ju diao yong
+工厂	gong chang
+巨并行遗传算法	ju bing xing yi chuan suan fa
+差异性度量	cha yi xing du liang
+市场规模	shi chang gui mo
+布尔概念学习	bu er gai nian xue xi
+布隆过滤器	bu long guo lv qi
+希尔伯特空间	xi er bo te kong jian
+带货	dai huo
+常识推理	chang shi tui li
+干净架构	gan jing jia gou
+平均梯度	ping jun ti du
+平均池化	ping jun chi hua
+平方损失	ping fang sun shi
+平滑	ping hua
+平衡树	ping heng shu
+平衡点	ping heng dian
+平衡观点	ping heng guan dian
+并发控制	bing fa kong zhi
+并发编程	bing fa bian cheng
+并查集	bing cha ji
+并行处理	bing xing chu li
+并行性	bing xing xing
+并行遗传算法	bing xing yi chuan suan fa
+幻觉问题	huan jue wen ti
+广义拉格朗日函数	guang yi la ge lang ri han shu
+广义瑞利商	guang yi rui li shang
+广义线性模型	guang yi xian xing mo xing
+广告支持	guang gao zhi chi
+序关系	xu guan xi
+应用层	ying yong ceng
+度量学习	du liang xue xi
+建造者	jian zao zhe
+开发	kai fa
+开放信	kai fang xin
+开源协议	kai yuan xie yi
+开源社区	kai yuan she qu
+开源许可	kai yuan xu ke
+开源贡献	kai yuan gong xian
+开闭原则	kai bi yuan ze
+异常处理	yi chang chu li
+异常检测	yi chang jian ce
+异步处理	yi bu chu li
+弃用警告	qi yong jing gao
+张量	zhang liang
+张量处理单元	zhang liang chu li dan yuan
+弱学习器	ruo xue xi qi
+弹性扩展	tan xing kuo zhan
+强化学习	qiang hua xue xi
+归一化	gui yi hua
+归纳	gui na
+归纳偏好	gui na pian hao
+归纳学习	gui na xue xi
+归纳逻辑程序设计	gui na luo ji cheng xu she ji
+径向基函数	jing xiang ji han shu
+循环交叉	xun huan jiao cha
+循环神经网络	xun huan shen jing wang luo
+微信小程序	wei xin xiao cheng xu
+微前端	wei qian duan
+微服务	wei fu wu
+微查全率	wei cha quan lv
+微查准率	wei cha zhun lv
+微调	wei tiao
+快速原型	kuai su yuan xing
+思维控制	si wei kong zhi
+思考	si kao
+性能分析	xing neng fen xi
+性能剖析	xing neng pou xi
+性能度量	xing neng du liang
+性能测试	xing neng ce shi
+悟道	wu dao
+情感分析	qing gan fen xi
+情绪分析	qing xu fen xi
+意念生成	yi nian sheng cheng
+意识	yi shi
+意识上传	yi shi shang chuan
+感知器	gan zhi qi
+感知机	gan zhi ji
+懒惰学习	lan duo xue xi
+成对型	cheng dui xing
+成对马尔可夫性	cheng dui ma er ke fu xing
+成本优化	cheng ben you hua
+成本函数	cheng ben han shu
+成本敏感	cheng ben min gan
+成本曲线	cheng ben qu xian
+成本矩阵	cheng ben ju zhen
+截断尺度变换	jie duan chi du bian huan
+截断点	jie duan dian
+执行步骤	zhi xing bu zhou
+扮演架构师	ban yan jia gou shi
+批判性	pi pan xing
+批量归一化	pi liang gui yi hua
+技术突破	ji shu tu po
+技术选型	ji shu xuan xing
+投资热点	tou zi re dian
+报告进度	bao gao jin du
+抽象工厂	chou xiang gong chang
+拉普拉斯修正	la pu la si xiu zheng
+拉普拉斯平滑	la pu la si ping hua
+拉格朗日乘子	la ge lang ri cheng zi
+拉格朗日对偶性	la ge lang ri dui ou xing
+拓扑排序	tuo pu pai xu
+拖拽建站	tuo zhuai jian zhan
+拟牛顿法	ni niu dun fa
+拼接算子	pin jie suan zi
+持续交付	chi xu jiao fu
+持续部署	chi xu bu shu
+持续集成	chi xu ji cheng
+指数损失函数	zhi shu sun shi han shu
+指示函数	zhi shi han shu
+挑战赛	tiao zhan sai
+挤压函数	ji ya han shu
+损失	sun shi
+损失函数	sun shi han shu
+排序	pai xu
+排挤	pai ji
+探索利用	tan suo li yong
+接入	jie ru
+接口隔离	jie kou ge li
+控制问题	kong zhi wen ti
+控制难度	kong zhi nan du
+推理优化	tui li you hua
+推荐系统	tui jian xi tong
+推送通知	tui song tong zhi
+描述不足	miao shu bu zu
+描述过剩	miao shu guo sheng
+提出建议	ti chu jian yi
+提取方法	ti qu fang fa
+提示词	ti shi ci
+搜索	sou suo
+操作简便	cao zuo jian bian
+支付宝	zhi fu bao
+支持向量展式	zhi chi xiang liang zhan shi
+支持向量机	zhi chi xiang liang ji
+收敛	shou lian
+改变签名	gai bian qian ming
+改进的迭代尺度法	gai jin de die dai chi du fa
+改进迭代	gai jin die dai
+攻击模拟	gong ji mo ni
+政策支持	zheng ce zhi chi
+政策法规	zheng ce fa gui
+故事	gu shi
+故障注入	gu zhang zhu ru
+效率工具	xiao lv gong ju
+敏捷开发	min jie kai fa
+救援	jiu yuan
+教程资源	jiao cheng zi yuan
+教育普及	jiao yu pu ji
+散度	san du
+数值属性	shu zhi shu xing
+数字永生	shu zi yong sheng
+数字艺术	shu zi yi shu
+数据	shu ju
+数据主权	shu ju zhu quan
+数据仓库	shu ju cang ku
+数据保护	shu ju bao hu
+数据库	shu ju ku
+数据库优化	shu ju ku you hua
+数据挖掘	shu ju wa jue
+数据湖	shu ju hu
+数据结构	shu ju jie gou
+数据隐私	shu ju yin si
+数据集	shu ju ji
+数据集公开	shu ju ji gong kai
+数据驱动	shu ju qu dong
+数组技巧	shu zu ji qiao
+文件读写	wen jian du xie
+文化算法	wen hua suan fa
+文化适应	wen hua shi ying
+文心一言	wen xin yi yan
+斜决策树	xie jue ce shu
+断点	duan dian
+新兴模型	xin xing mo xing
+新架构	xin jia gou
+新范式	xin fan shi
+方差困境	fang cha kun jing
+旅行商问题	lv xing shang wen ti
+无代码	wu dai ma
+无回放余数随机	wu hui fang yu shu sui ji
+无回放随机选择	wu hui fang sui ji xuan ze
+无导师学习	wu dao shi xue xi
+无序属性	wu xu shu xing
+无监督	wu jian du
+无监督学习	wu jian du xue xi
+无监督逐层训练	wu jian du zhu ceng xun lian
+无锁编程	wu suo bian cheng
+无限	wu xian
+无限上下文	wu xian shang xia wen
+无限创意	wu xian chuang yi
+无限可能	wu xian ke neng
+日志打印	ri zhi da yin
+日志收集	ri zhi shou ji
+日志记录	ri zhi ji lu
+早期收敛	zao qi shou lian
+时代	shi dai
+时间复杂度	shi jian fu za du
+时间步骤	shi jian bu zhou
+昇腾	sheng teng
+映射	ying she
+显性基因	xian xing ji yin
+智慧交通	zhi hui jiao tong
+智能代理	zhi neng dai li
+智能体	zhi neng ti
+智能合约	zhi neng he yue
+智能城市	zhi neng cheng shi
+智能家居	zhi neng jia ju
+智能补全	zhi neng bu quan
+暂停	zan ting
+暂停信	zan ting xin
+替代函数	ti dai han shu
+替代损失	ti dai sun shi
+最优化	zui you hua
+最佳实践	zui jia shi jian
+最大似然	zui da si ran
+最大团	zui da tuan
+最大带权生成树	zui da dai quan sheng cheng shu
+最大池化	zui da chi hua
+最大间隔	zui da jian ge
+最小二乘回归树	zui xiao er cheng hui gui shu
+最小二乘法	zui xiao er cheng fa
+最小可行	zui xiao ke xing
+最小描述长度	zui xiao miao shu chang du
+最小最大博弈	zui xiao zui da bo yi
+最小欺骗问题	zui xiao qi pian wen ti
+最小生成树	zui xiao sheng cheng shu
+最短路径	zui duan lu jing
+最近邻算法	zui jin lin suan fa
+有向分离	you xiang fen li
+有向边	you xiang bian
+有导师学习	you dao shi xue xi
+有序属性	you xu shu xing
+有序性	you xu xing
+有放回采样	you fang hui cai yang
+有效利他	you xiao li ta
+有监督学习	you jian du xue xi
+朋友	peng you
+服务出售	fu wu chu shou
+服务发现	fu wu fa xian
+服务器渲染	fu wu qi xuan ran
+服务层	fu wu ceng
+服务网格	fu wu wang ge
+期望值选择模型	qi wang zhi xuan ze mo xing
+期望损失	qi wang sun shi
+期望最大化	qi wang zui da hua
+未来	wei lai
+未来工具	wei lai gong ju
+未来接口	wei lai jie kou
+未来生活	wei lai sheng huo
+未来畅想	wei lai chang xiang
+未来计算	wei lai ji suan
+未见示例	wei jian shi li
+本地化	ben di hua
+朴素贝叶斯	pu su bei ye si
+朴素贝叶斯分类器	pu su bei ye si fen lei qi
+机会点	ji hui dian
+机器人	ji qi ren
+机器学习	ji qi xue xi
+机器翻译	ji qi fan yi
+机械学习	ji xie xue xi
+杂合子	za he zi
+权共享	quan gong xiang
+权重	quan zhong
+权限控制	quan xian kong zhi
+条件互信息	tiao jian hu xin xi
+条件概率表	tiao jian gai lv biao
+条件熵	tiao jian shang
+条件随机场	tiao jian sui ji chang
+条件随机域	tiao jian sui ji yu
+条件风险	tiao jian feng xian
+松弛变量	song chi bian liang
+极大似然估计	ji da si ran gu ji
+极大似然法	ji da si ran fa
+极小极大博弈	ji xiao ji da bo yi
+极性检测	ji xing jian ce
+析合范式	xi he fan shi
+枚举搜索算法	mei ju sou suo suan fa
+染色体	ran se ti
+查全率	cha quan lv
+查准率	cha zhun lv
+查看输出	cha kan shu chu
+查询优化	cha xun you hua
+标准	biao zhun
+标准型并行方法	biao zhun xing bing xing fang fa
+标签	biao qian
+标记	biao ji
+标记代价	biao ji dai jia
+标记化	biao ji hua
+标记空间	biao ji kong jian
+栈追踪	zhan zhui zong
+树库	shu ku
+树结构	shu jie gou
+校准	jiao zhun
+样例	yang li
+样本	yang ben
+样本空间	yang ben kong jian
+核化目标函数	he hua mu biao han shu
+核技巧	he ji qiao
+核方法	he fang fa
+核糖核酸稳健性	he tang he suan wen jian xing
+核线性判别分析	he xian xing pan bie fen xi
+核范数	he fan shu
+根结点	gen jie dian
+格雷码	ge lei ma
+框架对比	kuang jia dui bi
+桥接	qiao jie
+梦境	meng jing
+梯度下降	ti du xia jiang
+梯度提升	ti du ti sheng
+梯度消失问题	ti du xiao shi wen ti
+梯度爆炸问题	ti du bao zha wen ti
+梯度裁剪	ti du cai jian
+植物授粉模型	zhi wu shou fen mo xing
+概念学习系统	gai nian xue xi xi tong
+概念漂移	gai nian piao yi
+概率图模型	gai lv tu mo xing
+概率算子	gai lv suan zi
+概率算法	gai lv suan fa
+模块化	mo kuai hua
+模型发布	mo xing fa bu
+模型更新	mo xing geng xin
+模型管理	mo xing guan li
+模型训练	mo xing xun lian
+模型选择	mo xing xuan ze
+模式定义长度	mo shi ding yi chang du
+模式定理	mo shi ding li
+模式阶	mo shi jie
+模态最优化	mo tai zui you hua
+模拟环境	mo ni huan jing
+模拟退火	mo ni tui huo
+模拟退火算法	mo ni tui huo suan fa
+模板方法	mu ban fang fa
+模板项目	mu ban xiang mu
+欠拟合	qian ni he
+欠配	qian pei
+欠采样	qian cai yang
+欧几里得距离	ou ji li de ju li
+欧氏距离	ou shi ju li
+正例	zheng li
+正则化	zheng ze hua
+正则化项	zheng ze hua xiang
+正定矩阵	zheng ding ju zhen
+正类	zheng lei
+正面应用	zheng mian ying yong
+死锁避免	si suo bi mian
+残差映射	can cha ying she
+残差网络	can cha wang luo
+毒化攻击	du hua gong ji
+比例选择模型	bi li xuan ze mo xing
+民主化开发	min zhu hua kai fa
+永生技术	yong sheng ji shu
+池化	chi hua
+沉浸式体验	chen jin shi ti yan
+没有免费的午餐定理	mei you mian fei de wu can ding li
+治理	zhi li
+治理全球	zhi li quan qiu
+治理城市	zhi li cheng shi
+泛化	fan hua
+泛化能力	fan hua neng li
+泛化误差	fan hua wu cha
+泛化误差上界	fan hua wu cha shang jie
+注意力机制	zhu yi li ji zhi
+注意机制	zhu yi ji zhi
+洋葱架构	yang cong jia gou
+流形假设	liu xing jia she
+流形学习	liu xing xue xi
+测试	ce shi
+测试代价	ce shi dai jia
+测试函数	ce shi han shu
+测试样本	ce shi yang ben
+测试示例	ce shi shi li
+测试试例	ce shi shi li
+测试误差	ce shi wu cha
+测试集	ce shi ji
+浏览器工具	liu lan qi gong ju
+浮点数编码	fu dian shu bian ma
+浮点数编码基因	fu dian shu bian ma ji yin
+海塞矩阵	hai sai ju zhen
+海明距离	hai ming ju li
+消息队列	xiao xi dui lie
+深度信念网络	shen du xin nian wang luo
+深度卷积生成对抗网络	shen du juan ji sheng cheng dui kang wang luo
+深度学习	shen du xue xi
+深度神经网络	shen du shen jing wang luo
+深度网络	shen du wang luo
+混合专家	hun he zhuan jia
+混合创作	hun he chuang zuo
+混合开发	hun he kai fa
+混合现实	hun he xian shi
+混合精度	hun he jing du
+混合计算	hun he ji suan
+混合遗传算法	hun he yi chuan suan fa
+混沌工程	hun dun gong cheng
+混淆矩阵	hun xiao ju zhen
+添加注释	tian jia zhu shi
+渗透测试	shen tou ce shi
+游戏开发	you xi kai fa
+滚动更新	gun dong geng xin
+满秩矩阵	man zhi ju zhen
+漂移检测	piao yi jian ce
+漏洞修复	lou dong xiu fu
+漏洞扫描	lou dong sao miao
+演化计算	yan hua ji suan
+演绎	yan yi
+演讲嘉宾	yan jiang jia bin
+潜在语义分析	qian zai yu yi fen xi
+潜意识	qian yi shi
+激活函数	ji huo han shu
+火焰图	huo yan tu
+灯光效果	deng guang xiao guo
+灰度发布	hui du fa bu
+灵感来源	ling gan lai yuan
+灾害响应	zai hai xiang ying
+点击率	dian ji lv
+熔断	rong duan
+熔断降级	rong duan jiang ji
+爬山搜索算法	pa shan sou suo suan fa
+爱好者	ai hao zhe
+版本	ban ben
+版本冲突	ban ben chong tu
+版本升级	ban ben sheng ji
+版本控制	ban ben kong zhi
+版本空间	ban ben kong jian
+版本迭代	ban ben die dai
+牛顿法	niu dun fa
+物体检测	wu ti jian ce
+物理	wu li
+物理引擎	wu li yin qing
+物联网	wu lian wang
+特化	te hua
+特征	te zheng
+特征值分解	te zheng zhi fen jie
+特征向量	te zheng xiang liang
+特征学习	te zheng xue xi
+特征工程	te zheng gong cheng
+特征开关	te zheng kai guan
+特征选择	te zheng xuan ze
+特征重要性	te zheng zhong yao xing
+状态	zhuang tai
+状态特征函	zhuang tai te zheng han
+状态空间模型	zhuang tai kong jian mo xing
+状态管理	zhuang tai guan li
+独依赖估计	du yi lai gu ji
+独立同分布	du li tong fen bu
+独立成分分析	du li cheng fen fen xi
+环境配置	huan jing pei zhi
+环境问题	huan jing wen ti
+玻尔兹曼机	bo er zi man ji
+理性讨论	li xing tao lun
+理解上下文	li jie shang xia wen
+理解代码库	li jie dai ma ku
+璇玑	xuan ji
+生产	sheng chan
+生态	sheng tai
+生态丰富	sheng tai feng fu
+生成代码	sheng cheng dai ma
+生成器	sheng cheng qi
+生成对抗网络	sheng cheng dui kang wang luo
+生成权	sheng cheng quan
+生成模型	sheng cheng mo xing
+生成测试	sheng cheng ce shi
+生成艺术	sheng cheng yi shu
+生涯规划	sheng ya gui hua
+用户体验	yong hu ti yan
+用户偏好	yong hu pian hao
+用户反馈	yong hu fan kui
+用户增长	yong hu zeng zhang
+用户故事	yong hu gu shi
+用户沟通	yong hu gou tong
+用户画像	yong hu hua xiang
+用户通知	yong hu tong zhi
+电路断路	dian lu duan lu
+界面设计	jie mian she ji
+留一法	liu yi fa
+留出法	liu chu fa
+留存率	liu cun lv
+病毒传播	bing du chuan bo
+病毒系数	bing du xi shu
+痛点解决	tong dian jie jue
+监控告警	jian kong gao jing
+监控工具	jian kong gong ju
+监控系统	jian kong xi tong
+监督学习	jian du xue xi
+盘古	pan gu
+目标函数	mu biao han shu
+直接偏好优化	zhi jie pian hao you hua
+直推学习	zhi tui xue xi
+直播带货	zhi bo dai huo
+相似度度量	xiang si du du liang
+相关系数	xiang guan xi shu
+相合性	xiang he xing
+相同语言	xiang tong yu yan
+相对多数投票法	xiang dui duo shu tou piao fa
+看板	kan ban
+真反例	zhen fan li
+真实操作系统	zhen shi cao zuo xi tong
+真正例	zhen zheng li
+真正例率	zhen zheng li lv
+真正类	zhen zheng lei
+真负类	zhen fu lei
+眼镜	yan jing
+知识产权	zhi shi chan quan
+知识工程	zhi shi gong cheng
+知识库	zhi shi ku
+知识表征	zhi shi biao zheng
+研究成果	yan jiu cheng guo
+硬件	ying jian
+硬投票	ying tou piao
+硬间隔	ying jian ge
+确定式采样选择	que ding shi cai yang xuan ze
+示例	shi li
+示例代码	shi li dai ma
+示性函数	shi xing han shu
+社会影响	she hui ying xiang
+社区共识	she qu gong shi
+社区分享	she qu fen xiang
+社区反馈	she qu fan kui
+社区活跃	she qu huo yue
+社区经济	she qu jing ji
+社区贡献	she qu gong xian
+神经图灵机	shen jing tu ling ji
+神经机器翻译	shen jing ji qi fan yi
+离散属性	li san shu xing
+离策略	li ce lue
+离线性能	li xian xing neng
+私有化	si you hua
+科幻现实	ke huan xian shi
+积分系统	ji fen xi tong
+积木块假设	ji mu kuai jia she
+移动字段	yi dong zi duan
+移动开发	yi dong kai fa
+移动端支持	yi dong duan zhi chi
+稀疏性	xi shu xing
+稀疏激活	xi shu ji huo
+稀疏表征	xi shu biao zheng
+稳健性	wen jian xing
+空间复杂度	kong jian fu za du
+穿戴设备	chuan dai she bei
+突破	tu po
+突破进展	tu po jin zhan
+站会	zhan hui
+竞争型学习	jing zheng xing xue xi
+竞赛	jing sai
+竞赛获奖	jing sai huo jiang
+端到端	duan dao duan
+端到端测试	duan dao duan ce shi
+端正图	duan zheng tu
+符号主义	fu hao zhu yi
+符号学习	fu hao xue xi
+符号编码基因	fu hao bian ma ji yin
+等位基因	deng wei ji yin
+等分回归	deng fen hui gui
+等度量映射	deng du liang ying she
+策略	ce lue
+简洁代码	jian jie dai ma
+算术交叉	suan shu jiao cha
+算法	suan fa
+算法优化	suan fa you hua
+管理	guan li
+簇内相似度	cu nei xiang si du
+簇间相似度	cu jian xiang si du
+类内散度矩阵	lei nei san du ju zhen
+类别不平衡	lei bie bu ping heng
+类型检查	lei xing jian cha
+类条件概率	lei tiao jian gai lv
+类比学习	lei bi xue xi
+类职责	lei zhi ze
+类脑计算	lei nao ji suan
+类间散度矩阵	lei jian san du ju zhen
+粒子群优化算法	li zi qun you hua suan fa
+粗粒度并行遗传算法	cu li du bing xing yi chuan suan fa
+精度	jing du
+系统提示	xi tong ti shi
+索引添加	suo yin tian jia
+紫东	zi dong
+累积误差逆传播	lei ji wu cha ni chuan bo
+纠错输出码	jiu cuo shu chu ma
+红队测试	hong dui ce shi
+级联相关	ji lian xiang guan
+纯函数	chun han shu
+纯合子	chun he zi
+纳什均衡	na shi jun heng
+线下活动	xian xia huo dong
+线性修正函数	xian xing xiu zheng han shu
+线性修正单元	xian xing xiu zheng dan yuan
+线性判别函数	xian xing pan bie han shu
+线性判别分析	xian xing pan bie fen xi
+线性可分	xian xing ke fen
+线性回归	xian xing hui gui
+线性尺度变换	xian xing chi du bian huan
+线性模型	xian xing mo xing
+线性注意力	xian xing zhu yi li
+线性链条件随机场	xian xing lian tiao jian sui ji chang
+线程池	xian cheng chi
+组件化	zu jian hua
+组件学习器	zu jian xue xi qi
+组合	zu he
+细粒度并行遗传算法	xi li du bing xing yi chuan suan fa
+终止条件	zhong zhi tiao jian
+终身学习	zhong shen xue xi
+经验交流	jing yan jiao liu
+经验条件熵	jing yan tiao jian shang
+经验熵	jing yan shang
+经验误差	jing yan wu cha
+经验风险	jing yan feng xian
+结构风险	jie gou feng xian
+结构风险最小化	jie gou feng xian zui xiao hua
+绝对多数投票法	jue dui duo shu tou piao fa
+统计学习	tong ji xue xi
+继续发展	ji xu fa zhan
+维数	wei shu
+维数灾难	wei shu zai nan
+维特比算法	wei te bi suan fa
+绿色计算	lv se ji suan
+缓存	huan cun
+缓存策略	huan cun ce lue
+编写文档	bian xie wen dang
+编码矩阵	bian ma ju zhen
+编程	bian cheng
+编程奇才	bian cheng qi cai
+网红经济	wang hong jing ji
+罚函数排列	fa han shu pai lie
+置信度	zhi xin du
+署名权	shu ming quan
+群体	qun ti
+群体多样性	qun ti duo yang xing
+群体大小	qun ti da xiao
+群体平均适应度	qun ti ping jun shi ying du
+翻转法	fan zhuan fa
+职业发展	zhi ye fa zhan
+联合国	lian he guo
+联系函数	lian xi han shu
+联邦学习	lian bang xue xi
+聚合根	ju he gen
+聚类	ju lei
+聚类分析	ju lei fen xi
+聚类集成	ju lei ji cheng
+背包问题	bei bao wen ti
+脑机接口	nao ji jie kou
+脚手架	jiao shou jia
+脱氧核糖核酸	tuo yang he tang he suan
+腾讯云	teng xun yun
+自主	zi zhu
+自主可控	zi zhu ke kong
+自动化测试	zi dong hua ce shi
+自动化部署	zi dong hua bu shu
+自动扩容	zi dong kuo rong
+自动摘要	zi dong zhai yao
+自动编码器	zi dong bian ma qi
+自动语音识别	zi dong yu yin shi bie
+自动驾驶	zi dong jia shi
+自助法	zi zhu fa
+自助采样法	zi zhu cai yang fa
+自我反思	zi wo fan si
+自我改进	zi wo gai jin
+自然语言处理	zi ran yu yan chu li
+自然语言生成	zi ran yu yan sheng cheng
+自然语言编程	zi ran yu yan bian cheng
+自监督	zi jian du
+自组织映射	zi zu zhi ying she
+自编码器	zi bian ma qi
+自适应交叉	zi shi ying jiao cha
+自适应变异	zi shi ying bian yi
+自适应谐振理论	zi shi ying xie zhen li lun
+致死基因	zhi si ji yin
+舞台设计	wu tai she ji
+艺术	yi shu
+艺术定义	yi shu ding yi
+芯片设计	xin pian she ji
+范数	fan shu
+蓝绿	lan lv
+蓝绿部署	lan lv bu shu
+虚拟偶像	xu ni ou xiang
+虚拟家庭	xu ni jia ting
+虚拟演唱会	xu ni yan chang hui
+虚拟现实	xu ni xian shi
+行业应用	hang ye ying yong
+行业标准	hang ye biao zhun
+行为分析	xing wei fen xi
+补丁管理	bu ding guan li
+表征	biao zheng
+表征学习	biao zheng xue xi
+表演	biao yan
+表示定理	biao shi ding li
+装箱问题	zhuang xiang wen ti
+装饰	zhuang shi
+覆盖率	fu gai lv
+观众互动	guan zhong hu dong
+观察者	guan cha zhe
+规划	gui hua
+规划任务	gui hua ren wu
+规划能力	gui hua neng li
+规则学习	gui ze xue xi
+规则引擎	gui ze yin qing
+规则提取	gui ze ti qu
+视觉识别	shi jue shi bie
+视频理解	shi pin li jie
+觉醒	jue xing
+角色扮演	jue se ban yan
+解析树	jie xi shu
+解码	jie ma
+解释代码	jie shi dai ma
+解释器	jie shi qi
+计算成本	ji suan cheng ben
+计算机视觉	ji suan ji shi jue
+计算语言学	ji suan yu yan xue
+订阅制	ding yue zhi
+订阅模式	ding yue mo shi
+认证授权	ren zheng shou quan
+认证考试	ren zheng kao shi
+训练	xun lian
+训练例	xun lian li
+训练数据	xun lian shu ju
+训练数据版权	xun lian shu ju ban quan
+训练样本	xun lian yang ben
+训练示例	xun lian shi li
+训练误差	xun lian wu cha
+训练集	xun lian ji
+论文解读	lun wen jie du
+设计	she ji
+设计模式	she ji mo shi
+访问者	fang wen zhe
+证书	zheng shu
+评估方法	ping gu fang fa
+评分函数	ping fen han shu
+词义消歧	ci yi xiao qi
+词块	ci kuai
+词嵌入	ci qian ru
+词性标注	ci xing biao zhu
+试错性	shi cuo xing
+试错法	shi cuo fa
+语义版本	yu yi ban ben
+语言现象	yu yan xian xiang
+语音控制	yu yin kong zhi
+语音识别	yu yin shi bie
+误分类代价	wu fen lei dai jia
+误分类成本	wu fen lei cheng ben
+请求权限	qing qiu quan xian
+调参	tiao can
+调和平均	tiao he ping jun
+调试	tiao shi
+调试技巧	tiao shi ji qiao
+调试错误	tiao shi cuo wu
+谨慎乐观	jin shen le guan
+谱聚类	pu ju lei
+谷歌神经机器翻译	gu ge shen jing ji qi fan yi
+贝叶斯决策论	bei ye si jue ce lun
+贝叶斯判定准则	bei ye si pan ding zhun ze
+贝叶斯最优分类器	bei ye si zui you fen lei qi
+贝叶斯模型平均	bei ye si mo xing ping jun
+贝叶斯网络	bei ye si wang luo
+负对数似然	fu dui shu si ran
+负相关法	fu xiang guan fa
+负类	fu lei
+负载均衡	fu zai jun heng
+责任链	ze ren lian
+贪婪算法	tan lan suan fa
+贪心	tan xin
+资金扶持	zi jin fu chi
+赌盘选择	du pan xuan ze
+赚钱	zhuan qian
+超参数	chao can shu
+超参调优	chao can tiao you
+超平面	chao ping mian
+超立方体	chao li fang ti
+超级人类	chao ji ren lei
+超级对齐	chao ji dui qi
+超限学习机	chao xian xue xi ji
+趋势	qu shi
+距离度量	ju li du liang
+距离度量学习	ju li du liang xue xi
+跨平台	kua ping tai
+跳表	tiao biao
+踏脚石模型	ta jiao shi mo xing
+转化率	zhuan hua lv
+软件工程师	ruan jian gong cheng shi
+软投票	ruan tou piao
+软间隔	ruan jian ge
+软间隔最大化	ruan jian ge zui da hua
+输入	shu ru
+输入层	shu ru ceng
+输入空间	shu ru kong jian
+输出	shu chu
+输出层	shu chu ceng
+输出空间	shu chu kong jian
+输出调制法	shu chu tiao zhi fa
+边界变异	bian jie bian yi
+边界案例	bian jie an li
+边缘计算	bian yuan ji suan
+边重组交叉	bian chong zu jiao cha
+边际分布	bian ji fen bu
+边际化	bian ji hua
+边际独立性	bian ji du li xing
+迁移学习	qian yi xue xi
+迁移指南	qian yi zhi nan
+迁移脚本	qian yi jiao ben
+过拟合	guo ni he
+过配	guo pei
+过采样	guo cai yang
+运行测试	yun xing ce shi
+近似	jin si
+近端梯度下降	jin duan ti du xia jiang
+近邻成分分析	jin lin cheng fen fen xi
+进化	jin hua
+进化模型	jin hua mo xing
+进化策略	jin hua ce lue
+进化算法	jin hua suan fa
+进化规划	jin hua gui hua
+进化计算	jin hua ji suan
+进阶技巧	jin jie ji qiao
+远程调试	yuan cheng tiao shi
+连接主义	lian jie zhu yi
+连接权	lian jie quan
+连续属性	lian xu shu xing
+迪米特法则	di mi te fa ze
+迭代二分器	die dai er fen qi
+迭代优化	die dai you hua
+迭代修改	die dai xiu gai
+迭代器	die dai qi
+迭代开发	die dai kai fa
+适应度	shi ying du
+适应度函数	shi ying du han shu
+适应度尺度变换	shi ying du chi du bian huan
+适应度景象	shi ying du jing xiang
+适用场景	shi yong chang jing
+适配器	shi pei qi
+选择	xuan ze
+选择模型	xuan ze mo xing
+选择算子	xuan ze suan zi
+选择重排序算子	xuan ze zhong pai xu suan zi
+透明度	tou ming du
+透明模型	tou ming mo xing
+逐步思考	zhu bu si kao
+递归神经网络	di gui shen jing wang luo
+通义千问	tong yi qian wen
+通用人工智能	tong yong ren gong zhi neng
+通用问题求解	tong yong wen ti qiu jie
+通过时间的反向传播	tong guo shi jian de fan xiang chuan bo
+道德图	dao de tu
+遗传	yi chuan
+遗传学	yi chuan xue
+遗传算子	yi chuan suan zi
+遗传算法	yi chuan suan fa
+遗传算法欺骗问题	yi chuan suan fa qi pian wen ti
+遗传编程	yi chuan bian cheng
+遗传隐匿	yi chuan yin ni
+邻居模型	lin ju mo xing
+部分匹配交叉	bu fen pi pei jiao cha
+部分映射交叉	bu fen ying she jiao cha
+部署	bu shu
+部署推理	bu shu tui li
+配对	pei dui
+配对规则	pei dui gui ze
+配置中心	pei zhi zhong xin
+采样	cai yang
+里氏替换	li shi ti huan
+重构代码	chong gou dai ma
+重构技巧	chong gou ji qiao
+重训练	zhong xun lian
+重试机制	chong shi ji zhi
+重试策略	chong shi ce lue
+重赋权法	zhong fu quan fa
+重采样法	zhong cai yang fa
+量化	liang hua
+量子化神经网络	liang zi hua shen jing wang luo
+量子计算	liang zi ji suan
+量子计算机	liang zi ji suan ji
+金丝雀发布	jin si que fa bu
+链式思考	lian shi si kao
+链式推理	lian shi tui li
+链表操作	lian biao cao zuo
+链路追踪	lian lu zhui zong
+锁文件	suo wen jian
+锁机制	suo ji zhi
+错误分析	cuo wu fen xi
+错误日志	cuo wu ri zhi
+错误率	cuo wu lv
+错误追踪	cuo wu zhui zong
+长序列	chang xu lie
+长期主义	chang qi zhu yi
+长期维护	chang qi wei hu
+长期记忆	chang qi ji yi
+长短期记忆	chang duan qi ji yi
+门槛降低	men kan jiang di
+闭式	bi shi
+间隔理论	jian ge li lun
+阈值	yu zhi
+阈值移动	yu zhi yi dong
+阈值逻辑单元	yu zhi luo ji dan yuan
+阙值	que zhi
+队列	dui lie
+防御机制	fang yu ji zhi
+阿里云	a li yun
+降级方案	jiang ji fang an
+降维算法	jiang wei suan fa
+限定等距性	xian ding deng ju xing
+限流	xian liu
+随机搜索算法	sui ji sou suo suan fa
+随机梯度下降	sui ji ti du xia jiang
+随机森林算法	sui ji sen lin suan fa
+随机游走排序	sui ji you zou pai xu
+随机漫步	sui ji man bu
+随机算法	sui ji suan fa
+随机联赛选择模型	sui ji lian sai xuan ze mo xing
+隐动态模型	yin dong tai mo xing
+隐变量	yin bian liang
+隐含并行性	yin han bing xing xing
+隐含狄利克雷分布	yin han di li ke lei fen bu
+隐狄利克雷分布	yin di li ke lei fen bu
+隐私	yin si
+隐私计算	yin si ji suan
+隐藏层	yin cang ceng
+隐马尔可夫模型	yin ma er ke fu mo xing
+障壁	zhang bi
+集合	ji he
+集成修剪	ji cheng xiu jian
+集成学习	ji cheng xue xi
+集成服务	ji cheng fu wu
+集成测试	ji cheng ce shi
+集成测试工具	ji cheng ce shi gong ju
+集群	ji qun
+零信任	ling xin ren
+零数据学习	ling shu ju xue xi
+零次学习	ling ci xue xi
+零知识证明	ling zhi shi zheng ming
+震荡	zhen dang
+静态分析	jing tai fen xi
+静态生成	jing tai sheng cheng
+静态类型	jing tai lei xing
+非凸优化	fei tu you hua
+非均匀变异	fei jun yun bian yi
+非均等代价	fei jun deng dai jia
+非度量距离	fei du liang ju li
+非线性模型	fei xian xing mo xing
+非负矩阵分解	fei fu ju zhen fen jie
+非饱和博弈	fei bao he bo yi
+鞍点	an dian
+音频理解	yin pin li jie
+项目变现	xiang mu bian xian
+顺序交叉	shun xu jiao cha
+预剪枝	yu jian zhi
+预发	yu fa
+预测	yu ce
+预测模型	yu ce mo xing
+预训练	yu xun lian
+预选择	yu xuan ze
+领先模型	ling xian mo xing
+领域自适应	ling yu zi shi ying
+领域驱动	ling yu qu dong
+频率主义学派	pin lv zhu yi xue pai
+风险评估	feng xian ping gu
+飞桨	fei jiang
+马尔可夫链	ma er ke fu lian
+马尔可夫链蒙特卡罗方法	ma er ke fu lian meng te ka luo fang fa
+马尔可夫随机场	ma er ke fu sui ji chang
+验收标准	yan shou biao zhun
+验证想法	yan zheng xiang fa
+验证结果	yan zheng jie guo
+验证集	yan zheng ji
+高并发	gao bing fa
+高手分享	gao shou fen xiang
+高效计算	gao xiao ji suan
+高斯变异	gao si bian yi
+高斯核函数	gao si he han shu
+高斯混合模型	gao si hun he mo xing
+高校合作	gao xiao he zuo
+鲁棒性	lu bang xing
+鲲鹏	kun peng
+黑客松	hei ke song
+黑格式	hei ge shi
+黑箱问题	hei xiang wen ti
