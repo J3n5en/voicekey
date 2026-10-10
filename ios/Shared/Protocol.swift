@@ -135,6 +135,8 @@ struct TypingPrefs: Codable, Equatable {
     var metrics = false
     /// 按键震动（需允许完全访问）
     var haptics = true
+    /// 九宫格功能键布局（数字与左侧标点列固定）
+    var t9Layout = T9Layout()
 
     /// 键盘里切布局时默认布局跟着改（待定，用户可能改成只对本次生效）
     static let toggleSetsDefault = true
@@ -148,6 +150,7 @@ struct TypingPrefs: Codable, Equatable {
         t9 = try c.decodeIfPresent(Bool.self, forKey: .t9) ?? false
         metrics = try c.decodeIfPresent(Bool.self, forKey: .metrics) ?? false
         haptics = try c.decodeIfPresent(Bool.self, forKey: .haptics) ?? true
+        if let l = try? c.decodeIfPresent(T9Layout.self, forKey: .t9Layout), l.valid { t9Layout = l }
     }
 
     /// 有 App Group（主 App、开了完全访问的键盘）读共享设置，否则读本进程自己的副本
@@ -160,6 +163,121 @@ struct TypingPrefs: Codable, Equatable {
     func save() {
         Bus.write(self, VK.File.typing)
         UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.localKey)
+    }
+}
+
+/// 九宫格 5 列 × 4 行：左列前三行为标点/拼音列表，中间 3×3 为数字，都固定。
+/// 7 个功能键分在两处，尺寸随数量弹性分配（拼音不用 0，数字在 123 页）：
+/// - 右列（right，1–4 个）：占前三行，extend 时延伸到底行共四行；键数不超过行数时每键至少一行、多出的行给回车
+///   （不在右列则均分），键比行多时均分
+/// - 底行（bottom）：extend 时剩 4 列，否则 5 列。最左的键与标点列同宽、最右的键（不延伸时）与右列同宽；
+///   中间区域紧挨空格左右的键缩为 0.75 列；空格占满剩余（至少一列）
+/// 「回车」随输入框显示 换行 / 发送 / 搜索；「换行」插入 \n（效果取决于宿主，会把 \n 当发送的输入框里同样会发送）；「符」打开标点符号页。
+/// 默认 ⌫ / 换行 / 回车(两行，右列延伸到底) + 123 · 符(0.75) · 空格(1.5) · 中英(0.75)
+struct T9Layout: Codable, Equatable {
+    var right = ["back", "newline", "enter"]
+    var bottom = ["123", "sym", "space", "lang"]
+    var extend = true
+
+    static let keys = ["back", "newline", "enter", "123", "sym", "lang", "space"]
+    /// 九宫格左列空闲时的常用中文标点，5 个正好铺满一列；其余在「符」页
+    static let punct = ["，", "。", "？", "！", "、"]
+
+    /// 网格单位的位置与大小，可为小数（右列均分时）
+    struct Cell: Equatable {
+        var id: String
+        var c: Double, r: Double, cw: Double, rh: Double
+    }
+
+    var rows: Int { extend ? 4 : 3 }
+    var cols: Int { extend ? 4 : 5 }
+
+    /// 七个键各一次；右列 1–4 个且没有空格；底行有空格且空格至少一列
+    var valid: Bool {
+        (right + bottom).sorted() == Self.keys.sorted()
+            && (1...4).contains(right.count) && !right.contains("space")
+            && bottom.contains("space") && spaceWidth >= 1
+    }
+
+    var cells: [Cell] {
+        var out: [Cell] = []
+        let spare = Double(rows - right.count)
+        let enterAt = right.firstIndex(of: "enter")
+        var y = 0.0
+        for (i, id) in right.enumerated() {
+            let h = spare < 0 ? Double(rows) / Double(right.count)
+                : 1 + (enterAt == nil ? spare / Double(right.count) : i == enterAt ? spare : 0)
+            out.append(Cell(id: id, c: 4, r: y, cw: 1, rh: h))
+            y += h
+        }
+        var x = 0.0
+        let widths = bottomWidths
+        for (id, w) in zip(bottom, widths) {
+            out.append(Cell(id: id, c: x, r: 3, cw: w, rh: 1))
+            x += w
+        }
+        return out
+    }
+
+    /// 底行各键宽度（与 bottom 对应），空格为剩余宽度
+    var bottomWidths: [Double] {
+        let space = bottom.firstIndex(of: "space")
+        var widths = bottom.indices.map { i -> Double in
+            if i == space { return 0 }
+            if i == 0 || (!extend && i == bottom.count - 1) { return 1 }
+            if let space, abs(i - space) == 1 { return 0.75 }
+            return 1
+        }
+        if let space { widths[space] = Double(cols) - widths.reduce(0, +) }
+        return widths
+    }
+
+    var spaceWidth: Double { bottom.firstIndex(of: "space").map { bottomWidths[$0] } ?? 0 }
+
+    /// 把 id 挪到右列 / 底行的第 index 位（同区即重排）；结果不合法返回 nil
+    func moving(_ id: String, toRight: Bool, at index: Int) -> T9Layout? {
+        var next = self
+        next.right.removeAll { $0 == id }
+        next.bottom.removeAll { $0 == id }
+        if toRight {
+            next.right.insert(id, at: min(max(0, index), next.right.count))
+        } else {
+            next.bottom.insert(id, at: min(max(0, index), next.bottom.count))
+        }
+        return next.valid ? next : nil
+    }
+
+    /// 拖到网格位置 (x, y)（网格单位）松手后的布局；落在数字、标点上或放不下返回 nil。
+    /// 右列前三行：按高度插进右列；底行：按横向插进底行；
+    /// 右下角：右列的键拖进去则右列延伸到底，底行的键拖进去则底行占满五列
+    func dropping(_ id: String, x: Double, y: Double) -> T9Layout? {
+        let c = Int(x.rounded(.down)), r = Int(y.rounded(.down))
+        /// 插入位置：目标区里中点在手指之前的其他键个数
+        func index(_ zone: [String], _ before: (Cell) -> Bool) -> Int {
+            cells.filter { $0.id != id && zone.contains($0.id) && before($0) }.count
+        }
+        if c >= 4, r >= 3 {
+            let fromRight = right.contains(id)
+            var base = self
+            base.extend = fromRight
+            return base.moving(id, toRight: fromRight, at: fromRight ? right.count : bottom.count)
+        }
+        if c >= 4, r >= 0 { return moving(id, toRight: true, at: index(right) { $0.r + $0.rh / 2 < y }) }
+        if r >= 3, c >= 0 { return moving(id, toRight: false, at: index(bottom) { $0.c + $0.cw / 2 < x }) }
+        return nil
+    }
+
+    static func name(_ id: String) -> String {
+        switch id {
+        case "back": "⌫"
+        // 编辑页显示：这个键随输入框变成 换行 / 发送 / 搜索……
+        case "enter": "回车"
+        case "newline": "换行"
+        case "space": "空格"
+        case "lang": "中/英"
+        case "sym": "符"
+        default: id
+        }
     }
 }
 

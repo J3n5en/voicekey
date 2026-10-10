@@ -15,6 +15,11 @@ enum Theme {
     static let fg3 = dyn(hex(0x9a9cab), hex(0x8a8c9a))
     static let line = dyn(hex(0x141428, 0.1), hex(0xffffff, 0.12))
     static let accent = dyn(hex(0x6a5cff), hex(0x9d94ff))
+    static let accentDown = dyn(hex(0x5243e0), hex(0x7d72ee))
+    static let sheet = dyn(hex(0xf2f3f7), hex(0x24252a))
+    static let surface = dyn(hex(0xffffff), hex(0x404148))
+    static let selected = dyn(hex(0xeff0ff), hex(0x4b4a60))
+    static let hairline = dyn(hex(0xc8cbd4, 0.6), hex(0xffffff, 0.1))
     static let rec = hex(0xff3b30)
     static let ok = hex(0x1fb57a)
     static let warn = hex(0xf0a020)
@@ -53,6 +58,43 @@ class ThemedView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+// MARK: - 顶栏
+
+/// 键盘顶栏：扩展里完全透明处收不到触摸，图标键又小，按在键缝或键外常常没反应。
+/// 落在空白处的点交给水平方向最近（16pt 内）的按钮
+final class ToolBar: UIStackView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.black.withAlphaComponent(0.001)
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else { return nil }
+        if hit is UIControl { return hit }
+        func gap(_ v: UIView) -> CGFloat { max(0, abs(point.x - v.frame.midX) - v.frame.width / 2) }
+        let near = arrangedSubviews
+            .compactMap { $0 as? UIControl }
+            .filter { !$0.isHidden && $0.isEnabled && $0.isUserInteractionEnabled && $0.alpha > 0.01 }
+            .min { gap($0) < gap($1) }
+        guard let near, gap(near) <= 16 else { return hit }
+        return near
+    }
+}
+
+/// 顶栏胶囊与图标按钮共用轻盈的悬浮表面
+enum ToolStyle {
+    static func apply(_ b: UIButton, radius: CGFloat) {
+        b.backgroundColor = Theme.surface
+        b.layer.cornerRadius = radius
+        b.layer.shadowColor = UIColor.black.cgColor
+        b.layer.shadowOffset = CGSize(width: 0, height: 1)
+        b.layer.shadowRadius = 2
+        b.layer.shadowOpacity = 0.12
+    }
+}
+
 // MARK: - 麦克风
 
 final class MicButton: UIControl {
@@ -60,7 +102,7 @@ final class MicButton: UIControl {
 
     var look = Look.solid { didSet { if look != oldValue { refresh() } } }
     private let side: CGFloat
-    private let grad = Theme.gradientLayer()
+    private let grad = CAGradientLayer()
     private let pulse = CALayer()
     private let icon = UIImageView()
     private let stopMark = UIView()
@@ -72,6 +114,9 @@ final class MicButton: UIControl {
         layer.cornerRadius = side / 2
         pulse.cornerRadius = side / 2
         grad.cornerRadius = side / 2
+        grad.colors = [Theme.hex(0x8c82f9).cgColor, Theme.hex(0x6255db).cgColor]
+        grad.startPoint = CGPoint(x: 0, y: 0)
+        grad.endPoint = CGPoint(x: 1, y: 1)
         layer.addSublayer(pulse)
         layer.addSublayer(grad)
         icon.contentMode = .center
@@ -113,17 +158,17 @@ final class MicButton: UIControl {
         grad.isHidden = look != .solid
         stopMark.isHidden = look != .recording
         icon.isHidden = look == .recording
-        icon.image = Theme.symbol(look == .outline ? "mic" : "mic.fill", side * 0.36, .medium)
-        icon.tintColor = look == .solid ? .white : accent
-        backgroundColor = look == .recording ? Theme.rec : Theme.key
-        layer.borderWidth = look == .outline || look == .finalizing ? 2 : 0
-        layer.borderColor = accent.cgColor
-        layer.shadowColor = Theme.hex(0x6a5cff).cgColor
-        layer.shadowOpacity = look == .solid ? 0.35 : 0
-        layer.shadowRadius = 9
-        layer.shadowOffset = CGSize(width: 0, height: 6)
+        icon.image = Theme.symbol(look == .outline ? "mic" : "mic.fill", side * 0.36, .semibold)
+        icon.tintColor = look == .solid ? .white : (look == .recording ? .white : accent)
+        backgroundColor = look == .recording ? Theme.hex(0xd93945) : Theme.surface
+        layer.borderWidth = look == .outline || look == .finalizing ? 1 : 0
+        layer.borderColor = accent.withAlphaComponent(0.45).cgColor
+        layer.shadowColor = look == .recording ? Theme.rec.cgColor : Theme.hex(0x6255db).cgColor
+        layer.shadowOpacity = look == .solid || look == .recording ? 0.22 : 0.12
+        layer.shadowRadius = look == .outline || look == .finalizing ? 2 : 6
+        layer.shadowOffset = CGSize(width: 0, height: look == .outline || look == .finalizing ? 1 : 3)
         pulse.removeAllAnimations()
-        pulse.backgroundColor = Theme.rec.withAlphaComponent(0.45).cgColor
+        pulse.backgroundColor = Theme.rec.withAlphaComponent(0.3).cgColor
         pulse.isHidden = look != .recording
         if look == .recording {
             let s = CABasicAnimation(keyPath: "transform.scale")
@@ -204,9 +249,19 @@ final class WaveView: UIView {
 class KeyButton: UIButton {
     enum Style { case key, fn, enter, action, actionRec, actionOutline }
 
-    var style: Style { didSet { setNeedsLayout() } }
+    var style: Style {
+        didSet {
+            if style != oldValue {
+                grad.colors = style == .actionRec ? Self.recGradient : Theme.gradient
+                setNeedsLayout()
+            }
+        }
+    }
     /// 不设则按样式取默认字号
     var fontSize: CGFloat? { didSet { setNeedsLayout() } }
+    /// 置灰（如输入框为空时的「发送」）
+    var muted = false { didSet { if muted != oldValue { setNeedsLayout() } } }
+    private static let recGradient = [Theme.hex(0xf65c57).cgColor, Theme.hex(0xd7354a).cgColor]
     private let grad = Theme.gradientLayer()
 
     init(_ title: String? = nil, symbol: String? = nil, style: Style = .key) {
@@ -218,6 +273,7 @@ class KeyButton: UIButton {
         layer.cornerRadius = 6
         grad.cornerRadius = 6
         layer.insertSublayer(grad, at: 0)
+        if style == .actionRec { grad.colors = Self.recGradient }
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOffset = CGSize(width: 0, height: 1)
         layer.shadowRadius = 0
@@ -250,17 +306,26 @@ class KeyButton: UIButton {
     private func applyStyle() {
         let t = traitCollection
         let down = isHighlighted
-        grad.isHidden = style != .action
+        grad.isHidden = style != .action && style != .actionRec
         let fg: UIColor
         switch style {
-        case .key: backgroundColor = down ? Theme.key2 : Theme.key; fg = Theme.fg
-        case .fn: backgroundColor = down ? Theme.key : Theme.key2; fg = Theme.fg
-        case .enter: backgroundColor = Theme.accent; fg = .white
+        case .key: backgroundColor = down ? Theme.key2 : Theme.key; fg = muted ? Theme.fg3 : Theme.fg
+        case .fn: backgroundColor = down ? Theme.key : Theme.key2; fg = muted ? Theme.fg3 : Theme.fg
+        case .enter: backgroundColor = down ? Theme.accentDown : Theme.accent; fg = .white
         case .action: backgroundColor = .clear; fg = .white
-        case .actionRec: backgroundColor = Theme.rec; fg = .white
+        case .actionRec: backgroundColor = .clear; fg = .white
         case .actionOutline: backgroundColor = Theme.key; fg = Theme.accent
         }
-        if style != .key, style != .fn { alpha = down ? 0.6 : 1 }
+        let recording = style == .actionRec
+        grad.startPoint = CGPoint(x: 0, y: 0.5)
+        grad.endPoint = CGPoint(x: 1, y: 0.5)
+        layer.cornerRadius = recording ? 9 : 6
+        grad.cornerRadius = layer.cornerRadius
+        layer.shadowColor = recording ? Theme.hex(0xa92a37).cgColor : UIColor.black.cgColor
+        layer.shadowRadius = recording ? 4 : 0
+        layer.shadowOffset = CGSize(width: 0, height: recording ? 2 : 1)
+        layer.shadowOpacity = recording ? 0.2 : 0.25
+        if style != .key, style != .fn, style != .enter { alpha = down ? 0.6 : 1 }
         // 富文本标题（中/英键）自带字体颜色，再设 titleLabel 会触发重新布局而死循环
         if attributedTitle(for: .normal) == nil {
             setTitleColor(fg, for: .normal)
@@ -350,7 +415,7 @@ final class CandidateRow: UIControl {
     let channel: String
     private let bar = UIView()
     private let dot = UIView()
-    private let name = Theme.label(11.5, Theme.fg2)
+    private let name = Theme.label(11.5, Theme.fg2, weight: .medium)
     private let text = Theme.label(14.5, lines: 0)
     private let pend = Theme.label(10.5, Theme.accent)
     private let ms = Theme.label(11, Theme.fg3)
@@ -363,14 +428,14 @@ final class CandidateRow: UIControl {
         accessibilityTraits = .button
         accessibilityIdentifier = "row-\(channel)"
         bar.backgroundColor = Theme.accent
-        bar.layer.cornerRadius = 1.5
+        bar.layer.cornerRadius = 1
         dot.layer.cornerRadius = 3
         pend.text = "定稿后上屏"
         ms.textAlignment = .right
-        ms.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        ms.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
         spin.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
         let nameRow = UIStackView(arrangedSubviews: [dot, name])
-        nameRow.spacing = 4
+        nameRow.spacing = 6
         nameRow.alignment = .center
         let mid = UIStackView(arrangedSubviews: [text, pend])
         mid.axis = .vertical
@@ -385,20 +450,28 @@ final class CandidateRow: UIControl {
             addSubview(v)
         }
         NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 46),
+            {
+                // 低优先级把行高收到 max(46, 内容)，避免在纵向 stack 里高度不定
+                let h = heightAnchor.constraint(equalToConstant: 46)
+                h.priority = .fittingSizeLevel
+                return h
+            }(),
             bar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bar.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
-            bar.widthAnchor.constraint(equalToConstant: 3),
+            bar.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+            bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -11),
+            bar.widthAnchor.constraint(equalToConstant: 2),
             dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6),
-            nameRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
-            nameRow.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            nameRow.widthAnchor.constraint(equalToConstant: 58),
+            nameRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            nameRow.centerYAnchor.constraint(equalTo: topAnchor, constant: 23),
+            nameRow.widthAnchor.constraint(equalToConstant: 60),
             mid.leadingAnchor.constraint(equalTo: nameRow.trailingAnchor, constant: 8),
-            mid.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            mid.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
-            right.leadingAnchor.constraint(equalTo: mid.trailingAnchor, constant: 8),
-            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            right.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            mid.centerYAnchor.constraint(equalTo: centerYAnchor),
+            mid.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 9),
+            mid.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
+            right.leadingAnchor.constraint(equalTo: mid.trailingAnchor, constant: 5),
+            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            right.centerYAnchor.constraint(equalTo: topAnchor, constant: 23),
             right.widthAnchor.constraint(equalToConstant: 40),
             right.heightAnchor.constraint(equalToConstant: 16),
             ms.trailingAnchor.constraint(equalTo: right.trailingAnchor), ms.centerYAnchor.constraint(equalTo: right.centerYAnchor),
@@ -432,7 +505,7 @@ final class CandidateRow: UIControl {
             text.font = .systemFont(ofSize: 14.5)
         }
         pend.isHidden = !pending
-        backgroundColor = selected ? Theme.accent.withAlphaComponent(0.14) : .clear
+        backgroundColor = selected ? Theme.selected : .clear
         bar.isHidden = !selected
         if r.state == .finalizing { spin.startAnimating() } else { spin.stopAnimating() }
         ms.text = r.state == .finalizing ? nil : r.ms.map { String(format: "%.2fs", Double($0) / 1000) }
@@ -454,28 +527,26 @@ final class CandidatePanel: ThemedView {
     private let list = UIStackView()
     private let scroll = UIScrollView()
     private var rows: [CandidateRow] = []
-    private var seps: [UIView] = []
     private let headerLine = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = Theme.key
-        layer.cornerRadius = 10
+        backgroundColor = Theme.surface
+        layer.cornerRadius = 13
         clipsToBounds = true
         recDot.backgroundColor = Theme.rec
         recDot.layer.cornerRadius = 3.5
         spin.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
         retry.setTitle("重试", for: .normal)
-        retry.titleLabel?.font = .systemFont(ofSize: 12)
+        retry.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
         retry.tintColor = Theme.accent
         retry.addAction(UIAction { [weak self] _ in self?.onRetry?() }, for: .touchUpInside)
         hint.text = "可提前选"
-        close.setTitle("✕", for: .normal)
-        close.titleLabel?.font = .systemFont(ofSize: 14)
+        close.setImage(Theme.symbol("xmark", 12, .semibold), for: .normal)
         close.tintColor = Theme.fg2
-        close.backgroundColor = Theme.line
-        close.layer.cornerRadius = 7
+        close.backgroundColor = Theme.dyn(Theme.hex(0xf1f2f6), Theme.hex(0x565760))
+        close.layer.cornerRadius = 16
         close.accessibilityLabel = "关闭候选"
         close.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
         let spacer = UIView()
@@ -483,7 +554,7 @@ final class CandidatePanel: ThemedView {
         let head = UIStackView(arrangedSubviews: [recDot, spin, status, retry, spacer, hint, close])
         head.spacing = 8
         head.alignment = .center
-        headerLine.backgroundColor = Theme.line
+        headerLine.backgroundColor = Theme.hairline
         list.axis = .vertical
         scroll.alwaysBounceVertical = false
         for v in [head, headerLine, scroll, list] { v.translatesAutoresizingMaskIntoConstraints = false }
@@ -494,13 +565,15 @@ final class CandidatePanel: ThemedView {
         NSLayoutConstraint.activate([
             recDot.widthAnchor.constraint(equalToConstant: 7), recDot.heightAnchor.constraint(equalToConstant: 7),
             spin.widthAnchor.constraint(equalToConstant: 14),
-            close.widthAnchor.constraint(equalToConstant: 26), close.heightAnchor.constraint(equalToConstant: 26),
-            head.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
-            head.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            head.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            headerLine.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 4),
-            headerLine.leadingAnchor.constraint(equalTo: leadingAnchor),
-            headerLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            close.widthAnchor.constraint(equalToConstant: 32), close.heightAnchor.constraint(equalToConstant: 32),
+            retry.widthAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            retry.heightAnchor.constraint(equalToConstant: 32),
+            head.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            head.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            head.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            headerLine.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 6),
+            headerLine.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            headerLine.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             headerLine.heightAnchor.constraint(equalToConstant: 0.5),
             scroll.topAnchor.constraint(equalTo: headerLine.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -526,7 +599,7 @@ final class CandidatePanel: ThemedView {
             for (i, v) in rows.enumerated() {
                 if i > 0 {
                     let s = UIView()
-                    s.backgroundColor = Theme.line
+                    s.backgroundColor = Theme.hairline
                     s.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
                     list.addArrangedSubview(s)
                 }
@@ -552,7 +625,7 @@ final class CandidatePanel: ThemedView {
             status.text = "全部失败"
             status.textColor = Theme.err
         } else {
-            status.text = "● 全部完成 · 点一条上屏"
+            status.text = "全部完成 · 点一条上屏"
             status.textColor = Theme.ok
         }
         recDot.layer.removeAllAnimations()
@@ -577,33 +650,49 @@ final class SheetView: ThemedView {
     init(title: String) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = Theme.kb
-        let t = Theme.label(14, weight: .semibold)
+        backgroundColor = Theme.sheet
+        let t = Theme.label(15, weight: .semibold)
         t.text = title
         let done = UIButton(type: .system)
         done.setTitle("完成", for: .normal)
-        done.titleLabel?.font = .systemFont(ofSize: 14)
+        done.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
         done.tintColor = Theme.accent
         done.addAction(UIAction { [weak self] _ in self?.onDone?() }, for: .touchUpInside)
-        let head = UIStackView(arrangedSubviews: [t, UIView(), done])
+        let head = UIView()
+        head.backgroundColor = Theme.sheet
+        let headRow = UIStackView(arrangedSubviews: [t, UIView(), done])
+        let line = UIView()
+        line.backgroundColor = Theme.hairline
         let scroll = UIScrollView()
+        scroll.contentInsetAdjustmentBehavior = .never
         content.axis = .vertical
-        content.spacing = 6
-        for v in [head, scroll, content] { v.translatesAutoresizingMaskIntoConstraints = false }
+        content.spacing = 8
+        for v in [head, headRow, line, scroll, content] { v.translatesAutoresizingMaskIntoConstraints = false }
         addSubview(head)
+        head.addSubview(headRow)
+        head.addSubview(line)
         addSubview(scroll)
         scroll.addSubview(content)
         NSLayoutConstraint.activate([
-            head.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            head.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            head.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            head.heightAnchor.constraint(equalToConstant: 30),
-            scroll.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 4),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-            content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
-            content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            head.topAnchor.constraint(equalTo: topAnchor),
+            head.leadingAnchor.constraint(equalTo: leadingAnchor),
+            head.trailingAnchor.constraint(equalTo: trailingAnchor),
+            head.heightAnchor.constraint(equalToConstant: 50),
+            headRow.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: 20),
+            headRow.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -16),
+            headRow.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            done.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            done.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            line.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: 18),
+            line.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -18),
+            line.bottomAnchor.constraint(equalTo: head.bottomAnchor),
+            line.heightAnchor.constraint(equalToConstant: 0.5),
+            scroll.topAnchor.constraint(equalTo: head.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -12),
             content.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor),
         ])
@@ -616,20 +705,20 @@ final class SheetView: ThemedView {
         l.text = text
         let wrap = UIStackView(arrangedSubviews: [l])
         wrap.isLayoutMarginsRelativeArrangement = true
-        wrap.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 0, trailing: 6)
+        wrap.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 1, trailing: 8)
         content.addArrangedSubview(wrap)
     }
 
     func group(_ cells: [UIView]) {
         let g = UIStackView()
         g.axis = .vertical
-        g.backgroundColor = Theme.key
-        g.layer.cornerRadius = 10
+        g.backgroundColor = Theme.surface
+        g.layer.cornerRadius = 12
         g.clipsToBounds = true
         for (i, c) in cells.enumerated() {
             if i > 0 {
                 let s = UIView()
-                s.backgroundColor = Theme.line
+                s.backgroundColor = Theme.hairline
                 s.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
                 g.addArrangedSubview(s)
             }
@@ -657,10 +746,10 @@ final class SheetView: ThemedView {
         row.isUserInteractionEnabled = accessory is UISwitch
         c.addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -14),
-            row.topAnchor.constraint(equalTo: c.topAnchor, constant: 10),
-            row.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -10),
+            row.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 16),
+            row.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -16),
+            row.topAnchor.constraint(equalTo: c.topAnchor, constant: 11),
+            row.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -11),
             c.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
         if let tap { c.addAction(UIAction { _ in tap() }, for: .touchUpInside) }

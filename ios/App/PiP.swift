@@ -18,8 +18,8 @@ final class PiPStandby: NSObject {
     private let display = AVSampleBufferDisplayLayer()
     private let host = UIView(frame: CGRect(x: 0, y: 0, width: 369, height: 369.0 / 4680))
     private var controller: AVPictureInPictureController?
-    private var possible: NSKeyValueObservation?
-    private var rendering: NSKeyValueObservation?
+    private var possible: KVOToken?
+    private var rendering: KVOToken?
     private var deadline: DispatchWorkItem?
     private var sessionGeneration = 0
     private var controllerGeneration = 0
@@ -84,10 +84,10 @@ final class PiPStandby: NSObject {
             c.canStartPictureInPictureAutomaticallyFromInline = false
             c.requiresLinearPlayback = true
             controller = c
-            possible = c.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] _, _ in
+            possible = KVOToken(c, "pictureInPicturePossible") { [weak self] in
                 DispatchQueue.main.async { self?.kick() }
             }
-            rendering = display.observe(\.status, options: [.new]) { [weak self] _, _ in
+            rendering = KVOToken(display, "status") { [weak self] in
                 DispatchQueue.main.async { self?.kick() }
             }
         }
@@ -183,6 +183,27 @@ final class PiPStandby: NSObject {
         }
         return out
     }
+}
+
+/// 字符串 KVO：Swift keyPath 版 observe 在 iOS 27 上观察 AVPictureInPictureController 会在类型转换处崩（切画中画待机即闪退）
+private final class KVOToken: NSObject {
+    private let object: NSObject
+    private let key: String
+    private let onChange: () -> Void
+
+    init(_ object: NSObject, _ key: String, _ onChange: @escaping () -> Void) {
+        self.object = object
+        self.key = key
+        self.onChange = onChange
+        super.init()
+        object.addObserver(self, forKeyPath: key, options: [], context: nil)
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        onChange()
+    }
+
+    deinit { object.removeObserver(self, forKeyPath: key) }
 }
 
 extension PiPStandby: AVPictureInPictureControllerDelegate {
