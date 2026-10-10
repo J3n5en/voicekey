@@ -103,7 +103,6 @@ struct RootView: View {
 struct SessionView: View {
     @EnvironmentObject var session: SessionManager
     @EnvironmentObject var perms: Permissions
-    @State private var copied = false
     @AppStorage("pipHintSeen") private var pipHintSeen = false
 
     private var pipOn: Bool { session.active && session.standby == .pip }
@@ -155,35 +154,23 @@ struct SessionView: View {
                          : "结束会话后停止待命、关闭麦克风。快到时间时键盘里会提醒，说话会自动续期。")
                 }
                 Section {
-                    if session.history.isEmpty {
-                        Text("还没有记录。上屏失败或没插进去时，可以在这里找回。").foregroundStyle(.secondary).font(.subheadline)
-                    }
-                    ForEach(session.history) { h in
-                        Button {
-                            UIPasteboard.general.string = h.text
-                            copied = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(h.text).foregroundStyle(.primary)
-                                    Text("\(Date(timeIntervalSince1970: h.at).formatted(date: .omitted, time: .shortened)) · \(h.channel)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text("复制").font(.subheadline).foregroundStyle(.secondary)
+                    NavigationLink { HistoryView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Color.accentVK).frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("最近上屏")
+                                Text(session.history.first?.text ?? "上屏失败或没插进去时，可以在这里找回")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
+                            if !session.history.isEmpty {
+                                Text("\(session.history.count)").foregroundStyle(.secondary)
                             }
                         }
                     }
-                } header: { Text("最近上屏") }
-            }
-            .navigationTitle("会话")
-            .overlay(alignment: .bottom) {
-                if copied {
-                    Text("已复制").padding(.horizontal, 16).padding(.vertical, 8)
-                        .background(.thinMaterial, in: Capsule()).padding(.bottom, 24)
                 }
             }
+            .navigationTitle("会话")
         }
     }
 
@@ -233,6 +220,247 @@ struct SessionView: View {
         case .failed: return "麦克风启动失败，请稍后重试"
         default: return "在键盘上点麦克风会自动开启"
         }
+    }
+}
+
+// MARK: - 最近上屏
+
+struct HistoryView: View {
+    @EnvironmentObject var session: SessionManager
+    @State private var query = ""
+    @State private var copied = false
+    @State private var confirmClear = false
+
+    private var days: [(day: Date, items: [HistoryItem])] {
+        let items = query.isEmpty ? session.history : session.history.filter { $0.text.localizedCaseInsensitiveContains(query) }
+        let cal = Calendar.current
+        return Dictionary(grouping: items) { cal.startOfDay(for: Date(timeIntervalSince1970: $0.at)) }
+            .map { ($0.key, $0.value.sorted { $0.at > $1.at }) }
+            .sorted { $0.day > $1.day }
+    }
+
+    var body: some View {
+        // 空列表时不挂 List / 搜索栏：空 List 上的搜索栏推入后会收起一次，整页跟着跳
+        Group {
+            if session.history.isEmpty {
+                ContentUnavailableView("还没有记录", systemImage: "clock.arrow.circlepath", description: Text("语音上屏的结果和键盘里主动清空的文字会保存在本机，上屏失败或没插进去时可以在这里找回。"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGroupedBackground))
+            } else {
+                List {
+                    ForEach(days, id: \.day) { group in
+                        Section(dayTitle(group.day)) {
+                            ForEach(group.items) { row($0) }
+                        }
+                    }
+                }
+                .overlay { if days.isEmpty { ContentUnavailableView.search(text: query) } }
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索")
+            }
+        }
+        .navigationTitle("最近上屏")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 常驻、空时置灰，避免按钮出现/消失让导航栏重排
+            Button("清空", role: .destructive) { confirmClear = true }
+                .disabled(session.history.isEmpty)
+        }
+        .confirmationDialog("清空全部最近上屏？", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("清空", role: .destructive) { session.clearHistory() }
+        }
+        .overlay(alignment: .bottom) {
+            if copied {
+                Label("已复制", systemImage: "checkmark").font(.subheadline)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(.thinMaterial, in: Capsule()).padding(.bottom, 24)
+                    .transition(.opacity)
+            }
+        }
+        .onAppear { session.reloadHistory() }
+    }
+
+    private func row(_ h: HistoryItem) -> some View {
+        Button { copy(h.text) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(h.text).foregroundStyle(.primary).lineLimit(4).multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    Text(Date(timeIntervalSince1970: h.at).formatted(date: .omitted, time: .shortened))
+                    Text(h.channel)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .swipeActions {
+            Button("删除", role: .destructive) { session.removeHistory([h.id]) }
+        }
+        .contextMenu {
+            Button { copy(h.text) } label: { Label("复制", systemImage: "doc.on.doc") }
+            ShareLink(item: h.text) { Label("分享", systemImage: "square.and.arrow.up") }
+            Button(role: .destructive) { session.removeHistory([h.id]) } label: { Label("删除", systemImage: "trash") }
+        }
+    }
+
+    private func copy(_ text: String) {
+        UIPasteboard.general.string = text
+        withAnimation { copied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { copied = false } }
+    }
+
+    private func dayTitle(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return "今天" }
+        if cal.isDateInYesterday(d) { return "昨天" }
+        return d.formatted(.dateTime.month().day().weekday())
+    }
+}
+
+// MARK: - 九宫格键位
+
+/// 数字 1–9 与左侧标点列固定、不可交互；7 个功能键（⌫ 换行 回车 123 符 中/英 空格）可拖到右列或底行任意位置。
+/// 拖动时像拼图：其他键实时让位、尺寸弹性重排，虚线框提示松手后的落点。按宽度自适应
+struct T9LayoutView: View {
+    @Binding var typing: TypingPrefs
+    @State private var width: CGFloat = 0
+    /// 正在拖的键、它的中心位置（跟手）、手指相对键中心的偏移、松手后的布局预览
+    @State private var dragging: String?
+    @State private var center: CGPoint = .zero
+    @State private var grab: CGSize = .zero
+    @State private var preview: T9Layout?
+
+    private static let letters = ["2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ", "1": "@/."]
+    private static let gap: CGFloat = 6
+
+    /// 键宽按 5 列均分；键高约为键宽 0.6（同系统九宫格比例），限制在 40–60 之间
+    private var col: CGFloat { max(0, (width - 4 * Self.gap) / 5) }
+    private var rowH: CGFloat { min(60, max(40, col * 0.6)) }
+    private var gridHeight: CGFloat { 4 * rowH + 3 * Self.gap }
+    private var layout: T9Layout { typing.t9Layout }
+    private var shown: T9Layout { preview ?? layout }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                grid
+                    .frame(maxWidth: .infinity)
+                    .frame(height: gridHeight)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                    .padding(14)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                Text("按住功能键拖到右列或底行的任意位置，其他键会自动让位、调整大小，虚线框是松手后的位置。数字和标点列固定。「回车」在键盘上会随输入框显示为换行、发送、搜索等。改完下次弹出键盘生效。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                Button("恢复默认") { withAnimation(.snappy) { save(T9Layout()) } }
+                    .disabled(layout == T9Layout())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(16)
+        }
+        .scrollDisabled(dragging != nil)
+        .background(Color(.systemGroupedBackground))
+        .sensoryFeedback(.selection, trigger: preview)
+        .navigationTitle("九宫格键位")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func frame(_ c: Double, _ r: Double, _ cw: Double = 1, _ rh: Double = 1) -> CGRect {
+        CGRect(x: c * (col + Self.gap), y: r * (rowH + Self.gap),
+               width: cw * col + (cw - 1) * Self.gap, height: rh * rowH + (rh - 1) * Self.gap)
+    }
+
+    private func frame(_ cell: T9Layout.Cell) -> CGRect { frame(cell.c, cell.r, cell.cw, cell.rh) }
+
+    private var grid: some View {
+        ZStack(alignment: .topLeading) {
+            punct(frame(0, 0, 1, 3))
+            ForEach(1...9, id: \.self) { n in digit(n, frame(Double((n - 1) % 3 + 1), Double((n - 1) / 3))) }
+            // 落点提示：拖动中的键在预览布局里的位置
+            if let dragging, let cell = shown.cells.first(where: { $0.id == dragging }) {
+                let f = frame(cell)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentVK, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(Color.accentVK.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .frame(width: f.width, height: f.height)
+                    .position(x: f.midX, y: f.midY)
+                    .allowsHitTesting(false)
+            }
+            // 以键为身份：重排时各键从旧位置、旧尺寸动画到新的
+            ForEach(shown.cells, id: \.id) { key($0) }
+        }
+        .frame(width: width, height: gridHeight, alignment: .topLeading)
+        .coordinateSpace(name: "t9")
+    }
+
+    private func punct(_ f: CGRect) -> some View {
+        VStack(spacing: 0) {
+            ForEach(T9Layout.punct, id: \.self) { Text($0).frame(maxHeight: .infinity) }
+        }
+        .font(.subheadline).foregroundStyle(.tertiary)
+        .frame(width: f.width, height: f.height)
+        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .position(x: f.midX, y: f.midY)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("标点列（固定）")
+    }
+
+    private func digit(_ n: Int, _ f: CGRect) -> some View {
+        VStack(spacing: 0) {
+            Text("\(n)").font(.title3)
+            if let l = Self.letters["\(n)"] { Text(l).font(.caption2) }
+        }
+        .foregroundStyle(.tertiary)
+        .frame(width: f.width, height: f.height)
+        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .position(x: f.midX, y: f.midY)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(n)（固定）")
+    }
+
+    private func key(_ cell: T9Layout.Cell) -> some View {
+        let f = frame(cell), id = cell.id, lifted = dragging == id
+        return Text(T9Layout.name(id)).font(id.count == 1 ? .title3 : .subheadline)
+            .foregroundStyle(.primary)
+            .frame(width: f.width, height: f.height)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(lifted ? Color.accentVK : Color.secondary.opacity(0.3), lineWidth: lifted ? 2 : 0.5))
+            .shadow(color: .black.opacity(lifted ? 0.25 : 0.08), radius: lifted ? 10 : 0.5, y: lifted ? 6 : 0.5)
+            .scaleEffect(lifted ? 1.06 : 1)
+            .opacity(lifted ? 0.92 : 1)
+            .position(lifted ? center : CGPoint(x: f.midX, y: f.midY))
+            .zIndex(lifted ? 1 : 0)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("t9"))
+                    .onChanged { v in
+                        if dragging == nil {
+                            grab = CGSize(width: v.startLocation.x - f.midX, height: v.startLocation.y - f.midY)
+                            center = CGPoint(x: f.midX, y: f.midY)
+                            withAnimation(.snappy(duration: 0.15)) { dragging = id }
+                        }
+                        center = CGPoint(x: v.location.x - grab.width, y: v.location.y - grab.height)
+                        let next = layout.dropping(id, x: v.location.x / (col + Self.gap), y: v.location.y / (rowH + Self.gap))
+                        if next != preview { withAnimation(.snappy(duration: 0.25)) { preview = next } }
+                    }
+                    .onEnded { _ in
+                        withAnimation(.snappy) {
+                            if let preview { save(preview) }
+                            dragging = nil
+                            preview = nil
+                        }
+                    }
+            )
+            .accessibilityLabel(T9Layout.name(id))
+            .accessibilityHint("拖到右列或底行调整位置")
+    }
+
+    private func save(_ l: T9Layout) {
+        typing.t9Layout = l
+        typing.save()
     }
 }
 
@@ -349,11 +577,14 @@ struct SettingsView: View {
                         Text("九宫格").tag(true)
                     }
                     .onChange(of: typing.t9) { typing.save() }
+                    if typing.t9 {
+                        NavigationLink("九宫格键位") { T9LayoutView(typing: $typing) }
+                    }
                     Toggle("按键震动", isOn: $typing.haptics)
                         .onChange(of: typing.haptics) { typing.save() }
                     Toggle("显示按键耗时", isOn: $typing.metrics)
                         .onChange(of: typing.metrics) { typing.save() }
-                } header: { Text("键盘") } footer: { Text("键盘顶部「26｜九键」随时切，切过就记住。按键震动需允许完全访问；按键耗时显示在键盘底部，排查卡顿用。") }
+                } header: { Text("键盘") } footer: { Text("键盘顶部「26 · 九键」随时切，切过就记住。九宫格的删除、换行、回车、123、符、中/英、空格可以拖动调整位置。按键震动需允许完全访问；按键耗时显示在键盘底部，排查卡顿用。") }
                 Section("通用") {
                     Button("重新查看引导", action: reonboard)
                 }

@@ -7,7 +7,8 @@ final class KeyPad: UIView {
 
     enum Key: Equatable {
         case letter(Character), digit(Character), one, text(String)
-        case space, back, enter, globe, shift, lang, page(Page)
+        /// enter：随输入框变成 换行 / 发送 / 搜索 的回车；newline：插入 \n（会把 \n 当发送的宿主里同样会发送）
+        case space, back, enter, newline, globe, shift, lang, page(Page)
     }
 
     struct Spec: Equatable {
@@ -17,6 +18,44 @@ final class KeyPad: UIView {
         var shift = false
         /// 系统没在键盘下方提供 🌐 时（Home 键机型等）才在键盘里放
         var globe = true
+        /// 九宫格字母页功能键布局（TypingPrefs.t9Layout）
+        var t9Layout = T9Layout()
+    }
+
+    /// 回车键随输入框的 returnKeyType 变（搜索、发送……）
+    struct ReturnKey: Equatable {
+        var title = "换行"
+        /// 非默认动作用强调色（同系统）
+        var accent = false
+        /// enablesReturnKeyAutomatically 且输入框为空时置灰、不响应
+        var enabled = true
+        /// 普通输入框（returnKeyType = .default）：九宫格另有「换行」键时，这个键改叫「回车」免得两个「换行」
+        var plain = false
+
+        init(title: String = "换行", accent: Bool = false, enabled: Bool = true, plain: Bool = false) {
+            self.title = title
+            self.accent = accent
+            self.enabled = enabled
+            self.plain = plain
+        }
+
+        init(type: UIReturnKeyType, enabled: Bool) {
+            let title: String
+            switch type {
+            case .default: title = "换行"
+            case .go: title = "前往"
+            case .google, .yahoo, .search: title = "搜索"
+            case .join: title = "加入"
+            case .next: title = "下一项"
+            case .route: title = "路线"
+            case .send: title = "发送"
+            case .done: title = "完成"
+            case .emergencyCall: title = "紧急呼叫"
+            case .continue: title = "继续"
+            @unknown default: title = "换行"
+            }
+            self.init(title: title, accent: enabled && type != .default && type != .next, enabled: enabled, plain: type == .default)
+        }
     }
 
     /// sys：Shift / 删除 / 123 等功能键；enter：底行换行键（宽度按原生比例由布局算出）
@@ -35,9 +74,9 @@ final class KeyPad: UIView {
     /// 九宫格 5 列 × 4 行网格中的位置：起始列（可为半列）、行、占几列、占几行
     private struct Cell {
         var c: CGFloat
-        var r: Int
+        var r: CGFloat
         var cw: CGFloat = 1
-        var rh = 1
+        var rh: CGFloat = 1
     }
 
     /// 系统键盘的键圆角
@@ -58,12 +97,14 @@ final class KeyPad: UIView {
     private var rows: [[Item]] = []
     private(set) var space: KeyButton?
     private var enter: KeyButton?
+    /// 当前布局里单独的换行键（九宫格可有可无）
+    private var newline: KeyButton?
     private var oneKey: DigitKey?
     private let list = SideList()
     private var listCell = false
+    private var composing = false
+    var returnKey = ReturnKey() { didSet { if returnKey != oldValue { applyReturn() } } }
 
-    /// 九宫格左列空闲时的中文标点（待定点 2：中文标点放左列）
-    static let t9Punct = ["，", "。", "？", "！", "、", "：", "；", "…", "～", "“", "”"]
     static let t9Math = ["+", "-", "*", "/", "=", "%", "@", ":", "(", ")", "#", "~"]
 
     override init(frame: CGRect) {
@@ -91,6 +132,7 @@ final class KeyPad: UIView {
         built = s
         rows.flatMap { $0 }.forEach { $0.button.removeFromSuperview() }
         hidePopup()
+        newline = nil
         rows = s.t9 && s.page != .sym ? t9Rows(s) : qwertyRows(s)
         listCell = s.t9 && s.page != .sym
         if listCell { addSubview(list) } else { list.removeFromSuperview() }
@@ -99,16 +141,28 @@ final class KeyPad: UIView {
             addSubview(it.button)
         }
         if s.t9, s.page == .num { list.set(Self.t9Math, pinyin: false) }
+        applyReturn()
         setNeedsLayout()
     }
 
     /// 每次按键后刷新会变的部分
     func update(composing: Bool, pinyin: [String]) {
+        self.composing = composing
         space?.setTitle(composing ? "首选词" : "空格", for: .normal)
         space?.accessibilityHint = composing ? "选择首选词" : "长按移动光标"
-        enter?.setTitle(composing ? "确认" : "换行", for: .normal)
+        applyReturn()
         oneKey?.bottom.text = composing ? "分词" : "@/."
-        if spec.t9, spec.page == .abc { list.set(composing ? pinyin : Self.t9Punct, pinyin: composing) }
+        if spec.t9, spec.page == .abc { list.set(composing ? pinyin : T9Layout.punct, pinyin: composing) }
+    }
+
+    private func applyReturn() {
+        guard let enter else { return }
+        var r = composing ? ReturnKey(title: "确认") : returnKey
+        if r.plain, newline != nil { r.title = "回车" }
+        enter.setTitle(r.title, for: .normal)
+        enter.style = r.accent ? .enter : .key
+        enter.muted = !r.enabled
+        enter.accessibilityLabel = r.title
     }
 
     // MARK: 键位
@@ -147,6 +201,11 @@ final class KeyPad: UIView {
             b.fontSize = 16
             b.accessibilityIdentifier = "换行"
             enter = b
+        case .newline:
+            b = KeyButton("换行", style: .key)
+            b.fontSize = 16
+            b.accessibilityLabel = "换行符"
+            newline = b
         case .globe:
             b = KeyButton(symbol: "globe", style: .key)
             b.accessibilityLabel = "切换输入法"
@@ -165,7 +224,7 @@ final class KeyPad: UIView {
         case .page(let p):
             let title: String
             switch p {
-            case .abc: title = spec.t9 && spec.page == .num ? "返回" : "ABC"
+            case .abc: title = spec.t9 && spec.page != .abc ? "返回" : "ABC"
             case .num: title = "123"
             case .sym: title = spec.t9 ? "符" : "#+="
             }
@@ -193,6 +252,11 @@ final class KeyPad: UIView {
         case .abc:
             let lead = zh ? item(.letter("'"), .sys) : item(.shift, .sys)
             r = [letters("qwertyuiop"), letters("asdfghjkl"), [lead] + letters("zxcvbnm") + [item(.back, .sys)]]
+        case .sym where s.t9 && zh:
+            // 九宫格「符」打开的标点页：中文常用标点放前两行
+            r = [texts(["，", "。", "？", "！", "、", "：", "；", "“", "”", "…"]),
+                 texts(["（", "）", "《", "》", "【", "】", "—", "～", "·", "@"]),
+                 [item(.page(.num), .sys)] + texts(["#", "%", "&", "*", "+", "=", "/"]) + [item(.back, .sys)]]
         case .num, .sym:
             let num = s.page == .num
             let row1 = num ? "1234567890".map(String.init) : ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
@@ -217,9 +281,9 @@ final class KeyPad: UIView {
 
     private static let t9Letters: [Character: String] = ["2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ"]
 
-    /// 与系统九宫格一致的 5 列 × 4 行：左列（前三行为标点/拼音列表）、中间 3 列、右列 ⌫ / 0 / 换行（换行占两行）
+    /// 与系统九宫格一致的 5 列 × 4 行：左列（前三行为标点/拼音列表）、中间 3×3 数字固定；功能键按 T9Layout 摆
     private func t9Rows(_ s: Spec) -> [[Item]] {
-        func at(_ key: Key, _ c: CGFloat, _ r: Int, cw: CGFloat = 1, rh: Int = 1) -> Item {
+        func at(_ key: Key, _ c: CGFloat, _ r: CGFloat, cw: CGFloat = 1, rh: CGFloat = 1) -> Item {
             var i = item(key)
             i.cell = Cell(c: c, r: r, cw: cw, rh: rh)
             return i
@@ -230,14 +294,33 @@ final class KeyPad: UIView {
         }
         var g: [Item]
         if s.page == .num {
-            g = (1...9).map { n in at(.text(String(n)), CGFloat((n - 1) % 3 + 1), (n - 1) / 3) }
+            g = (1...9).map { (n: Int) -> Item in
+                let c = CGFloat((n - 1) % 3 + 1), r = CGFloat((n - 1) / 3)
+                return at(.text(String(n)), c, r)
+            }
             g += [at(.back, 4, 0), at(.text("."), 4, 1), at(.enter, 4, 2, rh: 2)]
             g += lead(.abc) + [at(.page(.sym), 1, 3), at(.text("0"), 2, 3), at(.space, 3, 3)]
         } else {
-            g = [at(.one, 1, 0)] + (2...9).map { n in at(.digit(Character(String(n))), CGFloat((n - 1) % 3 + 1), (n - 1) / 3) }
-            // 待定点 4：0 单独一个键，放在 ⌫ 下面
-            g += [at(.back, 4, 0), at(.text("0"), 4, 1), at(.enter, 4, 2, rh: 2)]
-            g += lead(.num) + [at(.lang, 1, 3), at(.space, 2, 3, cw: 2)]
+            g = [at(.one, 1, 0)]
+            for n in 2...9 {
+                let c = CGFloat((n - 1) % 3 + 1), r = CGFloat((n - 1) / 3)
+                g.append(at(.digit(Character(String(n))), c, r))
+            }
+            for cell in s.t9Layout.cells {
+                let c = CGFloat(cell.c), r = CGFloat(cell.r), cw = CGFloat(cell.cw), rh = CGFloat(cell.rh)
+                switch cell.id {
+                case "back": g.append(at(.back, c, r, cw: cw, rh: rh))
+                case "enter": g.append(at(.enter, c, r, cw: cw, rh: rh))
+                case "newline": g.append(at(.newline, c, r, cw: cw, rh: rh))
+                case "lang": g.append(at(.lang, c, r, cw: cw, rh: rh))
+                case "space": g.append(at(.space, c, r, cw: cw, rh: rh))
+                case "sym": g.append(at(.page(.sym), c, r, cw: cw, rh: rh))
+                default:
+                    // 123（Home 键机型再与 🌐 平分）
+                    g += s.globe ? [at(.page(.num), c, r, cw: cw / 2, rh: rh), at(.globe, c + cw / 2, r, cw: cw / 2, rh: rh)]
+                                 : [at(.page(.num), c, r, cw: cw, rh: rh)]
+                }
+            }
         }
         return [g]
     }
@@ -292,8 +375,8 @@ final class KeyPad: UIView {
         let rowH = min(45, floor((h - 8 - 3 * vgap) / 4))
         let y0 = (h - 4 * rowH - 3 * vgap) / 2
         func frame(_ c: Cell) -> CGRect {
-            CGRect(x: pad + c.c * (col + gap), y: y0 + CGFloat(c.r) * (rowH + vgap),
-                   width: c.cw * col + (c.cw - 1) * gap, height: CGFloat(c.rh) * rowH + CGFloat(c.rh - 1) * vgap)
+            CGRect(x: pad + c.c * (col + gap), y: y0 + c.r * (rowH + vgap),
+                   width: c.cw * col + (c.cw - 1) * gap, height: c.rh * rowH + (c.rh - 1) * vgap)
         }
         list.frame = frame(Cell(c: 0, r: 0, rh: 3))
         for it in rows.flatMap({ $0 }) {
@@ -560,6 +643,7 @@ final class SideList: UIScrollView {
         super.init(frame: frame)
         layer.cornerRadius = KeyPad.radius
         showsVerticalScrollIndicator = false
+        hideEdgeEffects()
         empty.text = "—"
         empty.textAlignment = .center
         addSubview(empty)
@@ -602,7 +686,9 @@ final class SideList: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let h: CGFloat = 34, w = bounds.width
+        // 标点不多时均分整列（不用滚）；拼音可能很多，固定行高可滚
+        let fill = !pinyin && !items.isEmpty && CGFloat(items.count) * 28 <= bounds.height
+        let h: CGFloat = fill ? bounds.height / CGFloat(items.count) : 34, w = bounds.width
         for (i, b) in pool.enumerated() where i < items.count {
             b.frame = CGRect(x: 0, y: CGFloat(i) * h, width: w, height: h)
             b.viewWithTag(1)?.frame = CGRect(x: 0, y: h - 0.5, width: w, height: 0.5)
@@ -629,6 +715,7 @@ final class CompBar: UIView {
         preedit.lineBreakMode = .byTruncatingHead
         preedit.accessibilityIdentifier = "preedit"
         scroll.showsHorizontalScrollIndicator = false
+        scroll.hideEdgeEffects()
         more.tintColor = Theme.fg2
         more.addAction(UIAction { [weak self] _ in self?.onMore?() }, for: .touchUpInside)
         divider.backgroundColor = Theme.line
@@ -708,6 +795,7 @@ final class CandidateGrid: UIView, UICollectionViewDataSource, UICollectionViewD
         grid = UICollectionView(frame: .zero, collectionViewLayout: flow)
         super.init(frame: frame)
         grid.backgroundColor = Theme.key
+        grid.hideEdgeEffects()
         grid.layer.cornerRadius = 8
         grid.dataSource = self
         grid.delegate = self
@@ -816,5 +904,13 @@ extension UIImage {
             color.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         }
+    }
+}
+
+extension UIScrollView {
+    /// iOS 26 起滚动视图默认在边缘加柔化模糊；键盘里的候选行、拼音列都很矮，字会被整片糊掉
+    func hideEdgeEffects() {
+        guard #available(iOS 26.0, *) else { return }
+        for edge in [topEdgeEffect, bottomEdgeEffect, leftEdgeEffect, rightEdgeEffect] { edge.isHidden = true }
     }
 }

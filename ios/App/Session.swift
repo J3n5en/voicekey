@@ -649,6 +649,22 @@ final class SessionManager: ObservableObject {
         Bus.write(history, VK.File.history)
     }
 
+    /// 主 App 最近上屏页里删除；先取文件里最新的（键盘可能刚写入）
+    func removeHistory(_ ids: Set<String>) {
+        history = (Bus.read([HistoryItem].self, VK.File.history) ?? history).filter { !ids.contains($0.id) }
+        Bus.write(history, VK.File.history)
+    }
+
+    /// 清空全部：直接写空，连页面打开期间键盘新写入的也一起清掉
+    func clearHistory() {
+        history = []
+        Bus.write(history, VK.File.history)
+    }
+
+    func reloadHistory() {
+        history = Bus.read([HistoryItem].self, VK.File.history) ?? history
+    }
+
     private func endBackgroundTask() {
         if bg != .invalid { UIApplication.shared.endBackgroundTask(bg) }
         bg = .invalid

@@ -5,17 +5,21 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
     // MARK: 视图
 
-    private let top = UIStackView()
+    private let top = ToolBar()
     private let topArea = UIView()
     private let typeMic = MicButton(side: 32)
     private let typingButton = UIButton(type: .custom)
-    private let layoutSeg = UISegmentedControl(items: ["26", "九键"])
+    private let layoutButton = UIButton(type: .system)
+    /// layoutButton 当前标题对应的布局，避免每次按键重建富文本
+    private var layoutTitleT9: Bool?
     private let compBar = CompBar()
     private let content = UIView()
     private let voiceBox = UIStackView()
     private let keypad = KeyPad()
     /// 语音模式底排的 🌐；系统已在键盘下方提供时隐藏
     private let voiceGlobe = KeyButton(symbol: "globe", style: .fn)
+    /// 语音模式底排的换行键，标题同打字键盘随 returnKeyType 变
+    private let voiceEnter = KeyButton("换行", style: .fn)
     private let grid = CandidateGrid()
     private var metricsLabel: UILabel?
     private let chip = UIButton(type: .system)
@@ -49,6 +53,8 @@ final class KeyboardViewController: UIInputViewController {
     private var sheet: SheetView?
     private var toast: UILabel?
     private var clearTip: UILabel?
+    /// 光标模式时顶栏的提示
+    private let cursorTip = Theme.label(13, Theme.fg, weight: .medium)
     private var height: NSLayoutConstraint?
 
     // MARK: 状态
@@ -156,7 +162,7 @@ final class KeyboardViewController: UIInputViewController {
         composer.layout = prefs.t9 ? .t9 : .qwerty
         composer.clear()
         marked = ""
-        typingDocument = textDocumentProxy.documentIdentifier
+        typingDocument = documentID
         PinyinLoader.warm(composer.layout)
         mode = .type
         page = .abc
@@ -207,7 +213,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        if reconcileTypingDocument() { render() }
+        if reconcileTypingDocument() { render() } else { applyReturnKey() }
         if let typer, !typer.synced { resync() }
     }
 
@@ -216,9 +222,18 @@ final class KeyboardViewController: UIInputViewController {
         if reconcileTypingDocument() { render() }
     }
 
+    /// 输入框身份。SDK 标成非可选 UUID，但系统偶尔给 nil（iOS 27 模拟器实测），直接读会在桥接时崩；走 ObjC 取值容忍 nil
+    private var documentID: UUID? {
+        let proxy = textDocumentProxy as AnyObject
+        let getter = #selector(getter: UITextDocumentProxy.documentIdentifier)
+        guard proxy.responds(to: getter) else { return nil }
+        return proxy.perform(getter)?.takeUnretainedValue() as? UUID
+    }
+
     @discardableResult
     private func reconcileTypingDocument() -> Bool {
-        let id = textDocumentProxy.documentIdentifier
+        // 偶发的 nil 当作「未知」：不算换了输入框，也不覆盖已知的身份
+        guard let id = documentID else { return false }
         defer { typingDocument = id }
         guard let typingDocument, typingDocument != id else { return false }
         // 焦点已换：只丢弃本地组字，不向新输入框清除旧 mark。
@@ -574,6 +589,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func render() {
         guard isViewLoaded else { return }
+        applyReturnKey()
         let full = hasFullAccess
         let u = mine
         let dm = Dictation.mode(u)
@@ -594,7 +610,7 @@ final class KeyboardViewController: UIInputViewController {
             grid.isHidden = true
             compBar.isHidden = true
             top.isHidden = false
-            layoutSeg.isHidden = true
+            layoutButton.isHidden = true
         }
 
         let showPanel = multi && u != nil
@@ -727,11 +743,10 @@ final class KeyboardViewController: UIInputViewController {
         let root: UIView = view
         // 顶栏：渠道芯片 · 状态 · 最近 · 打开 VoiceKey
         chip.setTitleColor(Theme.fg, for: .normal)
-        chip.titleLabel?.font = .systemFont(ofSize: 12.5)
+        chip.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
         chip.titleLabel?.lineBreakMode = .byTruncatingTail
-        chip.backgroundColor = Theme.key2
-        chip.layer.cornerRadius = 14
-        chip.contentEdgeInsets = UIEdgeInsets(top: 5, left: 22, bottom: 5, right: 10)
+        ToolStyle.apply(chip, radius: 15)
+        chip.contentEdgeInsets = UIEdgeInsets(top: 0, left: 23, bottom: 0, right: 11)
         chip.addAction(UIAction { [weak self] _ in self?.showChannels() }, for: .touchUpInside)
         chipDot.layer.cornerRadius = 3.5
         chipDot.isUserInteractionEnabled = false
@@ -744,25 +759,25 @@ final class KeyboardViewController: UIInputViewController {
         // 打字时左上角麦克风进语音；语音时换成「返回打字」
         typeMic.accessibilityLabel = "语音输入"
         typeMic.addAction(UIAction { [weak self] _ in self?.tapTypeMic() }, for: .touchUpInside)
-        typingButton.setImage(Theme.symbol("keyboard", 15), for: .normal)
-        typingButton.tintColor = Theme.fg
-        typingButton.backgroundColor = Theme.key
-        typingButton.layer.cornerRadius = 16
+        typingButton.setImage(Theme.symbol("keyboard", 16, .medium), for: .normal)
+        typingButton.tintColor = Theme.fg2
+        ToolStyle.apply(typingButton, radius: 16)
         typingButton.accessibilityLabel = "返回打字"
         typingButton.addAction(UIAction { [weak self] _ in self?.backToTyping() }, for: .touchUpInside)
-        layoutSeg.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 11.5)], for: .normal)
-        layoutSeg.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 11.5, weight: .semibold)], for: .selected)
-        layoutSeg.accessibilityLabel = "中文键盘布局"
-        layoutSeg.addAction(UIAction { [weak self] _ in
+        // 26 键 / 九键：一个胶囊，点一下切换（原分段控件太小，常按不中）
+        ToolStyle.apply(layoutButton, radius: 15)
+        layoutButton.contentEdgeInsets = UIEdgeInsets(top: 0, left: 11, bottom: 0, right: 11)
+        layoutButton.accessibilityLabel = "中文键盘布局"
+        layoutButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            self.setLayout(t9: self.layoutSeg.selectedSegmentIndex == 1)
-        }, for: .valueChanged)
-        top.addArrangedSubviews([typeMic, typingButton, chip, status, layoutSeg, recent, gear])
-        top.spacing = 6
+            self.setLayout(t9: !self.prefs.t9)
+        }, for: .touchUpInside)
+        top.addArrangedSubviews([typeMic, typingButton, chip, status, layoutButton, recent, gear])
+        top.spacing = 7
         top.alignment = .center
         top.isLayoutMarginsRelativeArrangement = true
         top.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0)
-        layoutSeg.setContentHuggingPriority(.required, for: .horizontal)
+        layoutButton.setContentHuggingPriority(.required, for: .horizontal)
         chip.setContentHuggingPriority(.required, for: .horizontal)
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -854,10 +869,26 @@ final class KeyboardViewController: UIInputViewController {
         let back = KeyButton(symbol: "delete.left", style: .fn)
         back.accessibilityLabel = "删除"
         back.addTarget(self, action: #selector(backTouch(_:event:)), for: [.touchDown, .touchDragInside, .touchDragOutside, .touchUpInside, .touchUpOutside, .touchCancel])
-        let enter = textKey("换行", "\n", style: .fn)
+        let enter = voiceEnter
+        enter.fontSize = 15
+        enter.titleLabel?.adjustsFontSizeToFitWidth = true
+        enter.addAction(UIAction { [weak self] _ in
+            guard let self, self.returnKey.enabled else { return }
+            self.textDocumentProxy.insertText("\n")
+        }, for: .touchUpInside)
         actionKey.addAction(UIAction { [weak self] _ in self?.tapMic() }, for: .touchUpInside)
         plainKeys = [comma, spaceKey, period, enter]
-        dimmed = [topArea, body, globe, comma, period, back, enter]
+        dimmed = [top, body, globe, comma, period, back, enter]
+        cursorTip.text = "‹  左右滑动移动光标 · 松手结束  ›"
+        cursorTip.textAlignment = .center
+        cursorTip.isHidden = true
+        cursorTip.translatesAutoresizingMaskIntoConstraints = false
+        topArea.addSubview(cursorTip)
+        NSLayoutConstraint.activate([
+            cursorTip.centerXAnchor.constraint(equalTo: topArea.centerXAnchor),
+            cursorTip.centerYAnchor.constraint(equalTo: topArea.centerYAnchor),
+            cursorTip.widthAnchor.constraint(lessThanOrEqualTo: topArea.widthAnchor, constant: -16),
+        ])
         keyRow.addArrangedSubviews([globe, comma, spaceKey, period, actionKey, back, enter])
         keyRow.spacing = 6
         for k in [globe, comma, period, back, enter] { k.widthAnchor.constraint(equalToConstant: 46).isActive = true }
@@ -917,6 +948,8 @@ final class KeyboardViewController: UIInputViewController {
             chipDot.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
             chipDot.widthAnchor.constraint(equalToConstant: 7), chipDot.heightAnchor.constraint(equalToConstant: 7),
             chip.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
+            chip.heightAnchor.constraint(equalToConstant: 30),
+            layoutButton.heightAnchor.constraint(equalToConstant: 30),
             topArea.heightAnchor.constraint(equalToConstant: 44),
             typingButton.widthAnchor.constraint(equalToConstant: 32), typingButton.heightAnchor.constraint(equalToConstant: 32),
             keyRow.heightAnchor.constraint(equalToConstant: 42),
@@ -929,8 +962,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func iconButton(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> UIButton {
         let b = UIButton(type: .system)
-        b.setImage(Theme.symbol(symbol, 17), for: .normal)
+        b.setImage(Theme.symbol(symbol, 16, .medium), for: .normal)
         b.tintColor = Theme.fg2
+        ToolStyle.apply(b, radius: 17)
         b.accessibilityLabel = label
         b.addAction(UIAction { _ in action() }, for: .touchUpInside)
         b.widthAnchor.constraint(equalToConstant: 34).isActive = true
@@ -986,14 +1020,23 @@ final class KeyboardViewController: UIInputViewController {
     private func renderTyping() {
         let composing = zh && composer.isComposing
         if !composing { expanded = false }
-        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh, globe: needsInputModeSwitchKey))
+        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh, globe: needsInputModeSwitchKey, t9Layout: prefs.t9Layout))
         if cursorKey == nil { keypad.update(composing: composing, pinyin: zh ? composer.pinyinOptions : []) }
         keypad.isHidden = expanded
         grid.isHidden = !expanded
         top.isHidden = composing
         compBar.isHidden = !composing
-        layoutSeg.isHidden = !zh
-        layoutSeg.selectedSegmentIndex = prefs.t9 ? 1 : 0
+        layoutButton.isHidden = !zh
+        if layoutTitleT9 != prefs.t9 {
+            layoutTitleT9 = prefs.t9
+            let on = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: Theme.fg]
+            let off = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 13), .foregroundColor: Theme.fg3]
+            let title = NSMutableAttributedString(string: "26", attributes: prefs.t9 ? off : on)
+            title.append(NSAttributedString(string: " · ", attributes: off))
+            title.append(NSAttributedString(string: "九键", attributes: prefs.t9 ? on : off))
+            layoutButton.setAttributedTitle(title, for: .normal)
+            layoutButton.accessibilityValue = prefs.t9 ? "九宫格" : "26 键"
+        }
         guard composing else { return gridSig = "" }
         let p = composer.preedit, cands = composer.candidates
         let sig = p.confirmed + "|" + p.picked.joined(separator: "'") + "|" + p.guess.joined(separator: "'") + "|" + cands.joined(separator: " ")
@@ -1032,7 +1075,8 @@ final class KeyboardViewController: UIInputViewController {
         case .one: timed { composer.one() }
         case .text(let s): commitThen(s)
         case .enter:
-            if zh, composer.isComposing { timed { insert(composer.commitRaw()) } } else { insert("\n") }
+            if zh, composer.isComposing { timed { insert(composer.commitRaw()) } } else if returnKey.enabled { insert("\n") }
+        case .newline: commitThen("\n")
         case .shift:
             shift.toggle()
             render()
@@ -1067,6 +1111,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func insert(_ s: String) {
+        defer { applyReturnKey() }
         guard !reconcileTypingDocument() else { return }
         guard !s.isEmpty else { return }
         guard !marked.isEmpty else { return textDocumentProxy.insertText(s) }
@@ -1144,8 +1189,28 @@ final class KeyboardViewController: UIInputViewController {
 
     private func textKey(_ title: String, _ text: String, style: KeyButton.Style) -> KeyButton {
         let k = KeyButton(title, style: style)
-        k.addAction(UIAction { [weak self] _ in self?.textDocumentProxy.insertText(text) }, for: .touchUpInside)
+        k.addAction(UIAction { [weak self] _ in
+            self?.textDocumentProxy.insertText(text)
+            self?.applyReturnKey()
+        }, for: .touchUpInside)
         return k
+    }
+
+    /// 输入框声明的回车动作（搜索、发送……）；enablesReturnKeyAutomatically 时空输入框置灰
+    private var returnKey: KeyPad.ReturnKey {
+        let p = textDocumentProxy
+        let enabled = p.enablesReturnKeyAutomatically != true || p.hasText
+        return KeyPad.ReturnKey(type: p.returnKeyType ?? .default, enabled: enabled)
+    }
+
+    private func applyReturnKey() {
+        let r = returnKey
+        keypad.returnKey = r
+        guard voiceEnter.title(for: .normal) != r.title || voiceEnter.muted == r.enabled else { return }
+        voiceEnter.setTitle(r.title, for: .normal)
+        voiceEnter.accessibilityLabel = r.title
+        voiceEnter.style = r.accent ? .enter : .fn
+        voiceEnter.muted = !r.enabled
     }
 
     private func startRepeat() {
@@ -1164,6 +1229,7 @@ final class KeyboardViewController: UIInputViewController {
             timed { _ = composer.deleteBackward() }
         } else {
             textDocumentProxy.deleteBackward()
+            applyReturnKey()
         }
     }
 
@@ -1188,8 +1254,12 @@ final class KeyboardViewController: UIInputViewController {
                 self.haptic.prepare()
                 sender.setTitle(nil, for: .normal)
                 self.cursorKey = sender
-                self.dimmedNow = self.mode == .type ? [self.topArea, self.keypad.sideList] + self.keypad.keys.filter { $0 !== sender } : self.dimmed
+                self.dimmedNow = self.mode == .type ? [self.top, self.keypad.sideList] + self.keypad.keys.filter { $0 !== sender } : self.dimmed
                 self.dimmedNow.forEach { $0.alpha = 0.35 }
+                // 顶栏让位给提示，结束时随 dimmedNow 一起恢复
+                self.top.alpha = 0
+                self.topArea.bringSubviewToFront(self.cursorTip)
+                self.cursorTip.isHidden = false
             }
         case .moved: moveCursor(to: spaceX)
         case .ended:
@@ -1237,6 +1307,7 @@ final class KeyboardViewController: UIInputViewController {
         key.setTitle("空格", for: .normal)
         dimmedNow.forEach { $0.alpha = 1 }
         dimmedNow = []
+        cursorTip.isHidden = true
         if mode == .type { keypad.update(composing: zh && composer.isComposing, pinyin: zh ? composer.pinyinOptions : []) }
     }
 
