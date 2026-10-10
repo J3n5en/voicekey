@@ -16,7 +16,6 @@ enum Theme {
     static let line = dyn(hex(0x141428, 0.1), hex(0xffffff, 0.12))
     static let accent = dyn(hex(0x6a5cff), hex(0x9d94ff))
     static let accentDown = dyn(hex(0x5243e0), hex(0x7d72ee))
-    static let sheet = dyn(hex(0xf2f3f7), hex(0x24252a))
     static let surface = dyn(hex(0xffffff), hex(0x404148))
     static let selected = dyn(hex(0xeff0ff), hex(0x4b4a60))
     static let hairline = dyn(hex(0xc8cbd4, 0.6), hex(0xffffff, 0.1))
@@ -261,6 +260,22 @@ class KeyButton: UIButton {
     var fontSize: CGFloat? { didSet { setNeedsLayout() } }
     /// 置灰（如输入框为空时的「发送」）
     var muted = false { didSet { if muted != oldValue { setNeedsLayout() } } }
+    /// 键上方的小字（上滑输入的数字）；hintCorner 时放右上角，否则顶部居中、标题下移
+    var hint: String? {
+        didSet {
+            hintLabel.text = hint
+            hintLabel.isHidden = hint == nil
+            setNeedsLayout()
+        }
+    }
+    var hintCorner = false
+    private lazy var hintLabel: UILabel = {
+        let l = UILabel()
+        l.textColor = Theme.fg3
+        l.isUserInteractionEnabled = false
+        addSubview(l)
+        return l
+    }()
     private static let recGradient = [Theme.hex(0xf65c57).cgColor, Theme.hex(0xd7354a).cgColor]
     private let grad = Theme.gradientLayer()
 
@@ -301,6 +316,13 @@ class KeyButton: UIButton {
         super.layoutSubviews()
         grad.frame = bounds
         applyStyle()
+        if hint != nil {
+            hintLabel.font = .systemFont(ofSize: hintCorner ? 11 : 10)
+            hintLabel.sizeToFit()
+            let s = hintLabel.bounds.size
+            hintLabel.frame.origin = hintCorner ? CGPoint(x: bounds.width - s.width - 6, y: 3) : CGPoint(x: (bounds.width - s.width) / 2, y: 2)
+            titleEdgeInsets = UIEdgeInsets(top: hintCorner ? 0 : 7, left: 0, bottom: 0, right: 0)
+        }
     }
 
     private func applyStyle() {
@@ -650,7 +672,7 @@ final class SheetView: ThemedView {
     init(title: String) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = Theme.sheet
+        // 透明：直接落在键盘的系统背景（iOS 26 液态玻璃）上，弹出时下面的键盘内容先藏起
         let t = Theme.label(15, weight: .semibold)
         t.text = title
         let done = UIButton(type: .system)
@@ -659,7 +681,6 @@ final class SheetView: ThemedView {
         done.tintColor = Theme.accent
         done.addAction(UIAction { [weak self] _ in self?.onDone?() }, for: .touchUpInside)
         let head = UIView()
-        head.backgroundColor = Theme.sheet
         let headRow = UIStackView(arrangedSubviews: [t, UIView(), done])
         let line = UIView()
         line.backgroundColor = Theme.hairline

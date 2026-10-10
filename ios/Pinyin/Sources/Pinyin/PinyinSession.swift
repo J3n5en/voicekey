@@ -39,6 +39,17 @@ public final class PinyinSession {
     public private(set) var preedit: (picked: [String], guess: [String]) = ([], [])
     /// 未选定部分在 `input` 中的起点
     private var openStart = 0
+    /// 九宫格合入纠错候选后的前若干个候选（覆盖 Rime 前 `covered` 个），为空即 Rime 原序
+    private var merged: [(candidate: PinyinCandidate, source: Source)] = []
+    /// 候选在哪个会话里的序号
+    private enum Source { case main(Int), fix(Int) }
+    private var covered = 0
+    private var pageSize = 20
+    /// 九宫格纠错方案的会话：同一段输入在这里算出按错相邻键的候选
+    private var fixId: RimeSessionId = 0
+    private var fixGeneration = -1
+    /// 最多合入几个纠错候选
+    static let maxFixes = 3
 
     public var isComposing: Bool { !input.isEmpty }
     public var composition: String { confirmed + pending }
@@ -50,6 +61,7 @@ public final class PinyinSession {
 
     private var api: RimeApi { engine.api }
     private var sid: RimeSessionId { engine.session(&id, generation: &generation, schema: layout.schema) }
+    private var fixSid: RimeSessionId { engine.session(&fixId, generation: &fixGeneration, schema: "vk_t9c") }
 
     /// 按键：全拼收 a–z，九宫格收 2–9，两者都收 `'` 分词
     public func type(_ key: Character) {
@@ -85,6 +97,7 @@ public final class PinyinSession {
     /// 选当前页第 `index` 个候选；整段选完返回要上屏的文字，否则继续组字返回 nil
     public func select(_ index: Int) -> String? {
         guard index >= 0, index < candidates.count else { return nil }
+        if !merged.isEmpty { return select(absolute: pageIndex * pageSize + index) }
         _ = api.select_candidate_on_current_page(sid, index)
         return refresh()
     }
@@ -92,13 +105,30 @@ public final class PinyinSession {
     /// 选第 `index` 个候选（跨页的绝对序号，展开候选用）
     public func select(absolute index: Int) -> String? {
         guard isComposing, index >= 0 else { return nil }
-        _ = api.select_candidate(sid, index)
-        return refresh()
+        switch index < merged.count ? merged[index].source : .main(covered + index - merged.count) {
+        case .main(let i):
+            _ = api.select_candidate(sid, i)
+            return refresh()
+        case .fix(let i):
+            // 纠错候选覆盖整段未选定的输入：在纠错会话里选（记入学习），连同已选定的字上屏
+            let text = confirmed + merged[index].candidate.text
+            _ = api.select_candidate(fixSid, i)
+            api.clear_composition(fixSid)
+            api.clear_composition(sid)
+            _ = refresh()
+            return text
+        }
     }
 
     /// 从第 `start` 个起最多 `limit` 个候选，跨页读取、不改变当前页
     public func candidates(from start: Int, limit: Int) -> [PinyinCandidate] {
         guard isComposing, limit > 0 else { return [] }
+        let head = start < merged.count ? merged[start..<min(start + limit, merged.count)].map(\.candidate) : []
+        return head + rimeCandidates(from: covered + max(0, start - merged.count), limit: limit - head.count)
+    }
+
+    private func rimeCandidates(from start: Int, limit: Int) -> [PinyinCandidate] {
+        guard limit > 0 else { return [] }
         var it = RimeCandidateListIterator()
         guard api.candidate_list_from_index(sid, &it, Int32(start)) != 0 else { return [] }
         defer { api.candidate_list_end(&it) }
@@ -178,9 +208,17 @@ public final class PinyinSession {
                 return PinyinCandidate(text: String(cString: c.text), comment: c.comment.map { String(cString: $0) } ?? "")
             }
             pageIndex = Int(menu.page_no)
+            pageSize = max(1, Int(menu.page_size))
             isLastPage = menu.is_last_page != 0
             _ = api.free_context(&ctx)
             openStart = Self.openStart(input: input, pending: pending)
+            if pageIndex == 0 { mergeFixes() }
+            if !merged.isEmpty {
+                candidates = candidates(from: pageIndex * pageSize, limit: pageSize)
+                isLastPage = isLastPage && candidates(from: (pageIndex + 1) * pageSize, limit: 1).isEmpty
+            }
+        } else {
+            merged = []; covered = 0
         }
         pinyinOptions = layout == .t9 ? firstDigitRun().map { T9.options(String(Array(input)[$0])) } ?? [] : []
         if !input.isEmpty { preedit = layout == .t9 ? t9Preedit() : ([], pending.split { $0 == " " || $0 == "'" }.map(String.init)) }
@@ -200,6 +238,41 @@ public final class PinyinSession {
             }
         }
         return (picked, guess)
+    }
+
+    /// 九宫格纠错：同一段未选定的输入在纠错方案里算一遍，取前几个按错相邻键拼出的整段候选，
+    /// 按它们在纠错方案里排在几个拼对的候选之后，插进首页。纠错拼出的候选不直接用主方案里，是因为它们覆盖整段输入、
+    /// 会排在拼对的部分候选（先选「你」再打后面）前面，数量又多，会把部分候选挤出前几页
+    private func mergeFixes() {
+        merged = []; covered = 0
+        let open = String(Array(input)[openStart...])
+        guard layout == .t9, !open.isEmpty else { return }
+        let keys = Array(open)[...]
+        var ctx = RimeContext()
+        ctx.data_size = Int32(MemoryLayout<RimeContext>.size - MemoryLayout<Int32>.size)
+        // 纠错得到的单字词频远高于词组，会压过拼对的候选（84 → 一 压过 提），已有拼对的整段候选时不加
+        let chars = !candidates.contains { T9.typos($0.comment, keys) == 0 }
+        let f = fixSid
+        guard api.set_input(f, open) != 0, api.get_context(f, &ctx) != 0 else { return }
+        var fixes: [(at: Int, candidate: PinyinCandidate, index: Int)] = [], exact = 0
+        for i in 0..<Int(ctx.menu.num_candidates) where fixes.count < Self.maxFixes {
+            let c = ctx.menu.candidates[i]
+            let cand = PinyinCandidate(text: String(cString: c.text), comment: c.comment.map { String(cString: $0) } ?? "")
+            switch T9.typos(cand.comment, keys) {
+            case 0?: exact += 1
+            case _? where (chars || cand.text.count > 1) && !candidates.contains(where: { $0.text == cand.text }):
+                fixes.append((exact, cand, i))
+            default: break
+            }
+        }
+        _ = api.free_context(&ctx)
+        guard !fixes.isEmpty else { return }
+        var list = candidates.enumerated().map { (candidate: $0.element, source: Source.main($0.offset)) }
+        for (k, x) in fixes.enumerated() {
+            list.insert((x.candidate, .fix(x.index)), at: min(x.at + k, list.count))
+        }
+        merged = list
+        covered = candidates.count
     }
 
     /// 未选定的预编辑与输入串末尾对齐：按字母数字个数从后往前数

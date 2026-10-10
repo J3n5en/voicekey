@@ -11,14 +11,15 @@ enum T9 {
 
     static func digits(_ pinyin: String) -> String { String(pinyin.compactMap { keys[$0] }) }
 
-    /// 按拼音注释把一段数字还原成字母：整音节、末尾半截、简拼首字母；注释对不上的数字取按键的首字母
+    /// 按拼音注释把一段数字还原成字母：整音节（含按错一个键的纠错）、末尾半截、简拼首字母；注释对不上的数字取按键的首字母
     static func spell(_ run: String, _ syllables: inout ArraySlice<String>) -> [String] {
         var out: [String] = []
         var rest = Substring(run)
         while let d = rest.first {
             if let p = syllables.first {
                 let c = digits(p)
-                if rest.hasPrefix(c) {
+                // 纠错：等长的一段只有一位按键不同，按注释的拼音显示
+                if rest.hasPrefix(c) || (rest.count >= c.count && zip(rest, c).filter { $0 != $1 }.count == 1) {
                     out.append(p); rest = rest.dropFirst(c.count); syllables.removeFirst(); continue
                 }
                 if c.hasPrefix(rest) {
@@ -32,6 +33,40 @@ enum T9 {
             rest = rest.dropFirst()
         }
         return out
+    }
+
+    /// 候选拼音对上整串输入要改几个数字键（0 为拼对，每个音节最多改一个，同纠错规则）；只覆盖输入开头的候选、
+    /// 对不上的为 nil。音节可以整个对上、只打声母（简拼）或残缺音节 ko（kou/kong）、在输入末尾只打了开头（补全）；
+    /// `'` 跳过，已选拼音的字母须一致
+    static func typos(_ comment: String, _ input: ArraySlice<Character>) -> Int? {
+        typos(comment.split(separator: " ").map(String.init)[...], input)
+    }
+
+    private static func typos(_ syllables: ArraySlice<String>, _ input: ArraySlice<Character>) -> Int? {
+        let input = input.drop { $0 == "'" }
+        guard !input.isEmpty else { return 0 }
+        guard let s = syllables.first else { return nil }
+        /// 拼音开头 n 个字母对上输入（输入先结束算补全），返回改了几个数字与剩余输入
+        func match(_ n: Int, _ allowed: Int) -> (used: Int, rest: ArraySlice<Character>)? {
+            var used = 0, k = input.startIndex
+            for l in s.prefix(n) {
+                guard k < input.endIndex, input[k] != "'" else { break }
+                if input[k] != l, input[k] != keys[l] {
+                    if input[k].isLetter { return nil }
+                    used += 1
+                }
+                k += 1
+            }
+            return used <= allowed ? (used, input[k...]) : nil
+        }
+        let initial = ["zh", "ch", "sh"].contains(String(s.prefix(2)))
+            || "dtngkhrzcs".contains(s.prefix(1)) && ["ou", "ong"].contains(s.dropFirst()) ? [1, 2] : [1]
+        var best: Int?
+        for (n, allowed) in [(s.count, 1)] + initial.map({ ($0, 0) }) where n <= s.count {
+            guard let m = match(n, allowed), let r = typos(syllables.dropFirst(), m.rest) else { continue }
+            best = min(best ?? .max, m.used + r)
+        }
+        return best
     }
 
     private static let firstLetter: [Character: Character] = Dictionary(keys.map { ($0.value, $0.key) }) { min($0, $1) }

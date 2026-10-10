@@ -56,6 +56,10 @@ final class KeyboardViewController: UIInputViewController {
     /// 光标模式时顶栏的提示
     private let cursorTip = Theme.label(13, Theme.fg, weight: .medium)
     private var height: NSLayoutConstraint?
+    /// 顶栏 + 内容；弹层透明，弹出时藏起
+    private let column = UIStackView()
+    /// 顶栏各位置的视图（Toolbar.all），按 prefs.toolbar 排列
+    private var toolViews: [String: [UIView]] = [:]
 
     // MARK: 状态
 
@@ -74,6 +78,7 @@ final class KeyboardViewController: UIInputViewController {
     private var spacePicks = false
     private var backComposing = false
     private var cursorKey: UIButton?
+    private var cursorBlank = false
     private var dimmedNow: [UIView] = []
 
     private enum Purpose { case probe, start, watch }
@@ -159,6 +164,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         notice = nil
         prefs = TypingPrefs.load()
+        applyToolbar()
         composer.layout = prefs.t9 ? .t9 : .qwerty
         composer.clear()
         marked = ""
@@ -570,6 +576,7 @@ final class KeyboardViewController: UIInputViewController {
         closeSheet()
         s.onDone = { [weak self] in self?.closeSheet() }
         view.addSubview(s)
+        column.alpha = 0
         NSLayoutConstraint.activate([
             s.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             s.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -582,6 +589,7 @@ final class KeyboardViewController: UIInputViewController {
     private func closeSheet() {
         sheet?.removeFromSuperview()
         sheet = nil
+        column.alpha = 1
         render()
     }
 
@@ -772,7 +780,8 @@ final class KeyboardViewController: UIInputViewController {
             guard let self else { return }
             self.setLayout(t9: !self.prefs.t9)
         }, for: .touchUpInside)
-        top.addArrangedSubviews([typeMic, typingButton, chip, status, layoutButton, recent, gear])
+        toolViews = ["mic": [typeMic, typingButton], "chip": [chip], "status": [status], "layout": [layoutButton], "recent": [recent], "gear": [gear]]
+        applyToolbar()
         top.spacing = 7
         top.alignment = .center
         top.isLayoutMarginsRelativeArrangement = true
@@ -905,6 +914,11 @@ final class KeyboardViewController: UIInputViewController {
             default: break
             }
         }
+        keypad.onCursor = { [weak self] b, phase, touch in self?.cursorTrack(b, phase, touch) }
+        keypad.canCursor = { [weak self] in
+            guard let self else { return false }
+            return self.mode == .type && !self.composer.isComposing && self.cursorKey == nil
+        }
         keypad.onFeedback = { [weak self] in self?.keyFeedback() }
         keypad.onKey = { [weak self] in self?.press($0) }
         keypad.onList = { [weak self] item, pinyin in
@@ -935,7 +949,7 @@ final class KeyboardViewController: UIInputViewController {
             note.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -4),
         ])
 
-        let column = UIStackView(arrangedSubviews: [topArea, content])
+        column.addArrangedSubviews([topArea, content])
         column.axis = .vertical
         column.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(column)
@@ -958,6 +972,13 @@ final class KeyboardViewController: UIInputViewController {
             column.topAnchor.constraint(equalTo: root.topAnchor),
             column.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
         ])
+    }
+
+    private func applyToolbar() {
+        let order = prefs.toolbar.flatMap { toolViews[$0] ?? [] }
+        guard top.arrangedSubviews != order else { return }
+        top.arrangedSubviews.forEach { top.removeArrangedSubview($0) }
+        top.addArrangedSubviews(order)
     }
 
     private func iconButton(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> UIButton {
@@ -1020,7 +1041,7 @@ final class KeyboardViewController: UIInputViewController {
     private func renderTyping() {
         let composing = zh && composer.isComposing
         if !composing { expanded = false }
-        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh, globe: needsInputModeSwitchKey, t9Layout: prefs.t9Layout))
+        keypad.set(KeyPad.Spec(t9: zh && prefs.t9, zh: zh, page: page, shift: shift && !zh, globe: needsInputModeSwitchKey, t9Layout: prefs.t9Layout, qwertyLayout: prefs.qwerty))
         if cursorKey == nil { keypad.update(composing: composing, pinyin: zh ? composer.pinyinOptions : []) }
         keypad.isHidden = expanded
         grid.isHidden = !expanded
@@ -1233,7 +1254,7 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    // MARK: 空格长按移光标
+    // MARK: 长按移光标（空格按住即进入，其他键按住后拖动进入）
 
     /// 短按输入空格（组字中选首选词）；按住 0.3 秒进光标模式，松手退出、不插空格
     @objc private func spaceTouch(_ sender: UIButton, event: UIEvent) {
@@ -1250,16 +1271,7 @@ final class KeyboardViewController: UIInputViewController {
             guard !spacePicks else { return }
             spaceHold = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self, weak sender] _ in
                 guard let self, let sender else { return }
-                self.walk = CursorWalk(before: self.textDocumentProxy.documentContextBeforeInput, after: self.textDocumentProxy.documentContextAfterInput, x: self.spaceX)
-                self.haptic.prepare()
-                sender.setTitle(nil, for: .normal)
-                self.cursorKey = sender
-                self.dimmedNow = self.mode == .type ? [self.top, self.keypad.sideList] + self.keypad.keys.filter { $0 !== sender } : self.dimmed
-                self.dimmedNow.forEach { $0.alpha = 0.35 }
-                // 顶栏让位给提示，结束时随 dimmedNow 一起恢复
-                self.top.alpha = 0
-                self.topArea.bringSubviewToFront(self.cursorTip)
-                self.cursorTip.isHidden = false
+                self.beginCursorMode(sender, x: self.spaceX, blank: true)
             }
         case .moved: moveCursor(to: spaceX)
         case .ended:
@@ -1278,6 +1290,31 @@ final class KeyboardViewController: UIInputViewController {
             spacePicks = false
             endCursorMode()
         }
+    }
+
+    /// 其他键按住后拖动：进入即移光标，松手只退出
+    private func cursorTrack(_ sender: UIButton, _ phase: UITouch.Phase, _ t: UITouch) {
+        let x = t.location(in: view).x
+        switch phase {
+        case .began: beginCursorMode(sender, x: x, blank: false)
+        case .moved: moveCursor(to: x)
+        default: endCursorMode()
+        }
+    }
+
+    /// blank：按键文字让位（空格键整条当触控板）
+    private func beginCursorMode(_ sender: UIButton, x: CGFloat, blank: Bool) {
+        walk = CursorWalk(before: textDocumentProxy.documentContextBeforeInput, after: textDocumentProxy.documentContextAfterInput, x: x)
+        haptic.prepare()
+        if blank { sender.setTitle(nil, for: .normal) }
+        cursorBlank = blank
+        cursorKey = sender
+        dimmedNow = mode == .type ? [top, keypad.sideList] + keypad.keys.filter { $0 !== sender } : dimmed
+        dimmedNow.forEach { $0.alpha = 0.35 }
+        // 顶栏让位给提示，结束时随 dimmedNow 一起恢复
+        top.alpha = 0
+        topArea.bringSubviewToFront(cursorTip)
+        cursorTip.isHidden = false
     }
 
     private func moveCursor(to x: CGFloat) {
@@ -1304,7 +1341,7 @@ final class KeyboardViewController: UIInputViewController {
         walk = nil
         guard let key = cursorKey else { return }
         cursorKey = nil
-        key.setTitle("空格", for: .normal)
+        if cursorBlank { key.setTitle("空格", for: .normal) }
         dimmedNow.forEach { $0.alpha = 1 }
         dimmedNow = []
         cursorTip.isHidden = true

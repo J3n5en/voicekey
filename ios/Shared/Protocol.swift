@@ -137,6 +137,10 @@ struct TypingPrefs: Codable, Equatable {
     var haptics = true
     /// 九宫格功能键布局（数字与左侧标点列固定）
     var t9Layout = T9Layout()
+    /// 26 键功能键布局（字母固定）
+    var qwerty = QwertyLayout()
+    /// 键盘顶栏按钮顺序（Toolbar.all 的排列）
+    var toolbar = Toolbar.all
 
     /// 键盘里切布局时默认布局跟着改（待定，用户可能改成只对本次生效）
     static let toggleSetsDefault = true
@@ -151,6 +155,8 @@ struct TypingPrefs: Codable, Equatable {
         metrics = try c.decodeIfPresent(Bool.self, forKey: .metrics) ?? false
         haptics = try c.decodeIfPresent(Bool.self, forKey: .haptics) ?? true
         if let l = try? c.decodeIfPresent(T9Layout.self, forKey: .t9Layout), l.valid { t9Layout = l }
+        if let l = try? c.decodeIfPresent(QwertyLayout.self, forKey: .qwerty), l.valid { qwerty = l }
+        if let t = try? c.decodeIfPresent([String].self, forKey: .toolbar), t.sorted() == Toolbar.all.sorted() { toolbar = t }
     }
 
     /// 有 App Group（主 App、开了完全访问的键盘）读共享设置，否则读本进程自己的副本
@@ -163,6 +169,24 @@ struct TypingPrefs: Codable, Equatable {
     func save() {
         Bus.write(self, VK.File.typing)
         UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.localKey)
+    }
+}
+
+/// 键盘顶栏：status（状态文字）占满中间，排在它前面的按钮靠左、后面的靠右。
+/// mic 在打字时是麦克风、语音时是「返回打字」
+enum Toolbar {
+    static let all = ["mic", "chip", "status", "layout", "recent", "gear"]
+
+    static func name(_ id: String) -> String {
+        switch id {
+        case "mic": "麦克风 / 返回打字"
+        case "chip": "渠道"
+        case "status": "状态（中间留白）"
+        case "layout": "26 · 九键"
+        case "recent": "最近上屏"
+        case "gear": "打开 VoiceKey"
+        default: id
+        }
     }
 }
 
@@ -276,6 +300,79 @@ struct T9Layout: Codable, Equatable {
         case "space": "空格"
         case "lang": "中/英"
         case "sym": "符"
+        default: id
+        }
+    }
+}
+
+/// 26 键功能键布局：字母固定，第三行右端一个键（side，默认 ⌫）与底行（bottom）的键可互换、重排，空格占满剩余。
+/// 宽度跟着键走（123 / 中英 / ⌫ 同 Shift 宽，回车最宽，标点一格），放到第三行右端的键都按 Shift 宽。
+/// 字母、数字、符号页共用；Home 键机型 🌐 紧跟 123
+struct QwertyLayout: Codable, Equatable {
+    var side = "back"
+    var bottom = ["123", "lang", "comma", "space", "period", "enter"]
+
+    static let keys = ["back", "123", "lang", "comma", "space", "period", "enter"]
+    /// 第三行 7 个字母居中占 1.5–8.5 格，右端键从这里起
+    static let sideX = 8.5
+
+    var valid: Bool { ([side] + bottom).sorted() == Self.keys.sorted() && side != "space" }
+
+    /// 编辑页与拖放用的近似宽度：一格 = 字母键宽 + 键距，整行 10 格
+    static func width(_ id: String) -> Double {
+        switch id {
+        case "comma", "period": 1
+        case "enter": 2.4
+        default: 1.25
+        }
+    }
+
+    struct Cell: Equatable {
+        var id: String
+        var x: Double, w: Double
+    }
+
+    var bottomCells: [Cell] {
+        let fixed = bottom.filter { $0 != "space" }.map(Self.width).reduce(0, +)
+        var x = 0.0
+        return bottom.map { id in
+            let w = id == "space" ? 10 - fixed : Self.width(id)
+            defer { x += w }
+            return Cell(id: id, x: x, w: w)
+        }
+    }
+
+    /// 拖到 (x 格, y 行) 松手后的布局：底行内按横向重排；第三行右端与底行之间互换（落在谁上换谁）；
+    /// 空格不能去第三行，落在字母上返回 nil
+    func dropping(_ id: String, x: Double, y: Double) -> QwertyLayout? {
+        var next = self
+        if y >= 3 {
+            if let from = bottom.firstIndex(of: id) {
+                next.bottom.remove(at: from)
+                next.bottom.insert(id, at: bottomCells.filter { $0.id != id && $0.x + $0.w / 2 < x }.count)
+            } else if id == side {
+                guard let target = (bottomCells.last { $0.x <= x } ?? bottomCells.first)?.id, target != "space",
+                      let i = bottom.firstIndex(of: target) else { return nil }
+                next.bottom[i] = id
+                next.side = target
+            } else { return nil }
+        } else if y >= 2, x >= Self.sideX {
+            guard id != side else { return self }
+            guard let i = bottom.firstIndex(of: id) else { return nil }
+            next.bottom[i] = side
+            next.side = id
+        } else { return nil }
+        return next.valid ? next : nil
+    }
+
+    static func name(_ id: String) -> String {
+        switch id {
+        case "back": "⌫"
+        case "enter": "回车"
+        case "space": "空格"
+        case "lang": "中/英"
+        case "comma": "，"
+        case "period": "。"
         default: id
         }
     }

@@ -20,6 +20,8 @@ final class KeyPad: UIView {
         var globe = true
         /// 九宫格字母页功能键布局（TypingPrefs.t9Layout）
         var t9Layout = T9Layout()
+        /// 26 键功能键布局（TypingPrefs.qwerty）；九宫格的「符」页用默认
+        var qwertyLayout = QwertyLayout()
     }
 
     /// 回车键随输入框的 returnKeyType 变（搜索、发送……）
@@ -89,6 +91,9 @@ final class KeyPad: UIView {
     var wire: ((KeyButton, Key) -> Void)?
     /// 空格、删除的触摸阶段交给控制器（长按移光标、连删、上滑清空）；phase 可能是补发的 ended / cancelled
     var onTrack: ((KeyButton, Key, UITouch.Phase, UITouch) -> Void)?
+    /// 其他键按住后左右拖动移光标（同空格长按）：began 时进入光标模式；canCursor 为 false（组字中）不进入
+    var onCursor: ((KeyButton, UITouch.Phase, UITouch) -> Void)?
+    var canCursor: (() -> Bool)?
     /// 每次按下一个键：按键音、震动
     var onFeedback: (() -> Void)?
 
@@ -233,8 +238,25 @@ final class KeyPad: UIView {
         }
         // iOS 26 系统键盘：功能键与字母键同为白底、大圆角
         b.layer.cornerRadius = Self.radius
+        if let up = upText(key) {
+            b.hint = up
+            if case .letter = key {} else { b.hintCorner = true }
+        }
         if key == .globe { wire?(b, key) } else { b.activate = { [weak self] in self?.onKey?(key) } }
         return b
+    }
+
+    private static let upDigits = Dictionary(uniqueKeysWithValues: zip("qwertyuiop", "1234567890".map(String.init)))
+
+    /// 上滑输入的数字：26 键首行 q–p 对应 1–0，九宫格字母键是本身的数字
+    private func upText(_ key: Key) -> String? {
+        guard spec.page == .abc else { return nil }
+        switch key {
+        case .letter(let c): return Self.upDigits[c]
+        case .digit(let c): return String(c)
+        case .one: return "1"
+        default: return nil
+        }
     }
 
     private func item(_ key: Key, _ w: Width = .unit, extra: CGFloat = 0, size: CGFloat? = nil) -> Item {
@@ -245,36 +267,44 @@ final class KeyPad: UIView {
 
     private func qwertyRows(_ s: Spec) -> [[Item]] {
         let zh = s.zh
+        let l = s.t9 ? QwertyLayout() : s.qwertyLayout
+        func fn(_ id: String, side: Bool = false) -> Item {
+            switch id {
+            case "123": item(.page(s.page == .abc ? .num : .abc), .sys)
+            case "lang": item(.lang, .sys)
+            case "comma": item(.text(zh ? "，" : ","), side ? .sys : .unit, size: 20)
+            case "period": item(.text(zh ? "。" : "."), side ? .sys : .unit, size: 20)
+            case "space": item(.space, .flex)
+            case "enter": item(.enter, side ? .sys : .enter)
+            default: item(.back, .sys)
+            }
+        }
         func letters(_ x: String) -> [Item] { x.map { item(.letter($0)) } }
         func texts(_ a: [String]) -> [Item] { a.map { item(.text($0)) } }
         var r: [[Item]]
         switch s.page {
         case .abc:
             let lead = zh ? item(.letter("'"), .sys) : item(.shift, .sys)
-            r = [letters("qwertyuiop"), letters("asdfghjkl"), [lead] + letters("zxcvbnm") + [item(.back, .sys)]]
+            r = [letters("qwertyuiop"), letters("asdfghjkl"), [lead] + letters("zxcvbnm") + [fn(l.side, side: true)]]
         case .sym where s.t9 && zh:
             // 九宫格「符」打开的标点页：中文常用标点放前两行
             r = [texts(["，", "。", "？", "！", "、", "：", "；", "“", "”", "…"]),
                  texts(["（", "）", "《", "》", "【", "】", "—", "～", "·", "@"]),
-                 [item(.page(.num), .sys)] + texts(["#", "%", "&", "*", "+", "=", "/"]) + [item(.back, .sys)]]
+                 [item(.page(.num), .sys)] + texts(["#", "%", "&", "*", "+", "=", "/"]) + [fn(l.side, side: true)]]
         case .num, .sym:
             let num = s.page == .num
             let row1 = num ? "1234567890".map(String.init) : ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
             let row2 = num ? (zh ? ["，", "。", "？", "！", "、", "：", "；", "（", "）", "@"] : ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""])
                 : ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"]
             let row3 = zh ? ["…", "—", "《", "》", "“", "”", "·"] : [".", ",", "?", "!", "'", "-", "…"]
-            r = [texts(row1), texts(row2), [item(.page(num ? .sym : .num), .sys)] + texts(row3) + [item(.back, .sys)]]
+            r = [texts(row1), texts(row2), [item(.page(num ? .sym : .num), .sys)] + texts(row3) + [fn(l.side, side: true)]]
         }
-        // 底行：123 | (🌐) | 中/英 | ， | 空格 | 。 | 换行
-        var bottom = [item(.page(s.page == .abc ? .num : .abc), .sys)]
-        if s.globe { bottom.append(item(.globe)) }
-        bottom += [
-            item(.lang, .sys),
-            item(.text(zh ? "，" : ","), size: 20),
-            item(.space, .flex),
-            item(.text(zh ? "。" : "."), size: 20),
-            item(.enter, .enter),
-        ]
+        // 底行默认：123 | (🌐) | 中/英 | ， | 空格 | 。 | 换行
+        var bottom: [Item] = []
+        for id in l.bottom {
+            bottom.append(fn(id))
+            if id == "123", s.globe { bottom.append(item(.globe)) }
+        }
         r.append(bottom)
         return r
     }
@@ -418,14 +448,30 @@ final class KeyPad: UIView {
         var button: KeyButton
         let wired: Bool
         weak var touch: UITouch?
+        /// 上滑起点与上滑输入的数字；swiped 时松手上屏数字
+        var start: CGPoint
+        var up: String?
+        var swiped = false
+        /// 按住够久：再左右拖动就进入光标模式；cursor 后松手不上屏
+        var hold: Timer?
+        var armed = false
+        var cursor = false
 
-        init(_ item: Item, touch: UITouch) {
+        init(_ item: Item, touch: UITouch, at p: CGPoint, up: String?) {
             key = item.key
             button = item.button
             wired = item.key == .space || item.key == .back
             self.touch = touch
+            start = p
+            self.up = up
         }
     }
+
+    /// 上滑多少算输入数字：小于半个键高，手指还没离开当前键就进入
+    private static let swipeUp: CGFloat = 18
+    /// 按住多久后左右拖动算移光标，拖多远进入
+    private static let cursorHold: TimeInterval = 0.3
+    private static let cursorDrag: CGFloat = 6
 
     private var tracks: [(id: ObjectIdentifier, t: Track)] = []
     private let popup = KeyPopup()
@@ -460,22 +506,45 @@ final class KeyPad: UIView {
         layoutIfNeeded()
         let p = touch.location(in: self)
         guard !inList(p), let it = nearest(p), it.key != .globe else { return }
-        let t = Track(it, touch: touch)
+        let t = Track(it, touch: touch, at: p, up: upText(it.key))
         tracks.append((ObjectIdentifier(touch), t))
         onFeedback?()
-        if t.wired { onTrack?(t.button, t.key, .began, touch) } else { show(t, down: true) }
+        if t.wired { return onTrack?(t.button, t.key, .began, touch) ?? () }
+        show(t, down: true)
+        t.hold = Timer.scheduledTimer(withTimeInterval: Self.cursorHold, repeats: false) { [weak t] _ in t?.armed = true }
     }
 
     private func moved(_ touch: UITouch) {
         guard let t = track(touch) else { return }
         if t.wired { return onTrack?(t.button, t.key, .moved, touch) ?? () }
+        if t.cursor { return onCursor?(t.button, .moved, touch) ?? () }
         let p = touch.location(in: self)
+        if t.up != nil {
+            let dy = t.start.y - p.y
+            let swiped = dy > Self.swipeUp && dy > abs(p.x - t.start.x)
+            if swiped != t.swiped {
+                t.swiped = swiped
+                if swiped { onFeedback?() }
+                show(t, down: true)
+            }
+            if swiped { return }
+        }
+        let dx = abs(p.x - t.start.x)
+        if t.armed, dx > Self.cursorDrag, dx > abs(p.y - t.start.y), canCursor?() ?? false {
+            show(t, down: false)
+            t.cursor = true
+            onCursor?(t.button, .began, touch)
+            onCursor?(t.button, .moved, touch)
+            return
+        }
         // 出了当前键（再宽 4pt）才换键，快打时手指轻微搓动不跳键
         if t.button.superview === self, t.button.frame.insetBy(dx: -4, dy: -4).contains(p) { return }
         guard let it = nearest(p), it.button !== t.button, it.key != .globe, it.key != .space, it.key != .back else { return }
         show(t, down: false)
         t.key = it.key
         t.button = it.button
+        t.start = p
+        t.up = upText(it.key)
         show(t, down: true)
     }
 
@@ -492,12 +561,15 @@ final class KeyPad: UIView {
     }
 
     private func finish(_ t: Track, cancelled: Bool) {
-        if t.wired {
-            if let touch = t.touch { onTrack?(t.button, t.key, cancelled ? .cancelled : .ended, touch) }
+        t.hold?.invalidate()
+        if t.wired || t.cursor {
+            let phase: UITouch.Phase = cancelled ? .cancelled : .ended
+            if let touch = t.touch { t.wired ? onTrack?(t.button, t.key, phase, touch) : onCursor?(t.button, phase, touch) }
             return
         }
         show(t, down: false)
-        if !cancelled { onKey?(t.key) }
+        guard !cancelled else { return }
+        if t.swiped, let up = t.up { onKey?(.text(up)) } else { onKey?(t.key) }
     }
 
     /// 按下态：键变色；26 键的字母、符号键弹出放大字
@@ -505,11 +577,13 @@ final class KeyPad: UIView {
         // 换过页（Shift、123）后旧按钮已移除，按键值找新按钮
         let b = t.button.superview === self ? t.button : rows.joined().first { $0.key == t.key }?.button
         b?.isHighlighted = down
-        if down, let b, !listCell, Self.pops(t.key) {
+        // 上滑时气泡显示数字（九宫格平时不弹气泡）
+        let text = t.swiped ? t.up : !listCell && Self.pops(t.key) ? b?.title(for: .normal) ?? "" : nil
+        if down, let b, let text {
             popupOwner = t
-            popup.show(b.title(for: .normal) ?? "", over: b.frame, in: bounds)
+            popup.show(text, over: b.frame, in: bounds)
             bringSubviewToFront(popup)
-        } else if !down, popupOwner === t {
+        } else if popupOwner === t {
             hidePopup()
         }
     }

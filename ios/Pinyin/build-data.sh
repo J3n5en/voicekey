@@ -23,6 +23,10 @@ DEPLOYER=$(find "$MAC" -name rime_deployer -type f | head -1)
 WORK=$CACHE/data
 rm -rf "$WORK" && mkdir -p "$WORK"
 cp rime/*.yaml "$WORK/"
+# 九宫格纠错方案：vk_t9 加上按错相邻键的拼写，残缺音节 ko 同样降权；只用来给九宫格补几个纠错候选（PinyinSession）
+sed -e 's/^  schema_id: vk_t9$/  schema_id: vk_t9c/' -e 's/^  prism: vk_t9$/  prism: vk_t9c/' \
+    -e 's|^    - derive/(\[dtngkhrzcs\])o(u\|ng)\$/\$1o/$|    - fuzz/([dtngkhrzcs])o(u\|ng)$/$1oQ/|' \
+    -e '/^    - derive\/\[wxyz\]\/9\/$/r rime/vk_t9c.rules' rime/vk_t9.schema.yaml > "$WORK/vk_t9c.schema.yaml"
 unzip -q -o "$CACHE/rime-ice-$RIME_ICE_TAG.zip" \
   cn_dicts/8105.dict.yaml cn_dicts/base.dict.yaml cn_dicts/ext.dict.yaml \
   cn_dicts/tencent.dict.yaml cn_dicts/others.dict.yaml -d "$WORK"
@@ -37,7 +41,7 @@ unzip -q -o "$CACHE/rime-ice-$RIME_ICE_TAG.zip" \
 DYLD_LIBRARY_PATH=$(dirname "$DEPLOYER")/../lib "$DEPLOYER" --build "$WORK" "$WORK" "$WORK/build" >/dev/null 2>&1
 
 rm -rf "$OUT" && mkdir -p "$OUT/build"
-for f in default.yaml vk_pinyin.schema.yaml vk_t9.schema.yaml vk.table.bin vk.reverse.bin vk.prism.bin vk_t9.prism.bin; do
+for f in default.yaml vk_pinyin.schema.yaml vk_t9.schema.yaml vk_t9c.schema.yaml vk.table.bin vk.reverse.bin vk.prism.bin vk_t9.prism.bin vk_t9c.prism.bin; do
     cp "$WORK/build/$f" "$OUT/build/"
 done
 # 九宫格左侧拼音：8105 字表全部音节，按字频合计降序

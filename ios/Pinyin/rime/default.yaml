@@ -2,3 +2,4 @@ config_version: "1"
 schema_list:
   - schema: vk_pinyin
   - schema: vk_t9
+  - schema: vk_t9c

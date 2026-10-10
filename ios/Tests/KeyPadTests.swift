@@ -107,4 +107,93 @@ final class KeyPadTests: XCTestCase {
         pad.set(KeyPad.Spec(page: .num))
         XCTAssertEqual(pad.keys.first { $0.accessibilityIdentifier == "换行" }?.title(for: .normal), "发送")
     }
+
+    /// 上滑输入数字：26 键 w 上滑出 2，短滑仍是字母；九宫格 5 键上滑出 5，不跳到上一行的键
+    func testSwipeUpTypesDigit() throws {
+        let pad = KeyPad(frame: CGRect(x: 0, y: 0, width: 390, height: 220))
+        var received: [KeyPad.Key] = []
+        pad.onKey = { received.append($0) }
+        let tracker = try XCTUnwrap(pad.gestureRecognizers?.first)
+        func swipe(_ key: KeyButton, dy: CGFloat) {
+            let t = Touch()
+            t.point = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            tracker.touchesBegan([t], with: UIEvent())
+            t.point.y -= dy
+            tracker.touchesMoved([t], with: UIEvent())
+            tracker.touchesEnded([t], with: UIEvent())
+        }
+        pad.set(KeyPad.Spec())
+        pad.layoutIfNeeded()
+        let w = try XCTUnwrap(pad.keys.first { $0.accessibilityLabel == "w" })
+        XCTAssertEqual(w.hint, "2")
+        swipe(w, dy: 25)
+        swipe(w, dy: 8)
+        XCTAssertEqual(received, [.text("2"), .letter("w")])
+        received = []
+        pad.set(KeyPad.Spec(t9: true))
+        pad.layoutIfNeeded()
+        let five = try XCTUnwrap(pad.keys.first { $0.accessibilityLabel == "5" })
+        XCTAssertEqual(five.hint, "5")
+        swipe(five, dy: five.frame.height)
+        XCTAssertEqual(received, [.text("5")])
+    }
+
+    /// 顶栏顺序：合法排列按存的，缺键或多键回落默认
+    func testToolbarOrderDecoding() {
+        func decode(_ json: String) -> [String]? { try? JSONDecoder().decode(TypingPrefs.self, from: Data(json.utf8)).toolbar }
+        XCTAssertEqual(decode(#"{"toolbar":["chip","status","layout","recent","gear","mic"]}"#), ["chip", "status", "layout", "recent", "gear", "mic"])
+        XCTAssertEqual(decode(#"{"toolbar":["mic","status"]}"#), Toolbar.all)
+        XCTAssertEqual(decode("{}"), Toolbar.all)
+    }
+
+    /// 26 键拖放：底行重排、第三行右端与底行互换；空格上不去、字母不是落点；非法布局回落默认
+    func testQwertyLayoutDropRules() throws {
+        let base = QwertyLayout()
+        XCTAssertEqual(base.bottomCells.first { $0.id == "space" }?.w ?? 0, 3.1, accuracy: 0.001)
+        XCTAssertNil(base.dropping("space", x: 9, y: 2.5), "空格不能去第三行")
+        XCTAssertNil(base.dropping("lang", x: 4, y: 1.5), "字母不是落点")
+        XCTAssertNil(base.dropping("back", x: 5, y: 3.5), "拖到空格上不互换")
+        let moved = try XCTUnwrap(base.dropping("lang", x: 9.5, y: 3.5))
+        XCTAssertEqual(moved.bottom, ["123", "comma", "space", "period", "enter", "lang"])
+        let swapped = try XCTUnwrap(base.dropping("comma", x: 9, y: 2.5))
+        XCTAssertEqual(swapped.side, "comma")
+        XCTAssertEqual(swapped.bottom, ["123", "lang", "back", "space", "period", "enter"])
+        let down = try XCTUnwrap(base.dropping("back", x: 0.5, y: 3.5))
+        XCTAssertEqual(down.side, "123")
+        XCTAssertEqual(down.bottom.first, "back")
+        func decode(_ json: String) -> QwertyLayout? { try? JSONDecoder().decode(TypingPrefs.self, from: Data(json.utf8)).qwerty }
+        XCTAssertEqual(decode(#"{"qwerty":{"side":"space","bottom":["123","lang","comma","back","period","enter"]}}"#), QwertyLayout())
+    }
+
+    /// 主 App 拖过的 26 键：中/英 换到第三行右端、⌫ 到底行最右，数字页同样生效；九宫格「符」页不受影响
+    func testDraggedQwertyLayoutDrivesKeyPad() throws {
+        let layout = QwertyLayout(side: "lang", bottom: ["123", "comma", "space", "period", "enter", "back"])
+        XCTAssertTrue(layout.valid)
+        let pad = KeyPad(frame: CGRect(x: 0, y: 0, width: 390, height: 220))
+        var picked: [KeyPad.Key] = []
+        pad.onKey = { picked.append($0) }
+        func key(_ f: (KeyButton) -> Bool) throws -> KeyButton { try XCTUnwrap(pad.keys.first(where: f)) }
+        for page in [KeyPad.Page.abc, .num] {
+            pad.set(KeyPad.Spec(page: page, globe: true, qwertyLayout: layout))
+            pad.layoutIfNeeded()
+            let lang = try key { $0.accessibilityLabel == "中英切换" }
+            let back = try key { $0.accessibilityLabel == "删除" }
+            let enter = try key { $0.accessibilityIdentifier == "换行" }
+            let space = try key { $0.accessibilityIdentifier == "空格" }
+            let globe = try key { $0.accessibilityLabel == "切换输入法" }
+            let pageKey = try key { ["123", "ABC"].contains($0.title(for: .normal)) && $0.frame.minY > lang.frame.maxY }
+            XCTAssertLessThan(lang.frame.maxY, space.frame.minY, "中/英在第三行")
+            XCTAssertEqual(lang.frame.maxX, back.frame.maxX, accuracy: 0.5, "右端对齐")
+            XCTAssertGreaterThan(back.frame.minX, enter.frame.maxX, "⌫ 在底行最右")
+            XCTAssertLessThan(pageKey.frame.maxX, globe.frame.minX, "🌐 紧跟 123")
+            XCTAssertLessThan(globe.frame.maxX, space.frame.minX)
+            XCTAssertTrue(lang.accessibilityActivate())
+        }
+        XCTAssertEqual(picked, [.lang, .lang])
+        pad.set(KeyPad.Spec(t9: true, page: .sym, qwertyLayout: layout))
+        pad.layoutIfNeeded()
+        let back = try key { $0.accessibilityLabel == "删除" }
+        let space = try key { $0.accessibilityIdentifier == "空格" }
+        XCTAssertLessThan(back.frame.maxY, space.frame.minY, "九宫格符号页仍是默认布局")
+    }
 }

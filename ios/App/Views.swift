@@ -464,6 +464,209 @@ struct T9LayoutView: View {
     }
 }
 
+// MARK: - 26 键键位
+
+/// 字母固定、不可交互；第三行右端的键与底行的 ⌫ 123 中/英 ， 。 空格 回车 可拖动：底行内重排，与第三行右端互换。
+/// 拖动时其他键实时让位，虚线框提示松手后的落点。按宽度自适应
+struct QwertyLayoutView: View {
+    @Binding var typing: TypingPrefs
+    @State private var width: CGFloat = 0
+    @State private var dragging: String?
+    @State private var center: CGPoint = .zero
+    @State private var grab: CGSize = .zero
+    @State private var preview: QwertyLayout?
+
+    private static let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+    private static let gap: CGFloat = 5
+    private static let vgap: CGFloat = 10
+
+    /// 一格 = 字母键宽 + 键距，整行 10 格
+    private var slot: CGFloat { max(0, (width + Self.gap) / 10) }
+    private var rowH: CGFloat { min(52, max(36, slot * 1.25)) }
+    private var gridHeight: CGFloat { 4 * rowH + 3 * Self.vgap }
+    private var layout: QwertyLayout { typing.qwerty }
+    private var shown: QwertyLayout { preview ?? layout }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                grid
+                    .frame(maxWidth: .infinity)
+                    .frame(height: gridHeight)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                    .padding(14)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                Text("按住功能键拖动：在底行里左右调整顺序，拖到第三行右端（默认是删除键）或从那里拖下来就两键互换，空格会自动占满剩余宽度。字母固定。数字、符号页沿用同样的位置。改完下次弹出键盘生效。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                Button("恢复默认") { withAnimation(.snappy) { save(QwertyLayout()) } }
+                    .disabled(layout == QwertyLayout())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(16)
+        }
+        .scrollDisabled(dragging != nil)
+        .background(Color(.systemGroupedBackground))
+        .sensoryFeedback(.selection, trigger: preview)
+        .navigationTitle("26 键键位")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func frame(_ x: Double, _ r: Int, _ w: Double = 1) -> CGRect {
+        CGRect(x: x * slot, y: CGFloat(r) * (rowH + Self.vgap), width: w * slot - Self.gap, height: rowH)
+    }
+
+    private func cells(_ l: QwertyLayout) -> [(id: String, f: CGRect)] {
+        let side = QwertyLayout.width("back")
+        return [(l.side, frame(10 - side, 2, side))] + l.bottomCells.map { ($0.id, frame($0.x, 3, $0.w)) }
+    }
+
+    private var grid: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(Self.rows.enumerated()), id: \.offset) { r, letters in
+                let x0 = Double(10 - letters.count) / 2
+                ForEach(Array(letters.enumerated()), id: \.offset) { i, c in fixed(String(c), frame(x0 + Double(i), r)) }
+            }
+            fixed("⇧", frame(0, 2, QwertyLayout.width("back")))
+            if let dragging, let f = cells(shown).first(where: { $0.id == dragging })?.f {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentVK, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(Color.accentVK.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .frame(width: f.width, height: f.height)
+                    .position(x: f.midX, y: f.midY)
+                    .allowsHitTesting(false)
+            }
+            ForEach(cells(shown), id: \.id) { key($0.id, $0.f) }
+        }
+        .frame(width: width, height: gridHeight, alignment: .topLeading)
+        .coordinateSpace(name: "qwerty")
+    }
+
+    private func fixed(_ text: String, _ f: CGRect) -> some View {
+        Text(text).font(.body)
+            .foregroundStyle(.tertiary)
+            .frame(width: f.width, height: f.height)
+            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+            .position(x: f.midX, y: f.midY)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private func key(_ id: String, _ f: CGRect) -> some View {
+        let lifted = dragging == id
+        return Text(QwertyLayout.name(id)).font(id.count <= 3 ? .body : .subheadline)
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .foregroundStyle(.primary)
+            .frame(width: f.width, height: f.height)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(lifted ? Color.accentVK : Color.secondary.opacity(0.3), lineWidth: lifted ? 2 : 0.5))
+            .shadow(color: .black.opacity(lifted ? 0.25 : 0.08), radius: lifted ? 10 : 0.5, y: lifted ? 6 : 0.5)
+            .scaleEffect(lifted ? 1.06 : 1)
+            .opacity(lifted ? 0.92 : 1)
+            .position(lifted ? center : CGPoint(x: f.midX, y: f.midY))
+            .zIndex(lifted ? 1 : 0)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("qwerty"))
+                    .onChanged { v in
+                        if dragging == nil {
+                            grab = CGSize(width: v.startLocation.x - f.midX, height: v.startLocation.y - f.midY)
+                            center = CGPoint(x: f.midX, y: f.midY)
+                            withAnimation(.snappy(duration: 0.15)) { dragging = id }
+                        }
+                        center = CGPoint(x: v.location.x - grab.width, y: v.location.y - grab.height)
+                        let next = layout.dropping(id, x: v.location.x / slot, y: v.location.y / (rowH + Self.vgap))
+                        if next != preview { withAnimation(.snappy(duration: 0.25)) { preview = next } }
+                    }
+                    .onEnded { _ in
+                        withAnimation(.snappy) {
+                            if let preview { save(preview) }
+                            dragging = nil
+                            preview = nil
+                        }
+                    }
+            )
+            .accessibilityLabel(QwertyLayout.name(id))
+            .accessibilityHint("拖到底行或第三行右端调整位置")
+    }
+
+    private func save(_ l: QwertyLayout) {
+        typing.qwerty = l
+        typing.save()
+    }
+}
+
+// MARK: - 顶栏按钮
+
+struct ToolbarLayoutView: View {
+    @Binding var typing: TypingPrefs
+
+    var body: some View {
+        List {
+            Section {
+                preview.listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
+            } footer: { Text("拖动右侧把手调整顺序。「状态」占满中间：排在它上面的按钮靠左，下面的靠右。改完下次弹出键盘生效。") }
+            Section {
+                ForEach(typing.toolbar, id: \.self) { id in
+                    Label(Toolbar.name(id), systemImage: Self.icon(id))
+                }
+                .onMove { from, to in
+                    typing.toolbar.move(fromOffsets: from, toOffset: to)
+                    typing.save()
+                }
+            }
+            Section {
+                Button("恢复默认") {
+                    typing.toolbar = Toolbar.all
+                    typing.save()
+                }
+                .disabled(typing.toolbar == Toolbar.all)
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle("顶栏按钮")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var preview: some View {
+        HStack(spacing: 6) {
+            ForEach(typing.toolbar, id: \.self) { id in
+                switch id {
+                case "status": Text("状态").font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                case "chip": capsule("渠道 ▾")
+                case "layout": capsule("26 · 九键")
+                default:
+                    Image(systemName: Self.icon(id)).font(.footnote)
+                        .foregroundStyle(id == "mic" ? Color.accentVK : .secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color(.systemBackground), in: Circle())
+                }
+            }
+        }
+        .padding(8)
+        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 12))
+        .animation(.snappy, value: typing.toolbar)
+    }
+
+    private func capsule(_ text: String) -> some View {
+        Text(text).font(.caption).lineLimit(1).fixedSize()
+            .padding(.horizontal, 10).frame(height: 28)
+            .background(Color(.systemBackground), in: Capsule())
+    }
+
+    private static func icon(_ id: String) -> String {
+        switch id {
+        case "mic": "mic.fill"
+        case "chip": "antenna.radiowaves.left.and.right"
+        case "status": "arrow.left.and.right"
+        case "layout": "keyboard"
+        case "recent": "clock.arrow.circlepath"
+        default: "gearshape"
+        }
+    }
+}
+
 // MARK: - 渠道
 
 struct ChannelList: View {
@@ -580,11 +783,13 @@ struct SettingsView: View {
                     if typing.t9 {
                         NavigationLink("九宫格键位") { T9LayoutView(typing: $typing) }
                     }
+                    NavigationLink("26 键键位") { QwertyLayoutView(typing: $typing) }
+                    NavigationLink("顶栏按钮") { ToolbarLayoutView(typing: $typing) }
                     Toggle("按键震动", isOn: $typing.haptics)
                         .onChange(of: typing.haptics) { typing.save() }
                     Toggle("显示按键耗时", isOn: $typing.metrics)
                         .onChange(of: typing.metrics) { typing.save() }
-                } header: { Text("键盘") } footer: { Text("键盘顶部「26 · 九键」随时切，切过就记住。九宫格的删除、换行、回车、123、符、中/英、空格可以拖动调整位置。按键震动需允许完全访问；按键耗时显示在键盘底部，排查卡顿用。") }
+                } header: { Text("键盘") } footer: { Text("键盘顶部「26 · 九键」随时切，切过就记住。九宫格和 26 键的功能键（删除、回车、123、中/英、空格等）可以拖动调整位置；顶栏按钮可以调整顺序。字母、数字键上滑输入角上的数字。按键震动需允许完全访问；按键耗时显示在键盘底部，排查卡顿用。") }
                 Section("通用") {
                     Button("重新查看引导", action: reonboard)
                 }

@@ -281,6 +281,21 @@ final class PinyinTests: XCTestCase {
         }
     }
 
+    /// 按错一个相邻键也能打出常用词；纠错的单字不压过词组和拼对的字，选词按显示顺序
+    func testT9NeighborKeyCorrection() throws {
+        for (keys, word) in [("5394", "可以"), ("9424", "一次"), ("84", "提"), ("64426", "你好"), ("64436", "你很")] {
+            XCTAssertEqual(session(.t9, keys).candidates.first?.text, word, "拼对的 \(keys) 不被纠错抢先")
+        }
+        let s = session(.t9, "5694")  // koyi
+        XCTAssertEqual(s.candidates.first?.text, "可以", "\(s.candidates.prefix(5).map(\.text))")
+        XCTAssertEqual(s.preedit.guess, ["ke", "yi"])
+        let second = s.candidates[1].text
+        XCTAssertEqual(s.candidates(from: 0, limit: 2).map(\.text), ["可以", second])
+        XCTAssertEqual(s.select(0), "可以")
+        "5694".forEach(s.type)
+        XCTAssertEqual(s.select(absolute: 1), second)
+    }
+
     func testT9Tokens() {
         let input = "ni'64'4hao'"
         let tokens = T9Token.parse(input)

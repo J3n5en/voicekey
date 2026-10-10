@@ -29,7 +29,7 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 | `hotkey.json` | 主 App | `HotkeyRequest`：唯一 `id` 和时刻 `at`（秒），有效期 2 秒 |
 | `hotkey-ack.json` | 键盘 | 已响应的 hotkey 请求 ID；处理前写入以去重 |
 | `keyboard.json` | 键盘 | `KeyboardInfo`，键盘每次出现时写；主 App 据此显示「完全访问已开」 |
-| `typing.json` | 双方 | `TypingPrefs`：中文键盘用九宫格还是 26 键（键盘里切布局即改默认）；`haptics` 按键震动；`metrics` 键盘底部显示按键耗时；`t9Layout` 九宫格功能键布局（`T9Layout`：`right` 右列的键、`bottom` 底行的键含空格、`extend` 右列是否延伸到底行；键为 back / newline（插入 \n，效果取决于宿主）/ enter（随输入框的回车）/ 123 / sym / lang / space，尺寸按位置弹性分配，数字与标点列固定），主 App「九宫格键位」里拖动调整，非法数据按默认。未开完全访问时键盘读写自己的副本 |
+| `typing.json` | 双方 | `TypingPrefs`：中文键盘用九宫格还是 26 键（键盘里切布局即改默认）；`haptics` 按键震动；`metrics` 键盘底部显示按键耗时；`t9Layout` 九宫格功能键布局（`T9Layout`：`right` 右列的键、`bottom` 底行的键含空格、`extend` 右列是否延伸到底行；键为 back / newline（插入 \n，效果取决于宿主）/ enter（随输入框的回车）/ 123 / sym / lang / space，尺寸按位置弹性分配，数字与标点列固定），主 App「九宫格键位」里拖动调整，非法数据按默认；`qwerty` 26 键功能键布局（`QwertyLayout`：`side` 第三行右端的键、`bottom` 底行顺序；键为 back / 123 / lang / comma / space / period / enter 各一次，space 不在 side，宽度跟键走、空格占满剩余，字母与数字符号页共用），主 App「26 键键位」里拖动调整，非法数据按默认；`toolbar` 顶栏按钮顺序（mic / chip / status / layout / recent / gear 的排列，status 占满中间，前面的靠左、后面的靠右），非法数据按默认。未开完全访问时键盘读写自己的副本 |
 
 ## 会话是否可用
 
