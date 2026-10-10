@@ -285,7 +285,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func startUtterance() {
         reset()
-        mySeq = CommandQueue.send(.start, silenceStop: 1.5, tapAt: tapAt)
+        mySeq = CommandQueue.send(.start, silenceStop: config.silenceSeconds, tapAt: tapAt)
         startAt = now
     }
 

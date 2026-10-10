@@ -22,7 +22,7 @@ v2 相对 v1：新增待机方式（`config.standby`、`session.standby`）、�
 
 | 文件 | 写入方 | 内容 |
 |---|---|---|
-| `config.json` | 双方 | `Config`：渠道列表（id / 显示名 / 开关）、多渠道开关、单渠道默认、闲置分钟、上次选中、待机方式 `standby`（`pip` 画中画 / `mic` 常开麦；缺省 = `pip`，旧用户升级后也是画中画） |
+| `config.json` | 双方 | `Config`：渠道列表（id / 显示名 / 开关）、多渠道开关、单渠道默认、闲置分钟、上次选中、待机方式 `standby`（`pip` 画中画 / `mic` 常开麦；缺省 = `pip`，旧用户升级后也是画中画）、`silence` 点麦克风说话时静音几秒自动结束（1–5，缺省 1.5，键盘发 `start` 时作为 `silenceStop`） |
 | `state.json` | 主 App | `LiveState`：会话 + 当前这句话 |
 | `cmd.json` | 键盘 | `CommandQueue`：最近 32 条命令 |
 | `history.json` | 双方 | 最近上屏 20 条；键盘删除键上滑清空输入框时也写入（渠道记为「已清空」），主 App 写前先重读 |

@@ -72,6 +72,18 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testSilenceSetting() throws {
+        XCTAssertEqual(Config.initial.silenceSeconds, 1.5)
+        var c = Config.initial
+        c.silence = 3
+        c = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(c))
+        XCTAssertEqual(c.silenceSeconds, 3)
+        c.silence = 9
+        XCTAssertEqual(c.silenceSeconds, 5)
+        let legacy = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(Config.initial))
+        XCTAssertEqual(legacy.silenceSeconds, 1.5)
+    }
+
     func testPipUpgradeAndModeSwitchPreserveSavedSettings() throws {
         for minutes in Config.idleChoices {
             var old = Config.initial

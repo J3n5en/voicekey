@@ -63,6 +63,8 @@ struct Config: Codable, Equatable {
     var lastPick: String?
     /// 待机方式；旧版配置没有此字段，按画中画
     var standby: Standby?
+    /// 点麦克风说话时停顿多少秒自动结束；缺省 1.5
+    var silence: Double? = nil
 
     static let idleChoices = [5, 10, 30, 0]
     private static let doubao = Channel(id: "e", engine: "doubao", name: "豆包", on: false)
@@ -80,6 +82,7 @@ struct Config: Codable, Equatable {
     var enabled: [Channel] { channels.filter(\.on) }
     var isMulti: Bool { multi && enabled.count >= 2 }
     var standbyMode: Standby { standby ?? .pip }
+    var silenceSeconds: Double { min(max(silence ?? 1.5, 1), 5) }
 
     /// 按当前设置本次参与识别的渠道
     var active: [Channel] {
