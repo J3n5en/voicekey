@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_desc">在任意输入框旁显示语音悬浮球，长按音量下键或悬浮球说话，识别结果直接写入当前输入框。VoiceKey 只读取当前聚焦的输入框，不收集其他屏幕内容。</string>
+</resources>

@@ -1,8 +1,16 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// 安卓等取不到系统数据目录的平台，在首次使用前指定
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR.set(dir);
+}
 
 /// macOS: ~/Library/Application Support/VoiceKey；Windows: %APPDATA%\VoiceKey
 pub fn data_dir() -> PathBuf {
-    let d = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("VoiceKey");
+    let d = DATA_DIR.get().cloned().unwrap_or_else(|| dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("VoiceKey"));
     let _ = std::fs::create_dir_all(&d);
     d
 }

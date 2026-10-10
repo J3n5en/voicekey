@@ -1,0 +1,2 @@
+-keep class j3.voicekey.Native { *; }
+-keep interface j3.voicekey.Native$Listener { *; }

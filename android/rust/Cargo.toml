@@ -1,0 +1,25 @@
+[package]
+name = "voicekey-jni"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "voicekey"
+crate-type = ["cdylib"]
+
+[dependencies]
+voicekey-core = { path = "../../crates/core" }
+voicekey-wtlocal = { path = "../../crates/wtlocal" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+jni = "0.21"
+
+# 独立于桌面端 workspace
+[workspace]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev.package.voicekey-wtlocal]
+opt-level = 3
