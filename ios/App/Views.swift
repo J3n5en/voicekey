@@ -325,7 +325,7 @@ struct HistoryView: View {
 
 // MARK: - 九宫格键位
 
-/// 数字 1–9 与左侧标点列固定、不可交互；7 个功能键（⌫ 换行 回车 123 符 中/英 空格）可拖到右列或底行任意位置。
+/// 数字 1–9 与左侧标点列固定、不可交互；8 个功能键（⌫ 换行 重输 回车 123 符 中/英 空格）可拖到右列或底行任意位置。
 /// 拖动时像拼图：其他键实时让位、尺寸弹性重排，虚线框提示松手后的落点。按宽度自适应
 struct T9LayoutView: View {
     @Binding var typing: TypingPrefs
@@ -355,7 +355,7 @@ struct T9LayoutView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
                     .padding(14)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-                Text("按住功能键拖到右列或底行的任意位置，其他键会自动让位、调整大小，虚线框是松手后的位置。数字和标点列固定。「回车」在键盘上会随输入框显示为换行、发送、搜索等。改完下次弹出键盘生效。")
+                Text("按住功能键拖到右列或底行的任意位置，其他键会自动让位、调整大小，虚线框是松手后的位置。数字和标点列固定。「回车」在键盘上会随输入框显示为换行、发送、搜索等；「重输」清空正在打的拼音。改完下次弹出键盘生效。")
                     .font(.footnote).foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                 Button("恢复默认") { withAnimation(.snappy) { save(T9Layout()) } }

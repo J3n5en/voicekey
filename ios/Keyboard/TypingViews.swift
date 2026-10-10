@@ -8,7 +8,8 @@ final class KeyPad: UIView {
     enum Key: Equatable {
         case letter(Character), digit(Character), one, text(String)
         /// enter：随输入框变成 换行 / 发送 / 搜索 的回车；newline：插入 \n（会把 \n 当发送的宿主里同样会发送）
-        case space, back, enter, newline, globe, shift, lang, page(Page)
+        /// retype：组字时清空拼音（重输），空闲时置灰
+        case space, back, enter, newline, retype, globe, shift, lang, page(Page)
     }
 
     struct Spec: Equatable {
@@ -104,6 +105,7 @@ final class KeyPad: UIView {
     private var enter: KeyButton?
     /// 当前布局里单独的换行键（九宫格可有可无）
     private var newline: KeyButton?
+    private var retype: KeyButton?
     private var oneKey: DigitKey?
     private let list = SideList()
     private var listCell = false
@@ -138,6 +140,7 @@ final class KeyPad: UIView {
         rows.flatMap { $0 }.forEach { $0.button.removeFromSuperview() }
         hidePopup()
         newline = nil
+        retype = nil
         rows = s.t9 && s.page != .sym ? t9Rows(s) : qwertyRows(s)
         listCell = s.t9 && s.page != .sym
         if listCell { addSubview(list) } else { list.removeFromSuperview() }
@@ -156,6 +159,7 @@ final class KeyPad: UIView {
         space?.setTitle(composing ? "首选词" : "空格", for: .normal)
         space?.accessibilityHint = composing ? "选择首选词" : "长按移动光标"
         applyReturn()
+        retype?.muted = !composing
         oneKey?.bottom.text = composing ? "分词" : "@/."
         if spec.t9, spec.page == .abc { list.set(composing ? pinyin : T9Layout.punct, pinyin: composing) }
     }
@@ -211,6 +215,11 @@ final class KeyPad: UIView {
             b.fontSize = 16
             b.accessibilityLabel = "换行符"
             newline = b
+        case .retype:
+            b = KeyButton("重输", style: .key)
+            b.fontSize = 16
+            b.muted = !composing
+            retype = b
         case .globe:
             b = KeyButton(symbol: "globe", style: .key)
             b.accessibilityLabel = "切换输入法"
@@ -342,6 +351,7 @@ final class KeyPad: UIView {
                 case "back": g.append(at(.back, c, r, cw: cw, rh: rh))
                 case "enter": g.append(at(.enter, c, r, cw: cw, rh: rh))
                 case "newline": g.append(at(.newline, c, r, cw: cw, rh: rh))
+                case "retype": g.append(at(.retype, c, r, cw: cw, rh: rh))
                 case "lang": g.append(at(.lang, c, r, cw: cw, rh: rh))
                 case "space": g.append(at(.space, c, r, cw: cw, rh: rh))
                 case "sym": g.append(at(.page(.sym), c, r, cw: cw, rh: rh))

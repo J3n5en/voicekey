@@ -157,7 +157,7 @@ struct TypingPrefs: Codable, Equatable {
         t9 = try c.decodeIfPresent(Bool.self, forKey: .t9) ?? false
         metrics = try c.decodeIfPresent(Bool.self, forKey: .metrics) ?? false
         haptics = try c.decodeIfPresent(Bool.self, forKey: .haptics) ?? true
-        if let l = try? c.decodeIfPresent(T9Layout.self, forKey: .t9Layout), l.valid { t9Layout = l }
+        if let l = (try? c.decodeIfPresent(T9Layout.self, forKey: .t9Layout))??.migrated(), l.valid { t9Layout = l }
         if let l = try? c.decodeIfPresent(QwertyLayout.self, forKey: .qwerty), l.valid { qwerty = l }
         if let t = try? c.decodeIfPresent([String].self, forKey: .toolbar), t.sorted() == Toolbar.all.sorted() { toolbar = t }
     }
@@ -194,7 +194,7 @@ enum Toolbar {
 }
 
 /// 九宫格 5 列 × 4 行：左列前三行为标点/拼音列表，中间 3×3 为数字，都固定。
-/// 7 个功能键分在两处，尺寸随数量弹性分配（拼音不用 0，数字在 123 页）：
+/// 8 个功能键分在两处，尺寸随数量弹性分配（拼音不用 0，数字在 123 页）：
 /// - 右列（right，1–4 个）：占前三行，extend 时延伸到底行共四行；键数不超过行数时每键至少一行、多出的行给回车
 ///   （不在右列则均分），键比行多时均分
 /// - 底行（bottom）：extend 时剩 4 列，否则 5 列。最左的键与标点列同宽、最右的键（不延伸时）与右列同宽；
@@ -202,11 +202,11 @@ enum Toolbar {
 /// 「回车」随输入框显示 换行 / 发送 / 搜索；「换行」插入 \n（效果取决于宿主，会把 \n 当发送的输入框里同样会发送）；「符」打开标点符号页。
 /// 默认 ⌫ / 换行 / 回车(两行，右列延伸到底) + 123 · 符(0.75) · 空格(1.5) · 中英(0.75)
 struct T9Layout: Codable, Equatable {
-    var right = ["back", "newline", "enter"]
+    var right = ["back", "newline", "retype", "enter"]
     var bottom = ["123", "sym", "space", "lang"]
     var extend = true
 
-    static let keys = ["back", "newline", "enter", "123", "sym", "lang", "space"]
+    static let keys = ["back", "newline", "retype", "enter", "123", "sym", "lang", "space"]
     /// 九宫格左列空闲时的常用中文标点，5 个正好铺满一列；其余在「符」页
     static let punct = ["，", "。", "？", "！", "、"]
 
@@ -219,11 +219,22 @@ struct T9Layout: Codable, Equatable {
     var rows: Int { extend ? 4 : 3 }
     var cols: Int { extend ? 4 : 5 }
 
-    /// 七个键各一次；右列 1–4 个且没有空格；底行有空格且空格至少一列
+    /// 八个键各一次；右列 1–4 个且没有空格；底行有空格且空格至少一列
     var valid: Bool {
         (right + bottom).sorted() == Self.keys.sorted()
             && (1...4).contains(right.count) && !right.contains("space")
             && bottom.contains("space") && spaceWidth >= 1
+    }
+
+    /// 旧版布局没有「重输」：插在右列回车上方，右列满了放底行最右
+    func migrated() -> T9Layout {
+        guard !(right + bottom).contains("retype") else { return self }
+        var r = self
+        r.right.insert("retype", at: r.right.firstIndex(of: "enter") ?? r.right.count)
+        if r.valid { return r }
+        r = self
+        r.bottom.append("retype")
+        return r
     }
 
     var cells: [Cell] {
@@ -300,6 +311,7 @@ struct T9Layout: Codable, Equatable {
         // 编辑页显示：这个键随输入框变成 换行 / 发送 / 搜索……
         case "enter": "回车"
         case "newline": "换行"
+        case "retype": "重输"
         case "space": "空格"
         case "lang": "中/英"
         case "sym": "符"

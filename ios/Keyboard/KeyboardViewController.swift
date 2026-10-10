@@ -1098,6 +1098,7 @@ final class KeyboardViewController: UIInputViewController {
         case .enter:
             if zh, composer.isComposing { timed { insert(composer.commitRaw()) } } else if returnKey.enabled { insert("\n") }
         case .newline: commitThen("\n")
+        case .retype: if composer.isComposing { timed { composer.clear() } }
         case .shift:
             shift.toggle()
             render()
