@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export IPHONEOS_DEPLOYMENT_TARGET=17.0
+export RUSTFLAGS="--remap-path-prefix=$HOME=~ --remap-path-prefix=$(cd ../.. && pwd)=."
+export CFLAGS="-ffile-prefix-map=$HOME=~"
 LIB=libvoicekey_ffi.a
 T=rust/target
 for t in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do

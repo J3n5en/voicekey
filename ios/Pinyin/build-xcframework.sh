@@ -32,7 +32,7 @@ build() {
     local prefix=$CACHE/out/$1 work=$CACHE/build/$1
     local common=(
         -G Ninja -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$2" -DCMAKE_OSX_ARCHITECTURES="$3"
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-Os -DNDEBUG" -DCMAKE_CXX_FLAGS_RELEASE="-Os -DNDEBUG" -DCMAKE_MACOSX_BUNDLE=OFF
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-Os -DNDEBUG -ffile-prefix-map=$HOME=~" -DCMAKE_CXX_FLAGS_RELEASE="-Os -DNDEBUG -ffile-prefix-map=$HOME=~" -DCMAKE_MACOSX_BUNDLE=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_ROOT_PATH="$prefix"
         -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
@@ -44,7 +44,7 @@ build() {
     dep leveldb -DLEVELDB_BUILD_BENCHMARKS=OFF -DLEVELDB_BUILD_TESTS=OFF -DLEVELDB_INSTALL=ON
     dep marisa-trie -DBUILD_TESTING=OFF -DENABLE_TOOLS=OFF
     dep yaml-cpp -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF
-    TARGET=libopencc dep opencc -DBUILD_DOCUMENTATION=OFF -DENABLE_GTEST=OFF -DBUILD_PYTHON=OFF -DUSE_SYSTEM_MARISA=ON -DCMAKE_CXX_FLAGS="-I$prefix/include"
+    TARGET=libopencc dep opencc -DBUILD_DOCUMENTATION=OFF -DENABLE_GTEST=OFF -DBUILD_PYTHON=OFF -DUSE_SYSTEM_MARISA=ON -DSHARE_INSTALL_PREFIX=share -DCMAKE_CXX_FLAGS="-I$prefix/include"
     cmake --install "$work/opencc" --component Unspecified >/dev/null 2>&1 || true # 命令行工具装不上，库和头文件已装好
     [ -f "$prefix/lib/libopencc.a" ] && [ -f "$prefix/include/opencc/opencc.h" ]
     configure "$SRC" "$work/rime" "${common[@]}" -DBoost_INCLUDE_DIR="$BOOST" -DBoost_NO_SYSTEM_PATHS=ON -DMarisa_LIBRARY="$prefix/lib/libmarisa.a" \
