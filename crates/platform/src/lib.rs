@@ -9,7 +9,10 @@ mod win;
 #[cfg(windows)]
 use win as imp;
 
+mod volume;
+
 pub use imp::{caret, front_app, inject_key, paste, secure_input, start_hook, FrontApp};
+pub use volume::OutputVolumeDucker;
 
 pub const CTRL: u8 = 1;
 pub const ALT: u8 = 2;

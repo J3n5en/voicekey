@@ -1,8 +1,15 @@
+use crate::volume::{OutputVolumeSnapshot, OutputVolumeValue};
 use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, FN, META, SHIFT};
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::{CFString, CFStringRef};
+use coreaudio_sys::{
+    kAudioDevicePropertyDeviceUID, kAudioDevicePropertyMute, kAudioDevicePropertyVolumeScalar,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject, AudioObjectGetPropertyData, AudioObjectHasProperty,
+    AudioObjectID, AudioObjectIsPropertySettable, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
+};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Mutex;
@@ -358,6 +365,181 @@ impl FrontApp {
             app.activateWithOptions(NSApplicationActivationOptions::empty());
         }
     }
+}
+
+fn audio_address(selector: u32, scope: u32, element: u32) -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress { mSelector: selector, mScope: scope, mElement: element }
+}
+
+fn default_output_device() -> Option<AudioObjectID> {
+    let mut address = audio_address(
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain,
+    );
+    let mut device = 0 as AudioObjectID;
+    let mut size = std::mem::size_of::<AudioObjectID>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            kAudioObjectSystemObject,
+            &mut address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut device as *mut _ as *mut c_void,
+        )
+    };
+    (status == 0 && device != 0).then_some(device)
+}
+
+fn device_uid(device: AudioObjectID) -> Option<String> {
+    let mut address = audio_address(kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain);
+    let mut uid: CFStringRef = std::ptr::null();
+    let mut size = std::mem::size_of::<CFStringRef>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            &mut address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut uid as *mut _ as *mut c_void,
+        )
+    };
+    if status != 0 || uid.is_null() {
+        return None;
+    }
+    // CoreAudio 的 CF 类型属性按 create 规则交给调用方释放。
+    Some(unsafe { CFString::wrap_under_create_rule(uid) }.to_string())
+}
+
+fn can_set_volume(device: AudioObjectID, element: u32) -> bool {
+    let address = audio_address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, element);
+    if unsafe { AudioObjectHasProperty(device, &address) } == 0 {
+        return false;
+    }
+    let mut settable = 0u8;
+    unsafe { AudioObjectIsPropertySettable(device, &address, &mut settable) == 0 && settable != 0 }
+}
+
+fn read_scalar(device: AudioObjectID, element: u32) -> Option<f32> {
+    let mut address = audio_address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, element);
+    let mut value = 0.0f32;
+    let mut size = std::mem::size_of::<f32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            &mut address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut value as *mut _ as *mut c_void,
+        )
+    };
+    (status == 0 && value.is_finite() && (0.0..=1.0).contains(&value)).then_some(value)
+}
+
+fn set_scalar(device: AudioObjectID, element: u32, value: f32) -> bool {
+    let mut address = audio_address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, element);
+    let value = value.clamp(0.0, 1.0);
+    unsafe {
+        AudioObjectSetPropertyData(
+            device,
+            &mut address,
+            0,
+            std::ptr::null(),
+            std::mem::size_of::<f32>() as u32,
+            &value as *const _ as *const c_void,
+        ) == 0
+    }
+}
+
+fn read_mute(device: AudioObjectID) -> Option<bool> {
+    let mut address = audio_address(kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput, kAudioObjectPropertyElementMain);
+    if unsafe { AudioObjectHasProperty(device, &address) } == 0 {
+        return None;
+    }
+    let mut value = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            &mut address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut value as *mut _ as *mut c_void,
+        )
+    };
+    (status == 0).then_some(value != 0)
+}
+
+fn output_snapshot(device: AudioObjectID) -> Option<OutputVolumeSnapshot> {
+    let device_id = device_uid(device)?;
+    // 大多数设备有 element 0 的 master volume；没有时探测可写物理通道，兼容 HDMI/部分专业声卡。
+    let elements: Vec<u32> = if can_set_volume(device, kAudioObjectPropertyElementMain) {
+        vec![kAudioObjectPropertyElementMain]
+    } else {
+        (1..=64).filter(|&element| can_set_volume(device, element)).collect()
+    };
+    if elements.is_empty() {
+        return None;
+    }
+    let values = elements
+        .into_iter()
+        .map(|element| Some(OutputVolumeValue { element, value: read_scalar(device, element)? }))
+        .collect::<Option<Vec<_>>>()?;
+    Some(OutputVolumeSnapshot { device_id, native_id: device as u64, muted: read_mute(device), values })
+}
+
+pub(crate) fn output_volume_default() -> Option<OutputVolumeSnapshot> {
+    output_snapshot(default_output_device()?)
+}
+
+pub(crate) fn output_volume_for(original: &OutputVolumeSnapshot) -> Option<OutputVolumeSnapshot> {
+    let current = output_snapshot(original.native_id as AudioObjectID)?;
+    current.same_device(original).then_some(current)
+}
+
+pub(crate) fn output_volume_write(
+    desired: &OutputVolumeSnapshot,
+    expected: &OutputVolumeSnapshot,
+) -> Option<OutputVolumeSnapshot> {
+    if !desired.same_device(expected) || desired.values.iter().map(|v| v.element).ne(expected.values.iter().map(|v| v.element)) {
+        return None;
+    }
+    let device = expected.native_id as AudioObjectID;
+    let current = output_snapshot(device)?;
+    if !current.matches(expected) {
+        return None;
+    }
+
+    let mut written: Vec<OutputVolumeValue> = Vec::new();
+    for value in &desired.values {
+        if !set_scalar(device, value.element, value.value) {
+            // 多通道设备部分写失败时，只回滚仍保持“本次写入值”的通道；用户同帧调节过的值绝不覆盖。
+            if let Some(actual) = output_snapshot(device) {
+                for changed in &written {
+                    let now = actual.values.iter().find(|v| v.element == changed.element);
+                    let old = expected.values.iter().find(|v| v.element == changed.element);
+                    if let (Some(now), Some(old)) = (now, old) {
+                        if (now.value - changed.value).abs() <= 0.002 {
+                            let _ = set_scalar(device, old.element, old.value);
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+        written.push(value.clone());
+    }
+    let actual = output_snapshot(device)?;
+    // 某些硬件会把 scalar volume 量化到固定步进；成功写入后以实际回读值继续做所有权判断，
+    // 只要求设备、通道布局和 mute 状态没有意外变化，不能要求浮点值精确等于 desired。
+    let same_layout = actual.same_device(desired)
+        && actual.values.iter().map(|v| v.element).eq(desired.values.iter().map(|v| v.element));
+    let same_mute = actual.muted.is_none() || expected.muted.is_none() || actual.muted == expected.muted;
+    (same_layout && same_mute).then_some(actual)
 }
 
 pub mod perm {
