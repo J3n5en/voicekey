@@ -1,10 +1,16 @@
+use crate::volume::{OutputVolumeSnapshot, OutputVolumeValue};
 use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, META, SHIFT};
 use std::sync::Mutex;
 use std::time::Duration;
-use windows::core::Interface;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    COINIT_MULTITHREADED,
+};
 use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VARIANT;
@@ -198,6 +204,95 @@ impl FrontApp {
             let _ = SetForegroundWindow(HWND(self.0 as *mut _));
         }
     }
+}
+
+struct AudioCom(bool);
+
+impl Drop for AudioCom {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+thread_local! {
+    // 音量后端固定在独立 worker 线程；COM 只初始化一次，避免每个 20ms fade 帧重复增加 COM 引用计数。
+    static AUDIO_COM: AudioCom = AudioCom(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() });
+}
+
+fn init_audio_com() -> bool {
+    AUDIO_COM.with(|com| com.0)
+}
+
+fn audio_device(id: Option<&str>) -> Option<IMMDevice> {
+    if !init_audio_com() {
+        return None;
+    }
+    let enumerator: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()? };
+    match id {
+        None => unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia).ok() },
+        Some(id) => {
+            let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe { enumerator.GetDevice(PCWSTR(wide.as_ptr())).ok() }
+        }
+    }
+}
+
+fn device_id(device: &IMMDevice) -> Option<String> {
+    let raw = unsafe { device.GetId().ok()? };
+    let id = unsafe { raw.to_string().ok() };
+    unsafe { CoTaskMemFree(Some(raw.0 as *const std::ffi::c_void)) };
+    id
+}
+
+fn endpoint(device: &IMMDevice) -> Option<IAudioEndpointVolume> {
+    unsafe { device.Activate(CLSCTX_ALL, None).ok() }
+}
+
+fn output_snapshot(device: IMMDevice) -> Option<OutputVolumeSnapshot> {
+    let device_id = device_id(&device)?;
+    let endpoint = endpoint(&device)?;
+    let value = unsafe { endpoint.GetMasterVolumeLevelScalar().ok()? };
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return None;
+    }
+    let muted = unsafe { endpoint.GetMute().ok() }.map(|v| v.as_bool());
+    Some(OutputVolumeSnapshot {
+        device_id,
+        native_id: 0,
+        muted,
+        values: vec![OutputVolumeValue { element: 0, value }],
+    })
+}
+
+pub(crate) fn output_volume_default() -> Option<OutputVolumeSnapshot> {
+    output_snapshot(audio_device(None)?)
+}
+
+pub(crate) fn output_volume_for(original: &OutputVolumeSnapshot) -> Option<OutputVolumeSnapshot> {
+    let current = output_snapshot(audio_device(Some(&original.device_id))?)?;
+    current.same_device(original).then_some(current)
+}
+
+pub(crate) fn output_volume_write(
+    desired: &OutputVolumeSnapshot,
+    expected: &OutputVolumeSnapshot,
+) -> Option<OutputVolumeSnapshot> {
+    if !desired.same_device(expected) || desired.values.len() != 1 || expected.values.len() != 1 {
+        return None;
+    }
+    let device = audio_device(Some(&expected.device_id))?;
+    let current = output_snapshot(device.clone())?;
+    if !current.matches(expected) {
+        return None;
+    }
+    let endpoint = endpoint(&device)?;
+    unsafe { endpoint.SetMasterVolumeLevelScalar(desired.values[0].value.clamp(0.0, 1.0), std::ptr::null()).ok()? };
+    let actual = output_snapshot(device)?;
+    // Endpoint 可能量化 master scalar；平台写成功后保留实际回读值，后续用它区分 VoiceKey 自己的状态与用户手调。
+    let same_mute = actual.muted.is_none() || expected.muted.is_none() || actual.muted == expected.muted;
+    (actual.same_device(desired) && same_mute).then_some(actual)
 }
 
 pub mod perm {

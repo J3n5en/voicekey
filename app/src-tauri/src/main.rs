@@ -125,10 +125,19 @@ fn get_state(app: AppHandle) -> serde_json::Value {
 
 #[tauri::command]
 fn set_settings(app: AppHandle, settings: Settings) {
-    let mic_changed = app.state::<AppState>().settings.read().unwrap().mic != settings.mic;
+    let new_ducking = settings.lower_system_volume;
+    let (mic_changed, ducking_changed) = {
+        let state = app.state::<AppState>();
+        let current = state.settings.read().unwrap();
+        (current.mic != settings.mic, current.lower_system_volume != new_ducking)
+    };
     update_settings(&app, |s| *s = settings);
     if mic_changed {
         send(&app, Msg::RefreshMeter);
+    }
+    if ducking_changed {
+        // 录音中切换设置也立即生效；controller 会在非录音状态把它归一为 false。
+        send(&app, Msg::VolumeDucking(new_ducking));
     }
 }
 
