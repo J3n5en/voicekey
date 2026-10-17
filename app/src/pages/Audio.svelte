@@ -9,10 +9,20 @@
 
   onMount(() => {
     refreshMics();
-    window.addEventListener("focus", refreshMics);
+    // 电平表只在设置窗处于前台时占用麦克风，切到其他应用立即释放。
+    const onFocus = () => {
+      refreshMics();
+      call("meter", { on: true });
+    };
+    const onBlur = () => {
+      call("meter", { on: false });
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
     call("meter", { on: true });
     return () => {
-      window.removeEventListener("focus", refreshMics);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
       call("meter", { on: false });
     };
   });

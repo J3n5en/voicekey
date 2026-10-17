@@ -259,4 +259,43 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    #[ignore = "live non-default mic test"]
+    fn live_named_nondefault_recorder_drop_stops_device() {
+        let initial = snapshot().expect("CoreAudio snapshot");
+        // cpal 0.15.3 只给非默认设备注册 disconnect listener；默认麦克风不能覆盖这个回归路径。
+        let default_name = initial.devices.iter().find(|d| d.id == initial.default).and_then(|d| d.name.as_deref());
+        let (dev_id, dev_name) = match initial.inputs().find(|d| d.id != initial.default && d.name.as_deref() != default_name) {
+            Some(d) => (d.id, d.name.clone().unwrap()),
+            None => {
+                eprintln!("SKIP: no distinctly named non-default input device available");
+                return;
+            }
+        };
+        let check_running = || {
+            let addr = address(kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal);
+            let (data, _) = property(dev_id, &addr).unwrap();
+            unsafe { data.as_ptr().cast::<u32>().read() }
+        };
+        eprintln!("Testing mic [{}] id={}", dev_name, dev_id);
+        let before = check_running();
+        eprintln!("Before start: running = {before}");
+        if before != 0 {
+            eprintln!("SKIP: device is already in use, cannot attribute running state to this recorder");
+            return;
+        }
+        let (rec, _rx) = crate::audio::Recorder::start(Some(&dev_name), |_| {}).expect("start recorder");
+        std::thread::sleep(Duration::from_millis(200));
+        let during = check_running();
+        eprintln!("During recording: running = {during}");
+        assert_ne!(during, 0, "non-default device must be running while recorder is active");
+        // cancel/disarm 都可能只通过 Drop 释放 Recorder，这里覆盖真实生命周期路径。
+        drop(rec);
+        eprintln!("Recorder dropped!");
+        std::thread::sleep(Duration::from_millis(500));
+        let after = check_running();
+        eprintln!("After stop: running = {}", after);
+        assert_eq!(after, 0, "Device must not be running after stop!");
+    }
 }
