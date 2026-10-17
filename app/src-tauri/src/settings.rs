@@ -98,6 +98,8 @@ pub struct Settings {
     pub pick_counts: HashMap<Channel, u32>,
     pub autostart: bool,
     pub theme: String,
+    /// 真正进入聆听后把系统输出平滑压到原音量的 30%；默认关闭，升级用户不会被突然改变系统声音。
+    pub lower_system_volume: bool,
     pub onboarded: bool,
 }
 
@@ -119,6 +121,7 @@ impl Default for Settings {
             pick_counts: HashMap::new(),
             autostart: false,
             theme: "system".into(),
+            lower_system_volume: false,
             onboarded: false,
         }
     }
