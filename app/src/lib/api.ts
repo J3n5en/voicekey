@@ -7,7 +7,7 @@ import baidu from "../assets/logos/baidu.png";
 import sogou from "../assets/logos/sogou.png";
 import iflytek from "../assets/logos/iflytek.png";
 
-export type Channel = "doubao" | "wetype" | "qwen" | "baidu" | "sogou" | "iflytek" | "offline" | "wetypeoffline" | "all";
+export type Channel = "doubao" | "wetype" | "qwen" | "baidu" | "sogou" | "iflytek" | "offline" | "wetypeoffline" | "sensevoice" | "all";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Settings {
   channel: Channel; holdKey: string; tapShortcut: Shortcut | null; silence: number; streaming: boolean;
@@ -37,11 +37,12 @@ export const CH: Record<Channel, { name: string; short: string; desc: string; ta
   iflytek: { name: "讯飞输入法", short: "讯飞", desc: "讯飞输入法官方云端识别，中文流式出字。", tags: ["在线", "流式"], logo: iflytek },
   offline: { name: "豆包离线", short: "豆包离线", desc: "豆包输入法离线引擎，本机运行，断网可用，不上传音频。", tags: ["离线", "约 190MB"], logo: doubao },
   wetypeoffline: { name: "微信离线", short: "微信离线", desc: "微信输入法官方离线模型，本机运行，断网可用，不上传音频。", tags: ["离线", "约 100MB"], logo: wetype },
+  sensevoice: { name: "SenseVoice 本地", short: "SenseVoice", desc: "阿里 SenseVoiceSmall，本机推理，支持中英粤日韩，边说边出字、不上传音频。", tags: ["本地", "不上传"], logo: "" },
   all: { name: "多渠道", short: "多渠道", desc: "勾选的渠道同时识别、实时出字，说完在光标处挑选最满意的一条上屏。", tags: ["并行", "流式候选"], logo: "" },
 };
 
 /** 需要下载模型的本地渠道及下载体积 */
-export const LOCAL: Partial<Record<Channel, string>> = { offline: "约 190MB", wetypeoffline: "约 100MB" };
+export const LOCAL: Partial<Record<Channel, string>> = { offline: "约 190MB", wetypeoffline: "约 100MB", sensevoice: "约 1GB" };
 
 /** 根据平台与主题设置 html class */
 export function applyLook(platform: string, theme: string) {

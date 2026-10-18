@@ -1,7 +1,7 @@
 //! 会话编排：快捷键 → 录音 → 识别 → 上屏；「全部」模式流式候选面板；设置页渠道对比
 use crate::hotkey::{HotEvent, Shared};
 use crate::settings::{Channel, Settings};
-use crate::{offline, ui, wtoffline, AppState};
+use crate::{offline, sensevoice, ui, wtoffline, AppState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -100,6 +100,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         engines.insert(Channel::Offline, e);
     }
     engines.insert(Channel::WetypeOffline, wtoffline::engine());
+    engines.insert(Channel::Sensevoice, sensevoice::engine());
     let ctl = Ctl {
         settings: st.settings.clone(),
         hk: st.hk.clone(),

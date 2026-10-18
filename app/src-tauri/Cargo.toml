@@ -11,6 +11,7 @@ voicekey-core = { path = "../../crates/core" }
 voicekey-platform = { path = "../../crates/platform" }
 voicekey-hanbao = { path = "../../crates/hanbao" }
 voicekey-wtlocal = { path = "../../crates/wtlocal" }
+voicekey-sensevoice = { path = "../../crates/sensevoice" }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
@@ -26,6 +27,8 @@ sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
 base64 = "0.22"
+# 选择 SenseVoice 模型目录，Windows/macOS 走原生对话框
+rfd = { version = "0.16", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
