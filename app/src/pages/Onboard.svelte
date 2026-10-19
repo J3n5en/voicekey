@@ -17,8 +17,20 @@
   onMount(() => {
     refreshMics();
     const iv = setInterval(refreshPerms, 1000);
+    // 引导页退到后台时不能继续占麦；回到麦克风步骤才恢复电平表。
+    const onFocus = () => {
+      refreshMics();
+      if (step === "mic") call("meter", { on: true });
+    };
+    const onBlur = () => {
+      call("meter", { on: false });
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
     return () => {
       clearInterval(iv);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
       call("meter", { on: false });
     };
   });

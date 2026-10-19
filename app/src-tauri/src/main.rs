@@ -265,10 +265,11 @@ fn main() {
             Ok(())
         })
         .on_window_event(|w, e| {
-            if w.label() == "main" && matches!(e, WindowEvent::Destroyed) {
+            // 先禁用电平表，再结束 Compare，避免回到 Idle 时 refresh_meter 瞬间重开麦。
+            if w.label() == "main" && matches!(e, WindowEvent::Destroyed | WindowEvent::CloseRequested { .. }) {
                 let st = w.state::<AppState>();
-                let _ = st.tx.send(Msg::CompareStop);
                 let _ = st.tx.send(Msg::Meter(false));
+                let _ = st.tx.send(Msg::CompareStop);
                 st.hk.recording.store(false, Ordering::Relaxed);
             }
         })
