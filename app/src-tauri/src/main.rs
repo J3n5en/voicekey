@@ -3,6 +3,7 @@
 mod controller;
 mod hotkey;
 mod offline;
+mod sensevoice;
 mod settings;
 mod ui;
 mod update;
@@ -52,6 +53,7 @@ pub fn update_settings<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut Setti
     };
     apply(app, &s);
     download_model(app, s.channel);
+    sensevoice::prewarm(app, &s);
     let _ = app.emit("settings", &s);
 }
 
@@ -60,6 +62,7 @@ fn download_model<R: Runtime>(app: &AppHandle<R>, ch: Channel) {
     match ch {
         Channel::Offline => offline::download(app),
         Channel::WetypeOffline => wtoffline::download(app),
+        Channel::Sensevoice => sensevoice::download(app),
         _ => {}
     }
 }
@@ -68,6 +71,7 @@ pub fn model_ready(ch: Channel) -> bool {
     match ch {
         Channel::Offline => offline::installed(),
         Channel::WetypeOffline => wtoffline::installed(),
+        Channel::Sensevoice => sensevoice::installed(),
         _ => true,
     }
 }
@@ -117,7 +121,7 @@ fn get_state(app: AppHandle) -> serde_json::Value {
         "holdKeys": hold,
         "channels": Channel::available(),
         "offline": { "supported": offline::SUPPORTED },
-        "models": { "offline": offline::status(), "wetypeoffline": wtoffline::status() },
+        "models": { "offline": offline::status(), "wetypeoffline": wtoffline::status(), "sensevoice": sensevoice::status() },
         "perms": perms(),
         "update": update::status(),
     })

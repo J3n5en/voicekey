@@ -14,6 +14,8 @@ pub enum Channel {
     Iflytek,
     Offline,
     WetypeOffline,
+    /// 本地 SenseVoice（Python 服务，GPU/CPU）
+    Sensevoice,
     All,
 }
 
@@ -28,6 +30,7 @@ impl Channel {
             Channel::Iflytek => "讯飞输入法",
             Channel::Offline => "豆包离线",
             Channel::WetypeOffline => "微信离线",
+            Channel::Sensevoice => "SenseVoice 本地",
             Channel::All => "多渠道（说完挑选）",
         }
     }
@@ -39,6 +42,7 @@ impl Channel {
             v.push(Channel::Offline);
         }
         v.push(Channel::WetypeOffline);
+        v.push(Channel::Sensevoice);
         v
     }
 
@@ -114,7 +118,7 @@ impl Default for Settings {
             streaming: true,
             live_text: true,
             mic: String::new(),
-            multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
+            multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline && c != Channel::Sensevoice).collect(),
             last_pick: None,
             pick_counts: HashMap::new(),
             autostart: false,

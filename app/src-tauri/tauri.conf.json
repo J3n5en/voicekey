@@ -38,6 +38,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "../../crates/sensevoice/python/sensevoice_server.py"
+    ],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "infoPlist": "Info.plist",
