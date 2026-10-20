@@ -27,8 +27,8 @@ pub enum Msg {
     CompareStop,
     Meter(bool),
     RefreshMeter,
-    /// 设置页在录音中即时开/关 ducking；worker 自己负责平滑反向和安全恢复。
-    VolumeDucking(bool),
+    /// 设置页在录音中即时调整 ducking；worker 自己负责所有权判断、平滑重定向和安全恢复。
+    VolumeDucking { enabled: bool, reduction_percent: u8 },
     MicrophonesChanged(Vec<String>),
 }
 
@@ -162,10 +162,10 @@ enum Gate {
 }
 
 const PREROLL: usize = 50;
-const LISTENING_OUTPUT_FRACTION: f32 = 0.30;
 
 pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) {
     let st = app.state::<AppState>();
+    let volume_fraction = st.settings.read().unwrap().retained_system_volume_fraction();
     let mut engines: HashMap<Channel, Arc<dyn Engine>> = HashMap::new();
     engines.insert(Channel::Doubao, Arc::new(DoubaoEngine));
     engines.insert(Channel::Wetype, Arc::new(WeTypeEngine::default()));
@@ -186,7 +186,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         recorder: None,
         meter: None,
         meter_enabled: false,
-        volume_ducking: pf::OutputVolumeDucker::new(LISTENING_OUTPUT_FRACTION),
+        volume_ducking: pf::OutputVolumeDucker::new(volume_fraction),
         tasks: Vec::new(),
         gen: 0,
         timeout_token: 0,
@@ -267,7 +267,10 @@ impl Ctl {
                 self.refresh_meter();
             }
             Msg::RefreshMeter => self.refresh_meter(),
-            Msg::VolumeDucking(enabled) => self.volume_ducking.set_active(enabled && self.recording),
+            Msg::VolumeDucking { enabled, reduction_percent } => {
+                // 设置/UI 统一使用“降低比例”；worker 只接收最终保留比例，因此只在这里做一次补数换算。
+                self.volume_ducking.configure(enabled && self.recording, 1.0 - reduction_percent as f32 / 100.0)
+            }
             Msg::MicrophonesChanged(mics) => {
                 let _ = self.app.emit("microphones", mics);
                 self.refresh_meter();
@@ -387,7 +390,9 @@ impl Ctl {
         };
 
         // Press 时的 arm() 只是预开麦，误触/短按取消都不应碰系统音量；只有确认真正进入聆听后才开始 duck。
-        self.volume_ducking.set_active(self.settings().lower_system_volume);
+        let settings = self.settings();
+        self.volume_ducking
+            .configure(settings.lower_system_volume, settings.retained_system_volume_fraction());
         Some(audio)
     }
 

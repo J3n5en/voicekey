@@ -6,6 +6,8 @@
 
   const s = $derived(app.s!);
   const missing = $derived(s.mic && !app.mics.includes(s.mic));
+  // 设置值和 UI 都直接表示“降低比例”；100% 只改变展示为“静音”，数值本身不做反转。
+  const duckReductionLabel = $derived(s.lowerSystemVolumePercent === 100 ? "静音" : `−${s.lowerSystemVolumePercent}%`);
 
   onMount(() => {
     refreshMics();
@@ -42,7 +44,17 @@
 <h3>系统音频</h3>
 <div class="group">
   <div class="row">
-    <div class="lbl">录音时降低系统音量<small>暂时降低其他系统声音，录音结束后自动恢复</small></div>
-    <button class="sw" class:on={s.lowerSystemVolume} onclick={() => save({ lowerSystemVolume: !s.lowerSystemVolume })} aria-label="录音时降低系统音量"></button>
+    <div class="lbl">录音时降低音量<small>减少背景声音的干扰，结束后自动恢复</small></div>
+    {#if s.lowerSystemVolume}
+      <!-- 录音中拖动比例会即时生效；worker 从当前实际音量平滑重定向到新目标，不等待当前过渡完成。 -->
+      <input class="duck-range" type="range" min="20" max="100" step="5" value={s.lowerSystemVolumePercent} oninput={(e) => save({ lowerSystemVolumePercent: +e.currentTarget.value })} aria-label="录音时降低音量比例" aria-valuetext={s.lowerSystemVolumePercent === 100 ? "静音" : `降低 ${s.lowerSystemVolumePercent}%`} />
+      <b class="duck-value">{duckReductionLabel}</b>
+    {/if}
+    <button class="sw" class:on={s.lowerSystemVolume} onclick={() => save({ lowerSystemVolume: !s.lowerSystemVolume })} aria-label="录音时降低音量"></button>
   </div>
 </div>
+
+<style>
+  .duck-range { width: 160px; accent-color: var(--accent); }
+  .duck-value { width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+</style>

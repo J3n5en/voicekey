@@ -4,8 +4,15 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-const FADE_STEPS: usize = 18;
-const FADE_FRAME: Duration = Duration::from_millis(20);
+const FADE_FRAME_MS: usize = 20;
+const FADE_FRAME: Duration = Duration::from_millis(FADE_FRAME_MS as u64);
+const FADE_MIN_MS: f32 = 250.0;
+const FADE_MAX_MS: f32 = 450.0;
+const FADE_MIN_RELATIVE_TRAVEL: f32 = 0.10;
+const FADE_MAX_RELATIVE_TRAVEL: f32 = 0.90;
+// 首帧收到命令后立即写入，所以 N 步只有 N-1 个等待间隔；20ms 粒度下实际钳在约 260..440ms，避免超过 450ms 上限。
+const MIN_FADE_STEPS: usize = 14;
+const MAX_FADE_STEPS: usize = 23;
 const HOLD_POLL: Duration = Duration::from_millis(120);
 const VOLUME_EPSILON: f32 = 0.002;
 
@@ -102,6 +109,7 @@ struct Transition {
     start: OutputVolumeSnapshot,
     target: OutputVolumeSnapshot,
     step: usize,
+    total_steps: usize,
 }
 
 struct DuckState {
@@ -141,6 +149,22 @@ impl DuckState {
             // stop 是一个明确的会话边界：下一次 start 可以重新以用户当前音量为基线。
             self.yielded = false;
         }
+    }
+
+    fn configure(&mut self, active: bool, fraction: f32) {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let fraction_changed = (self.fraction - fraction).abs() > VOLUME_EPSILON;
+        let active_changed = self.active != active;
+        self.fraction = fraction;
+
+        if active_changed {
+            self.set_active(active);
+        } else if active && fraction_changed && !self.yielded {
+            // 只重定向 VoiceKey 仍拥有的过渡；下一 tick 会先核对实际音量，用户手调后不会被重新抢回。
+            self.transition = None;
+            self.duck_settled = false;
+        }
+        // active=false 时只记住下次比例；正在进行的恢复必须继续回 original，不能被 slider 改写目标。
     }
 
     fn quiescent(&self) -> bool {
@@ -262,10 +286,12 @@ impl DuckState {
         if lease.applied.matches(&target) {
             return true;
         }
+        let total_steps = fade_steps(&lease.original, &lease.applied, &target);
         self.transition = Some(Transition {
             start: lease.applied.clone(),
             target,
             step: 0,
+            total_steps,
         });
         false
     }
@@ -280,7 +306,7 @@ impl DuckState {
         };
 
         transition.step += 1;
-        let linear = transition.step as f32 / FADE_STEPS as f32;
+        let linear = transition.step as f32 / transition.total_steps as f32;
         let progress = linear * linear * (3.0 - 2.0 * linear);
         let desired = transition
             .start
@@ -298,7 +324,7 @@ impl DuckState {
                 return Advance::Failed;
             }
         }
-        if transition.step >= FADE_STEPS {
+        if transition.step >= transition.total_steps {
             self.transition = None;
             Advance::Finished
         } else {
@@ -317,12 +343,42 @@ impl DuckState {
     }
 
     fn shutdown<B: Backend>(&mut self, backend: &mut B) {
-        // 进程退出没有时间做 360ms 动画；只在仍拥有音量时立即恢复，避免 VoiceKey 退出后把系统永久留在低音量。
+        // 进程退出没有时间等待最长约 450ms 的动态动画；只在仍拥有音量时立即恢复，避免永久留在低音量。
         self.restore_immediately(backend);
         self.lease = None;
         self.transition = None;
         self.duck_settled = false;
     }
+}
+
+/// 根据“这一次真正还要移动多少”决定动画时长，而不是直接看 slider 的静态百分比。
+///
+/// 距离始终除以本轮首次接管时的 original：因此初次 duck、恢复、录音中改比例和中途反向都以同一基线衡量，
+/// 不会把已经压低后的中间值当成新基线。相对路程 10%..90% 线性映射到目标 250..450ms，超出范围钳住；
+/// 这样大幅压低更柔和，而只改一点比例或刚开始就反向时不会拖着跑一段过长的动画。
+fn fade_steps(
+    original: &OutputVolumeSnapshot,
+    start: &OutputVolumeSnapshot,
+    target: &OutputVolumeSnapshot,
+) -> usize {
+    let relative_travel = original
+        .values
+        .iter()
+        .zip(&start.values)
+        .zip(&target.values)
+        .filter_map(|((original, start), target)| {
+            (original.value > VOLUME_EPSILON)
+                .then_some((target.value - start.value).abs() / original.value)
+        })
+        .fold(0.0_f32, f32::max);
+    let relative_travel = relative_travel.clamp(FADE_MIN_RELATIVE_TRAVEL, FADE_MAX_RELATIVE_TRAVEL);
+    let progress = (relative_travel - FADE_MIN_RELATIVE_TRAVEL)
+        / (FADE_MAX_RELATIVE_TRAVEL - FADE_MIN_RELATIVE_TRAVEL);
+    let duration_ms = FADE_MIN_MS + (FADE_MAX_MS - FADE_MIN_MS) * progress;
+
+    // 第 1 帧会立即执行；20ms 无法精确表达 250/450ms，因此实际完成时间量化为约 260..440ms。
+    // 上限选择向下钳制而不是放到 460ms，是为了保证“450ms 最长目标”不会再次显得拖拉。
+    ((duration_ms / FADE_FRAME_MS as f32).ceil() as usize + 1).clamp(MIN_FADE_STEPS, MAX_FADE_STEPS)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,6 +390,7 @@ enum Advance {
 
 enum Command {
     SetActive(bool),
+    Configure { active: bool, fraction: f32 },
     Shutdown,
 }
 
@@ -358,6 +415,11 @@ impl OutputVolumeDucker {
 
     pub fn set_active(&self, active: bool) {
         let _ = self.tx.send(Command::SetActive(active));
+    }
+
+    /// 原子更新启用状态和相对音量比例，避免设置页快速操作时短暂套用旧参数。
+    pub fn configure(&self, active: bool, fraction: f32) {
+        let _ = self.tx.send(Command::Configure { active, fraction });
     }
 }
 
@@ -407,6 +469,10 @@ fn apply_command<B: Backend>(cmd: Command, state: &mut DuckState, backend: &mut 
     match cmd {
         Command::SetActive(active) => {
             state.set_active(active);
+            false
+        }
+        Command::Configure { active, fraction } => {
+            state.configure(active, fraction);
             false
         }
         Command::Shutdown => {
@@ -507,17 +573,139 @@ mod tests {
     }
 
     #[test]
+    fn fade_duration_scales_with_actual_relative_travel() {
+        let original = snapshot("speaker", 0.8);
+
+        // 10% 路程落在最短档；50% 居中；70%（默认保留 30%）约 400ms；90% 到最长档。
+        assert_eq!(
+            fade_steps(&original, &original, &snapshot("speaker", 0.72)),
+            14
+        );
+        assert_eq!(
+            fade_steps(&original, &original, &snapshot("speaker", 0.4)),
+            19
+        );
+        assert_eq!(
+            fade_steps(&original, &original, &snapshot("speaker", 0.24)),
+            21
+        );
+        assert_eq!(
+            fade_steps(&original, &original, &snapshot("speaker", 0.08)),
+            23
+        );
+
+        // 已经压低后只微调 5% 原始音量时，按实际剩余路程走最短档，而不是按 slider 数字重跑长动画。
+        assert_eq!(
+            fade_steps(
+                &original,
+                &snapshot("speaker", 0.24),
+                &snapshot("speaker", 0.28),
+            ),
+            14
+        );
+    }
+
+    #[test]
     fn smooth_duck_and_restore() {
         let mut backend = FakeBackend::new("speaker", 0.8);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.24).abs() < 0.003);
 
         state.set_active(false);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
         assert!(state.lease.is_none());
+    }
+
+    #[test]
+    fn full_reduction_reaches_zero_and_restores_original() {
+        let mut backend = FakeBackend::new("speaker", 0.8);
+        let mut state = DuckState::new(0.0);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!(backend.volume("speaker").abs() < 0.003);
+
+        state.set_active(false);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
+        assert!(state.lease.is_none());
+    }
+
+    #[test]
+    fn changing_fraction_after_duck_keeps_original_baseline() {
+        let mut backend = FakeBackend::new("speaker", 0.8);
+        let mut state = DuckState::new(0.3);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.24).abs() < 0.003);
+
+        state.configure(true, 0.5);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.4).abs() < 0.003);
+
+        state.set_active(false);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
+    }
+
+    #[test]
+    fn changing_fraction_mid_fade_retargets_without_ratchet() {
+        let mut backend = FakeBackend::new("speaker", 0.8);
+        let mut state = DuckState::new(0.3);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, 4);
+        assert!(backend.volume("speaker") < 0.8);
+
+        state.configure(true, 0.5);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.4).abs() < 0.003);
+
+        state.set_active(false);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
+    }
+
+    #[test]
+    fn fraction_change_after_manual_volume_change_does_not_reclaim_control() {
+        let mut backend = FakeBackend::new("speaker", 0.8);
+        let mut state = DuckState::new(0.3);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+
+        // 用户先按系统音量键、设置页紧接着改比例；即使 worker 还没轮询到用户修改，也必须让权。
+        backend.set_user_volume("speaker", 0.55);
+        state.configure(true, 0.5);
+        ticks(&mut state, &mut backend, 4);
+        assert!(state.yielded);
+        assert!(state.lease.is_none());
+        assert!((backend.volume("speaker") - 0.55).abs() < 0.003);
+
+        // 只有明确结束再开始下一次录音，才允许用新比例重新接管。
+        state.set_active(false);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.275).abs() < 0.003);
+    }
+
+    #[test]
+    fn fraction_change_during_restore_does_not_move_restore_target() {
+        let mut backend = FakeBackend::new("speaker", 0.8);
+        let mut state = DuckState::new(0.3);
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+
+        state.set_active(false);
+        ticks(&mut state, &mut backend, 4);
+        state.configure(false, 0.5);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
+        assert!(state.lease.is_none());
+
+        state.set_active(true);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
+        assert!((backend.volume("speaker") - 0.4).abs() < 0.003);
     }
 
     #[test]
@@ -525,17 +713,17 @@ mod tests {
         let mut backend = FakeBackend::new("speaker", 0.8);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
 
         state.set_active(false);
         ticks(&mut state, &mut backend, 5);
         assert!(backend.volume("speaker") > 0.24);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.24).abs() < 0.003);
 
         state.set_active(false);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
     }
 
@@ -556,7 +744,7 @@ mod tests {
         state.set_active(true);
         ticks(&mut state, &mut backend, 2);
         state.set_active(false);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
 
         // 多次反向只能改变当前过渡起点，最初 0.8 的 original lease 不能被中间值替换。
         assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
@@ -568,7 +756,7 @@ mod tests {
         let mut backend = FakeBackend::new("speaker", 0.8);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
 
         backend.set_user_volume("speaker", 0.5);
         state.tick(&mut backend);
@@ -579,7 +767,7 @@ mod tests {
 
         state.set_active(false);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.15).abs() < 0.003);
     }
 
@@ -603,7 +791,7 @@ mod tests {
         let mut backend = FakeBackend::new("speaker", 0.8);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
 
         state.set_active(false);
         ticks(&mut state, &mut backend, 4);
@@ -618,7 +806,7 @@ mod tests {
         let mut backend = FakeBackend::quantized("speaker", 0.8, 0.05);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.25).abs() < 0.003);
         assert!(state.duck_settled);
 
@@ -627,7 +815,7 @@ mod tests {
         assert_eq!(backend.writes, writes, "量化后的实际值不能触发重复 fade");
 
         state.set_active(false);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
         assert!(state.lease.is_none());
     }
@@ -637,7 +825,7 @@ mod tests {
         let mut backend = FakeBackend::new("speaker", 0.8);
         let mut state = DuckState::new(0.3);
         state.set_active(true);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
 
         backend
             .devices
@@ -645,7 +833,7 @@ mod tests {
         backend.default = "headset".into();
         state.tick(&mut backend);
         assert!((backend.volume("speaker") - 0.8).abs() < 0.003);
-        ticks(&mut state, &mut backend, FADE_STEPS);
+        ticks(&mut state, &mut backend, MAX_FADE_STEPS);
         assert!((backend.volume("headset") - 0.18).abs() < 0.003);
     }
 }
