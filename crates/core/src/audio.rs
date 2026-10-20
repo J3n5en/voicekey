@@ -9,6 +9,8 @@ use tokio::sync::mpsc;
 mod devices;
 #[cfg(target_os = "macos")]
 pub use devices::watch_microphones;
+#[cfg(target_os = "macos")]
+pub mod volume;
 
 pub const FRAME: usize = 320;
 /// 语音前垫的静音，给服务端 VAD 起音
