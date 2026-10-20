@@ -90,6 +90,8 @@ pub struct Settings {
     pub streaming: bool,
     pub live_text: bool,
     pub mic: String,
+    /// 录音时把系统输出音量设为该值（0–100）；0 表示不调整。仅 macOS 生效
+    pub volume: u8,
     /// 多渠道模式下同时识别的渠道（至少 2 个）
     pub multi: Vec<Channel>,
     /// 候选框上次选中的渠道，下次默认聚焦
@@ -114,6 +116,7 @@ impl Default for Settings {
             streaming: true,
             live_text: true,
             mic: String::new(),
+            volume: 15,
             multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
             last_pick: None,
             pick_counts: HashMap::new(),
@@ -150,6 +153,7 @@ impl Settings {
             self.hold_key = voicekey_platform::hold_keys()[0].id.into();
         }
         self.silence = self.silence.clamp(1.0, 5.0);
+        self.volume = self.volume.min(100);
         let engines = Channel::engines();
         let mut multi: Vec<Channel> = engines.iter().copied().filter(|c| self.multi.contains(c)).collect();
         if multi.len() < 2 {

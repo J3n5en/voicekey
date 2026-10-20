@@ -11,6 +11,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tauri::async_runtime::JoinHandle;
 use voicekey_core::audio::Recorder;
+#[cfg(target_os = "macos")]
+use voicekey_core::audio::volume::RecordingVolume;
 use voicekey_core::{BaiduEngine, DoubaoEngine, Engine, IflyEngine, QwenEngine, SogouEngine, WeTypeEngine};
 use voicekey_platform::{self as pf, Special, Typer};
 
@@ -145,6 +147,9 @@ pub struct Ctl {
     flush_pending: bool,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
+    /// 录音时压低系统输出音量（仅 macOS）；录音结束后还原
+    #[cfg(target_os = "macos")]
+    volume: RecordingVolume,
 }
 
 /// 预开麦：先环形缓存，确认录音后转成实时帧流
@@ -202,6 +207,8 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         last_emit: Instant::now(),
         flush_pending: false,
         primed: None,
+        #[cfg(target_os = "macos")]
+        volume: RecordingVolume::default(),
     };
     tauri::async_runtime::spawn(ctl.run(rx));
 }
@@ -363,6 +370,8 @@ impl Ctl {
         }
         let tx = self.tx.clone();
         let mic = self.settings().mic;
+        #[cfg(target_os = "macos")]
+        self.lower_volume();
         match Recorder::start(Some(&mic), move |v| {
             let _ = tx.send(Msg::Level(v));
         }) {
@@ -375,6 +384,9 @@ impl Ctl {
                 Some(audio)
             }
             Err(e) => {
+                // 没开成麦就不该停在压低状态
+                #[cfg(target_os = "macos")]
+                self.restore_volume();
                 ui::hud_error(&self.app, &format!("{e:#}"));
                 None
             }
@@ -389,9 +401,14 @@ impl Ctl {
         self.meter = None;
         let tx = self.tx.clone();
         let mic = self.settings().mic;
+        #[cfg(target_os = "macos")]
+        self.lower_volume();
         let Ok((recorder, mut audio)) = Recorder::start(Some(&mic), move |v| {
             let _ = tx.send(Msg::Level(v));
         }) else {
+            // 没开成麦就不该停在压低状态
+            #[cfg(target_os = "macos")]
+            self.restore_volume();
             if self.mode == Mode::Idle {
                 self.refresh_meter();
             }
@@ -425,6 +442,9 @@ impl Ctl {
             return;
         }
         self.primed = None;
+        // 取消预开麦，还原音量
+        #[cfg(target_os = "macos")]
+        self.restore_volume();
         if self.mode == Mode::Idle {
             self.refresh_meter();
         }
@@ -459,7 +479,25 @@ impl Ctl {
         if let Some(mut r) = self.recorder.take() {
             r.stop();
         }
+        #[cfg(target_os = "macos")]
+        self.restore_volume();
         ui::set_tray_active(&self.app, false);
+    }
+
+    /// 按设置压低系统输出音量；未开启或目标为 0 时不动。仅 macOS
+    #[cfg(target_os = "macos")]
+    fn lower_volume(&self) {
+        let target = self.settings().volume as f32 / 100.0;
+        if target > 0.0 && !self.volume.lower(target) {
+            eprintln!("录音时调整音量：压低系统输出音量失败");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn restore_volume(&self) {
+        if self.volume.is_lowered() && !self.volume.restore() {
+            eprintln!("录音时调整音量：还原系统输出音量失败");
+        }
     }
 
     fn spawn_engine(&mut self, ch: Channel, seg: usize, audio: voicekey_core::Audio) {
