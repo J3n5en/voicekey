@@ -27,6 +27,8 @@ pub enum Msg {
     CompareStop,
     Meter(bool),
     RefreshMeter,
+    /// 设置页在录音中即时调整 ducking；worker 自己负责所有权判断、平滑重定向和安全恢复。
+    VolumeDucking { enabled: bool, reduction_percent: u8 },
     MicrophonesChanged(Vec<String>),
 }
 
@@ -124,6 +126,7 @@ pub struct Ctl {
     recorder: Option<Recorder>,
     meter: Option<Recorder>,
     meter_enabled: bool,
+    volume_ducking: pf::OutputVolumeDucker,
     tasks: Vec<JoinHandle<()>>,
     gen: u64,
     timeout_token: u64,
@@ -162,6 +165,7 @@ const PREROLL: usize = 50;
 
 pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) {
     let st = app.state::<AppState>();
+    let volume_fraction = st.settings.read().unwrap().retained_system_volume_fraction();
     let mut engines: HashMap<Channel, Arc<dyn Engine>> = HashMap::new();
     engines.insert(Channel::Doubao, Arc::new(DoubaoEngine));
     engines.insert(Channel::Wetype, Arc::new(WeTypeEngine::default()));
@@ -182,6 +186,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         recorder: None,
         meter: None,
         meter_enabled: false,
+        volume_ducking: pf::OutputVolumeDucker::new(volume_fraction),
         tasks: Vec::new(),
         gen: 0,
         timeout_token: 0,
@@ -262,6 +267,10 @@ impl Ctl {
                 self.refresh_meter();
             }
             Msg::RefreshMeter => self.refresh_meter(),
+            Msg::VolumeDucking { enabled, reduction_percent } => {
+                // 设置/UI 统一使用“降低比例”；worker 只接收最终保留比例，因此只在这里做一次补数换算。
+                self.volume_ducking.configure(enabled && self.recording, 1.0 - reduction_percent as f32 / 100.0)
+            }
             Msg::MicrophonesChanged(mics) => {
                 let _ = self.app.emit("microphones", mics);
                 self.refresh_meter();
@@ -358,27 +367,33 @@ impl Ctl {
 
     fn start_recorder(&mut self) -> Option<voicekey_core::Audio> {
         self.meter = None;
-        if let Some(audio) = self.take_primed() {
-            return Some(audio);
-        }
-        let tx = self.tx.clone();
-        let mic = self.settings().mic;
-        match Recorder::start(Some(&mic), move |v| {
-            let _ = tx.send(Msg::Level(v));
-        }) {
-            Ok((r, audio)) => {
-                self.recorder = Some(r);
-                self.recording = true;
-                self.heard_voice = false;
-                self.last_voice = Instant::now();
-                ui::set_tray_active(&self.app, true);
-                Some(audio)
-            }
-            Err(e) => {
-                ui::hud_error(&self.app, &format!("{e:#}"));
-                None
-            }
-        }
+        let audio = if let Some(audio) = self.take_primed() {
+            audio
+        } else {
+            let tx = self.tx.clone();
+            let mic = self.settings().mic;
+            let (r, audio) = match Recorder::start(Some(&mic), move |v| {
+                let _ = tx.send(Msg::Level(v));
+            }) {
+                Ok(v) => v,
+                Err(e) => {
+                    ui::hud_error(&self.app, &format!("{e:#}"));
+                    return None;
+                }
+            };
+            self.recorder = Some(r);
+            self.recording = true;
+            self.heard_voice = false;
+            self.last_voice = Instant::now();
+            ui::set_tray_active(&self.app, true);
+            audio
+        };
+
+        // Press 时的 arm() 只是预开麦，误触/短按取消都不应碰系统音量；只有确认真正进入聆听后才开始 duck。
+        let settings = self.settings();
+        self.volume_ducking
+            .configure(settings.lower_system_volume, settings.retained_system_volume_fraction());
+        Some(audio)
     }
 
     /// 快捷键按下即开麦。短按取消或被别的键打断时关掉
@@ -456,6 +471,8 @@ impl Ctl {
         }
         self.recording = false;
         self.auto_stop = false;
+        // 先发恢复意图；若此时还在淡入/淡出，worker 会从当前实际音量平滑反向，而不是排队跑完整段动画。
+        self.volume_ducking.set_active(false);
         if let Some(mut r) = self.recorder.take() {
             r.stop();
         }
