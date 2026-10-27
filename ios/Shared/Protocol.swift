@@ -72,6 +72,7 @@ struct Config: Codable, Equatable {
 
     static let idleChoices = [5, 10, 30, 0]
     private static let doubao = Channel(id: "e", engine: "doubao", name: "豆包", on: false)
+    private static let chatterfly = Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false)
 
     static let initial = Config(
         channels: [
@@ -80,6 +81,7 @@ struct Config: Codable, Equatable {
             Channel(id: "c", engine: "iflytek", name: "讯飞", on: false),
             Channel(id: "d", engine: "baidu", name: "百度", on: false),
             doubao,
+            chatterfly,
         ],
         multi: true, defaultChannel: "a", idleMinutes: 10, lastPick: nil, standby: .pip)
 
@@ -119,12 +121,13 @@ struct Config: Codable, Equatable {
         for i in c.channels.indices where c.channels[i].name == "渠道 \(c.channels[i].id.uppercased())" {
             c.channels[i].name = Self.initial.channels.first { $0.engine == c.channels[i].engine }?.name ?? c.channels[i].name
         }
-        if !c.channels.contains(where: { $0.engine == Self.doubao.engine }) {
-            var channel = Self.doubao
+        for base in [Self.doubao, Self.chatterfly]
+        where !c.channels.contains(where: { $0.engine == base.engine }) {
+            var channel = base
             var suffix = 0
             while c.channels.contains(where: { $0.id == channel.id }) {
                 suffix += 1
-                channel.id = "\(Self.doubao.id)\(suffix)"
+                channel.id = "\(base.id)\(suffix)"
             }
             c.channels.append(channel)
         }

@@ -6,11 +6,15 @@ source versions.env
 CACHE=$PWD/.cache
 OUT=Sources/Pinyin/RimeData
 STAMP="librime $LIBRIME_VERSION ($LIBRIME_COMMIT) rime-ice $RIME_ICE_TAG $(cat rime/* | shasum -a 256 | cut -c1-16) $(shasum -a 256 .cache/zh-hans-t-essay-bgw.gram 2>/dev/null | cut -c1-16)"
-[ "$(cat "$OUT/VERSION" 2>/dev/null)" = "$STAMP" ] && exit 0
+if [ "$(cat "$OUT/VERSION" 2>/dev/null)" = "$STAMP" ]; then exit 0; fi
 mkdir -p "$CACHE"
 
 fetch() { # fetch <url> <file> <sha256>
-    [ -f "$2" ] || curl -fsSL -o "$2" "$1"
+    if ! echo "$3  $2" | shasum -a 256 -c - >/dev/null 2>&1; then
+        rm -f "$2"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 -o "$2.part" "$1"
+        mv -f "$2.part" "$2"
+    fi
     echo "$3  $2" | shasum -a 256 -c - >/dev/null
 }
 fetch "$RIME_MAC_URL" "$CACHE/rime-mac.tar.bz2" "$RIME_MAC_SHA256"

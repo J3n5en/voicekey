@@ -136,7 +136,7 @@ final class ProtocolTests: XCTestCase {
 
     func testConfigChannelResolution() {
         var c = Config.initial
-        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "千问", "讯飞", "百度", "豆包"])
+        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "千问", "讯飞", "百度", "豆包", "Chatterfly"])
         XCTAssertEqual(c.active.map(\.engine), ["wetype"])
         XCTAssertFalse(c.isMulti)
         c.channels[1].on = true
@@ -147,7 +147,8 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(c.active.map(\.id), ["b"])
         XCTAssertEqual(c.resolve(["c", "a"]).map(\.id), ["a"])
         XCTAssertEqual(c.resolve([]).map(\.id), ["b"])
-        XCTAssertEqual(c.channels.last, Channel(id: "e", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(c.channels[4], Channel(id: "e", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(c.channels.last, Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false))
         XCTAssertTrue(c.resolve(["e"]).isEmpty)
         c.channels[4].on = true
         XCTAssertEqual(c.resolve(["e"]).map(\.engine), ["doubao"])
@@ -162,8 +163,8 @@ final class ProtocolTests: XCTestCase {
         old.channels[2].name = "渠道 C"
         old.channels[2].on = true
         let c = old.migrated()
-        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "我的千问", "讯飞", "百度", "豆包"])
-        XCTAssertEqual(c.channels.map { $0.on }, [true, false, true, false, false])
+        XCTAssertEqual(c.channels.map { $0.name }, ["微信", "我的千问", "讯飞", "百度", "豆包", "Chatterfly"])
+        XCTAssertEqual(c.channels.map { $0.on }, [true, false, true, false, false, false])
         let h = try! JSONDecoder().decode([HistoryItem].self, from: Data(#"[{"text":"x","channel":"渠道 D","at":1},{"text":"y","channel":"我的","at":2}]"#.utf8))
         XCTAssertEqual(h.map(\.channel), ["百度", "我的"])
     }
@@ -174,6 +175,7 @@ final class ProtocolTests: XCTestCase {
         let upgraded = old.migrated()
         var expected = old
         expected.channels.append(Channel(id: "e", engine: "doubao", name: "豆包", on: false))
+        expected.channels.append(Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false))
         XCTAssertEqual(upgraded, expected)
         XCTAssertEqual(upgraded.active, old.active)
         XCTAssertEqual(upgraded.enabled, old.enabled)
@@ -191,8 +193,10 @@ final class ProtocolTests: XCTestCase {
             old.defaultChannel = "custom"
             old.lastPick = "custom"
             let upgraded = old.migrated()
-            XCTAssertEqual(upgraded, old)
-            XCTAssertEqual(upgraded.migrated(), old)
+            var expected = old
+            expected.channels.append(Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false))
+            XCTAssertEqual(upgraded, expected)
+            XCTAssertEqual(upgraded.migrated(), expected)
         }
         var old = Config.initial
         old.channels[4].on = true
@@ -200,11 +204,14 @@ final class ProtocolTests: XCTestCase {
         let upgraded = old.migrated()
         XCTAssertEqual(upgraded.channels[4].name, "豆包")
         XCTAssertTrue(upgraded.channels[4].on)
-        XCTAssertEqual(upgraded.channels.count, 5)
+        XCTAssertEqual(upgraded.channels.count, 6)
         XCTAssertEqual(upgraded.migrated(), upgraded)
 
         old.channels = [Channel(id: "a", engine: "doubao", name: "渠道 A", on: true)]
-        XCTAssertEqual(old.migrated().channels, [Channel(id: "a", engine: "doubao", name: "豆包", on: true)])
+        XCTAssertEqual(old.migrated().channels, [
+            Channel(id: "a", engine: "doubao", name: "豆包", on: true),
+            Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false),
+        ])
     }
 
     func testConfigMigrationAvoidsChannelIDCollisions() {
@@ -218,7 +225,8 @@ final class ProtocolTests: XCTestCase {
         var expected = old.channels
         expected[0].name = "千问"
         XCTAssertEqual(Array(upgraded.channels.prefix(2)), expected)
-        XCTAssertEqual(upgraded.channels.last, Channel(id: "e2", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(upgraded.channels[2], Channel(id: "e2", engine: "doubao", name: "豆包", on: false))
+        XCTAssertEqual(upgraded.channels.last, Channel(id: "f", engine: "chatterfly", name: "Chatterfly", on: false))
         XCTAssertEqual(upgraded.active.map(\.id), old.active.map(\.id))
         XCTAssertEqual(upgraded.migrated(), upgraded)
     }

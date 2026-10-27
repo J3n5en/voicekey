@@ -7,13 +7,18 @@ ROOT=$PWD
 CACHE=$ROOT/.cache
 OUT=RimeFFI.xcframework
 STAMP="$LIBRIME_COMMIT boost-$BOOST_VERSION $(shasum -a 256 build-xcframework.sh | cut -c1-16)"
-[ "$(cat "$OUT/.stamp" 2>/dev/null)" = "$STAMP" ] && exit 0
+if [ "$(cat "$OUT/.stamp" 2>/dev/null)" = "$STAMP" ]; then exit 0; fi
 mkdir -p "$CACHE"
 
 BOOST=$CACHE/boost_${BOOST_VERSION//./_}
 if [ ! -d "$BOOST/boost" ]; then
     tarball=$CACHE/boost_${BOOST_VERSION//./_}.tar.gz
-    [ -f "$tarball" ] || curl -fsSL -o "$tarball" "https://archives.boost.io/release/$BOOST_VERSION/source/$(basename "$tarball")"
+    if ! echo "$BOOST_SHA256  $tarball" | shasum -a 256 -c - >/dev/null 2>&1; then
+        rm -f "$tarball"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+            -o "$tarball.part" "https://archives.boost.io/release/$BOOST_VERSION/source/$(basename "$tarball")"
+        mv -f "$tarball.part" "$tarball"
+    fi
     echo "$BOOST_SHA256  $tarball" | shasum -a 256 -c -
     tar -xzf "$tarball" -C "$CACHE" "$(basename "$BOOST")/boost"
 fi
