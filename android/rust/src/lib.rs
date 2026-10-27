@@ -46,6 +46,7 @@ fn engine(name: &str) -> Option<Box<dyn Engine>> {
         "baidu" => Box::new(BaiduEngine),
         "sogou" => Box::new(SogouEngine),
         "iflytek" => Box::new(IflyEngine),
+        "chatterfly" => Box::new(ChatterflyEngine),
         "wetypeoffline" => Box::new(LocalEngine { dir: wtoffline_dir() }),
         _ => return None,
     })

@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod baidu;
+pub mod chatterfly;
 pub mod doubao;
 pub mod opus;
 pub mod pb;
@@ -26,6 +27,7 @@ pub trait Engine: Send + Sync {
 }
 
 pub use baidu::BaiduEngine;
+pub use chatterfly::ChatterflyEngine;
 pub use doubao::DoubaoEngine;
 pub use qwen::QwenEngine;
 pub use sogou::SogouEngine;

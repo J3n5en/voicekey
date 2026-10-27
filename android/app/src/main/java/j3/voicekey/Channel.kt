@@ -14,6 +14,7 @@ enum class Channel(
     Baidu("baidu", "百度输入法", "百度", "百度输入法官方云端识别，中文流式出字。", R.drawable.logo_baidu),
     Sogou("sogou", "搜狗输入法", "搜狗", "搜狗输入法官方云端识别，中文流式出字。", R.drawable.logo_sogou),
     Iflytek("iflytek", "讯飞输入法", "讯飞", "讯飞输入法官方云端识别，中文流式出字。", R.drawable.logo_iflytek),
+    Chatterfly("chatterfly", "Chatterfly", "Chatterfly", "Chatterfly 官方云端识别，中文流式出字。", R.drawable.logo_chatterfly),
     WetypeOffline("wetypeoffline", "微信离线", "微信离线", "微信输入法官方离线模型，本机运行，断网可用，不上传音频。", R.drawable.logo_wetype, true);
 
     val ready: Boolean get() = !offline || Native.wtofflineReady()

@@ -35,6 +35,7 @@ unsafe fn engine(name: *const c_char) -> Option<Box<dyn Engine>> {
         b"baidu" => Box::new(BaiduEngine),
         b"sogou" => Box::new(SogouEngine),
         b"iflytek" => Box::new(IflyEngine),
+        b"chatterfly" => Box::new(ChatterflyEngine),
         _ => return None,
     })
 }

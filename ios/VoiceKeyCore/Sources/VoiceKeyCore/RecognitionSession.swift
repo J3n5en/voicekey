@@ -4,7 +4,7 @@ import VoiceKeyCoreFFI
 public let coreVersion = String(cString: vk_version())
 
 public enum RecognitionEngine: String, CaseIterable, Sendable {
-    case doubao, wetype, qwen, baidu, sogou, iflytek
+    case doubao, wetype, qwen, baidu, sogou, iflytek, chatterfly
 
     /// 预热（建连、取凭据等），不阻塞
     public func prewarm() { _ = vk_prewarm(rawValue) }
