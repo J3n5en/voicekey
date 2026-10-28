@@ -304,6 +304,7 @@ impl Ctl {
                 _ => self.begin(false),
             },
             HotEvent::Release => {
+                // 点按录音由静音/Tap 结束；同键被判为长按后的 Release 不应改写点按语义。
                 if !self.auto_stop && self.mode != Mode::Compare {
                     self.end()
                 }
@@ -814,6 +815,8 @@ impl Ctl {
         for t in self.tasks.drain(..) {
             t.abort();
         }
+        // cancel 可能发生在预开麦阶段；丢弃 Primed 会经 Recorder::Drop 同步停麦。
+        self.primed = None;
         self.stop_recording();
         if let Some(mut t) = self.typer.take() {
             t.finish();
