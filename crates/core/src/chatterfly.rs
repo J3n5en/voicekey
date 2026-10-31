@@ -73,7 +73,10 @@ fn config(token: &str) -> Value {
             },
         },
         "interim_results": true,
-        "single_utterance": true,
+        // 必须关闭：开启后服务端用 VAD 自行判句尾，用户按下麦克风到开口之间的
+        // 前导静音会被当成「一句话说完了」，直接回 END_OF_SINGLE_UTTERANCE 并断开连接。
+        // 由我们发 "{}" 决定何时收尾（服务端仍会返回 is_final 结果和标点）。
+        "single_utterance": false,
     });
     if !token.is_empty() {
         cfg["config"]["auth_token"] = json!(token);
