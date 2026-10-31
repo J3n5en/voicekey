@@ -5709,6 +5709,7 @@ dependencies = [
  "arboard",
  "block2",
  "core-foundation 0.10.1",
+ "coreaudio-sys",
  "objc2",
  "objc2-app-kit",
  "objc2-av-foundation",
