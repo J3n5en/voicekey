@@ -142,8 +142,8 @@ jobs:
               echo "::error::minor 与 patch 必须 ≤ 99，当前是 $GITHUB_REF_NAME"; exit 1
             fi
             CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-            if (( CODE <= 6 )); then
-              echo "::error::versionCode $CODE 不大于现有的 6，无法覆盖升级"; exit 1
+            if (( CODE <= 7 )); then
+              echo "::error::versionCode $CODE 不大于已发布的 7（android-v0.5.1），无法覆盖升级"; exit 1
             fi
             echo "CODE=$CODE" >> "$GITHUB_ENV"
           else

@@ -3,8 +3,8 @@
   import { call, type JevConfig, type JevTested } from "../lib/api";
 
   const MODES: [JevConfig["mode"], string][] = [["off", "关闭"], ["official", "官方格式"], ["yce", "自定义格式"]];
-  // 旧设置没有 jev 字段；输入框绑本地草稿，失焦才写回设置
-  let d = $state<JevConfig>({ mode: "off", key: "", endpoint: "", model: "", pool: "", ...app.s!.jev });
+  // 输入框绑本地草稿，失焦才写回设置
+  let d = $state<JevConfig>({ ...app.s!.jev });
   let busy = $state(false);
   let result = $state<{ ok: boolean; text: string } | null>(null);
 

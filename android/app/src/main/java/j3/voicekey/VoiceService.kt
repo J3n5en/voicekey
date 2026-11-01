@@ -107,8 +107,7 @@ class VoiceService : AccessibilityService() {
         } ?: return false
         var n: AccessibilityNodeInfo? = hit
         while (n != null && !n.isClickable) n = n.parent
-        val clicked = n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
-        return clicked
+        return n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
     }
 
     private fun editorSend(): Boolean {
