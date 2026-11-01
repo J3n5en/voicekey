@@ -97,8 +97,111 @@ jobs:
           name: VoiceKey-${{ runner.os }}
           path: dist/*
 
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # runner 预装了多个 NDK，build-rust.sh 未指定时会取最高版本；这里显式固定，与 build.gradle.kts 的 ndkVersion 保持一致
+      - name: Android SDK components
+        run: |
+          # yes 在 sdkmanager 读完后收到 SIGPIPE，pipefail 会把它当失败，故此处关掉；sdkmanager 自身失败仍由 -e 捕获
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.1.12297006" "platforms;android-36" "build-tools;36.0.0" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+          workspaces: android/rust -> target
+
+      - run: cargo install cargo-ndk --locked
+
+      # versionCode = major*10000 + minor*100 + patch；10# 防止 08 这类前导零被当成八进制
+      - name: Version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "::error::tag 必须形如 vX.Y.Z，当前是 $GITHUB_REF_NAME"; exit 1
+            fi
+            MAJOR=$((10#${BASH_REMATCH[1]})); MINOR=$((10#${BASH_REMATCH[2]})); PATCH=$((10#${BASH_REMATCH[3]}))
+            if (( MINOR > 99 || PATCH > 99 )); then
+              echo "::error::minor 与 patch 必须 ≤ 99，当前是 $GITHUB_REF_NAME"; exit 1
+            fi
+            CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+            if (( CODE <= 6 )); then
+              echo "::error::versionCode $CODE 不大于现有的 6，无法覆盖升级"; exit 1
+            fi
+            echo "CODE=$CODE" >> "$GITHUB_ENV"
+          else
+            VER="0.0.0"
+          fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      # tag 构建必须用正式签名；手动触发的包只作为 artifact，不进 Release，允许 debug 签名
+      - name: Signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+              echo "::error::缺少 Android 签名 secrets，tag 构建不能发 debug 签名包"; exit 1
+            fi
+            echo "未配置 Android 签名 secrets，本次使用 debug 签名（不会进入 Release）"
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release.keystore
+          cat > android/keystore.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Build
+        run: |
+          PROPS=""
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            PROPS="-PvkVersionCode=$CODE -PvkVersionName=$VER -PvkRequireSigning=true"
+          fi
+          android/build-rust.sh
+          cd android && ./gradlew :app:assembleRelease --no-daemon $PROPS
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          APK="VoiceKey-$VER-android.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/$APK"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            jq -n --argjson c "$CODE" --arg n "$VER" \
+              --arg u "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$APK" \
+              --arg s "$(sha256sum "dist/$APK" | cut -d' ' -f1)" --argjson z "$(stat -c%s "dist/$APK")" \
+              '{versionCode: $c, versionName: $n, url: $u, sha256: $s, size: $z}' > dist/android.json
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceKey-Android
+          path: dist/*
+
   release:
-    needs: build
+    needs: [build, android]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -126,4 +229,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "VoiceKey $GITHUB_REF_NAME" --generate-notes --latest \
-            --notes "macOS 包未经 Apple 公证（自签名）：首次安装时打开 DMG 将 VoiceKey 拖到「应用程序」，运行前在终端执行 \`xattr -dr com.apple.quarantine /Applications/VoiceKey.app\`；之后可在应用内（设置 → 通用，或菜单栏）直接更新。Windows 提供安装程序（setup.exe）与 MSI 两种格式。"
+            --notes "macOS 包未经 Apple 公证（自签名）：首次安装时打开 DMG 将 VoiceKey 拖到「应用程序」，运行前在终端执行 \`xattr -dr com.apple.quarantine /Applications/VoiceKey.app\`；之后可在应用内（设置 → 通用，或菜单栏）直接更新。Windows 提供安装程序（setup.exe）与 MSI 两种格式。Android 提供签名 APK（arm64）：首次安装需允许安装未知应用，之后可在应用内（设置 → 关于与更新）直接更新。"

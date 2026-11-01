@@ -6,6 +6,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// CI 推 tag 时经 -PvkVersionCode / -PvkVersionName 传入；本地构建不传则用下面的默认值
+val vkCode = providers.gradleProperty("vkVersionCode").orNull?.toInt() ?: 7
+val vkName = providers.gradleProperty("vkVersionName").orNull ?: "0.5.1"
+val vkRequireSigning = providers.gradleProperty("vkRequireSigning").orNull == "true"
+
 android {
     namespace = "j3.voicekey"
     compileSdk = 36
@@ -15,14 +20,15 @@ android {
         applicationId = "do.j3.voicekey"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.5.1"
+        versionCode = vkCode
+        versionName = vkName
         ndk { abiFilters += "arm64-v8a" }
     }
 
     val ks = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { f ->
         Properties().apply { f.inputStream().use { load(it) } }
     }
+    if (vkRequireSigning && ks == null) throw GradleException("vkRequireSigning=true 但缺少 keystore.properties，拒绝用 debug 签名出包")
     signingConfigs {
         if (ks != null) create("release") {
             storeFile = rootProject.file(ks.getProperty("storeFile"))

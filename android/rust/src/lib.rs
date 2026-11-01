@@ -1,5 +1,5 @@
 //! crates/core 的 JNI 接口，对应 Kotlin 的 j3.voicekey.Native
-use jni::objects::{GlobalRef, JClass, JFloatArray, JObject, JString, JValue};
+use jni::objects::{GlobalRef, JClass, JFloatArray, JObject, JObjectArray, JString, JValue};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
 use std::path::PathBuf;
@@ -113,6 +113,17 @@ fn string(env: &mut JNIEnv, s: &JString) -> Option<String> {
     env.get_string(s).ok().map(Into::into)
 }
 
+/// 从 String 对象数组逐个取出内容，任一元素取不出返回 None
+fn strings(env: &mut JNIEnv, arr: &JObjectArray) -> Option<Vec<String>> {
+    let len = env.get_array_length(arr).ok()?;
+    let mut out = Vec::with_capacity(len.max(0) as usize);
+    for i in 0..len {
+        let e = env.get_object_array_element(arr, i).ok()?;
+        out.push(string(env, &JString::from(e))?);
+    }
+    Some(out)
+}
+
 /// 回调 Listener.onEvent(kind, text)，在 Rust 工作线程上调用
 struct Sink(GlobalRef);
 
@@ -215,4 +226,62 @@ pub extern "system" fn Java_j3_voicekey_Native_wtofflineUnpack(mut env: JNIEnv, 
 #[no_mangle]
 pub extern "system" fn Java_j3_voicekey_Native_wtofflineInfo(env: JNIEnv, _: JClass) -> jstring {
     env.new_string(format!("{}\n{}\n{}", pack::URL, pack::SIZE, pack::MD5)).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Jev 智能选择配置自检：可用返回 null，不可用返回原因
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_jevCheck(mut env: JNIEnv, _: JClass, config: JString) -> jstring {
+    let reason = match string(&mut env, &config) {
+        Some(c) => jev::Config::from_json(&c).targets().err(),
+        None => Some("参数错误".to_string()),
+    };
+    match reason {
+        Some(r) => env.new_string(r).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Jev 智能选择：评出最佳候选转写，成功回调 FINAL（Picked JSON），失败回调 ERROR（原因），恰好一次
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_jevPick(
+    mut env: JNIEnv,
+    _: JClass,
+    config: JString,
+    texts: JObjectArray,
+    listener: JObject,
+) {
+    let Ok(cb) = env.new_global_ref(listener) else { return };
+    let sink = Arc::new(Sink(cb));
+    let (Some(c), Some(texts)) = (string(&mut env, &config), strings(&mut env, &texts)) else {
+        return sink.emit(ERROR, "参数错误");
+    };
+    let cfg = jev::Config::from_json(&c);
+    rt().spawn(async move {
+        match jev::pick(&cfg, &texts).await {
+            Ok(p) => sink.emit(FINAL, &p.to_json()),
+            Err(e) => sink.emit(ERROR, &e.to_string()),
+        }
+    });
+}
+
+/// Jev 测试：用内置示例转写真打一次，成功回调 FINAL（Tested JSON），失败回调 ERROR（原因），恰好一次
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_jevTest(
+    mut env: JNIEnv,
+    _: JClass,
+    config: JString,
+    listener: JObject,
+) {
+    let Ok(cb) = env.new_global_ref(listener) else { return };
+    let sink = Arc::new(Sink(cb));
+    let Some(c) = string(&mut env, &config) else {
+        return sink.emit(ERROR, "参数错误");
+    };
+    let cfg = jev::Config::from_json(&c);
+    rt().spawn(async move {
+        match jev::test(&cfg).await {
+            Ok(t) => sink.emit(FINAL, &t.to_json()),
+            Err(e) => sink.emit(ERROR, &e.to_string()),
+        }
+    });
 }

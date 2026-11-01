@@ -34,4 +34,13 @@ object Native {
 
     /** 下载地址、字节数、MD5，换行分隔 */
     external fun wtofflineInfo(): String
+
+    /** Jev 智能选择配置自检；可用返回 null，否则返回原因文本 */
+    external fun jevCheck(config: String): String?
+
+    /** 恰好回调一次 FINAL 或 ERROR，FINAL 文本为 JSON（Picked：index/alias/ms）；在 Rust 工作线程回调 */
+    external fun jevPick(config: String, texts: Array<String>, listener: Listener)
+
+    /** 恰好回调一次 FINAL 或 ERROR，FINAL 文本为 JSON（Tested：index/text/alias/ms/key）；在 Rust 工作线程回调 */
+    external fun jevTest(config: String, listener: Listener)
 }

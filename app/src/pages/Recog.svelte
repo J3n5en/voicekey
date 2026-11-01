@@ -3,6 +3,7 @@
   import { call, CH, LOCAL, type Channel } from "../lib/api";
   import ChIcon from "../lib/ChIcon.svelte";
   import Compare from "./Compare.svelte";
+  import Jev from "./Jev.svelte";
 
   const s = $derived(app.s!);
   const engines = $derived(app.info!.channels.filter((c) => c !== "all"));
@@ -57,6 +58,7 @@
     </div>
   </button>
 </div>
+{#if s.channel === "all"}<Jev />{/if}
 {#if !app.info!.offline.supported}
   <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
 {/if}

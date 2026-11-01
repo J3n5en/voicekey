@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -53,6 +55,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,8 +65,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private var tick by mutableIntStateOf(0)
@@ -90,11 +95,15 @@ class MainActivity : ComponentActivity() {
         Keep.restore(this)
         tick++
         MicService.start(this)
+        Updater.foreground = true
+        Updater.check(this, manual = false)
+        Updater.resumeConfirm(this)
     }
 
     /** 离开设置页即取消按键录制，免得全局吞键 */
     override fun onPause() {
         super.onPause()
+        Updater.foreground = false
         VoiceService.instance?.let { s -> s.recorder?.let { s.recorder = null; it(null) } }
     }
 }
@@ -206,10 +215,11 @@ private fun Screen(tick: Int, refresh: () -> Unit) {
                         Text(ch.title + if (ch.ready) "" else "（未下载，跳过）")
                     }
                 }
-                Toggle("点一条直接发送", if (pickSend) "点候选上屏并发送，长按候选只上屏、可继续编辑" else "点候选上屏；开启后点一条直接发送，长按上屏编辑", pickSend) {
+                Toggle("选中后自动上屏并发送", if (pickSend) "手动点选和 Jev 自动选中的候选上屏后随即发送；长按候选只上屏、可继续编辑" else "Jev 只高亮推荐的一条，你点它才上屏；手动点选也只上屏不发送", pickSend) {
                     pickSend = it
                     p.pickSend = it
                 }
+                JevSettings()
             }
             Offline()
         }
@@ -255,6 +265,8 @@ private fun Screen(tick: Int, refresh: () -> Unit) {
             OutlinedTextField(trial, { trial = it }, Modifier.fillMaxWidth(), placeholder = { Text("点这里，然后长按${holdName}说话") }, minLines = 3)
         }
 
+        Section("关于与更新") { UpdateSection() }
+
         Hint("本项目通过分析输入法客户端协议实现，仅供学习与个人使用；语音会发送到所选厂商的服务器（离线渠道除外）。")
     }
 }
@@ -270,8 +282,124 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
 }
 
 @Composable
-private fun Hint(text: String, modifier: Modifier = Modifier) =
-    Text(text, modifier, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Hint(text: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) =
+    Text(text, modifier, style = MaterialTheme.typography.bodySmall, color = color)
+
+private data class JevRow(val addr: String, val key: String)
+
+/** jevPool → 行列表：跳过空行、# 注释和 core 也会跳过的坏行（段数不是 2–3 或 key 为空）；alias 丢弃，地址存原文不补全 */
+private fun parseJevPool(text: String): List<JevRow> =
+    text.lines().map(String::trim).filter { it.isNotEmpty() && !it.startsWith("#") }.mapNotNull { line ->
+        val parts = line.split('|').map(String::trim)
+        if (parts.size in 2..3 && parts[1].isNotEmpty()) JevRow(parts.getOrElse(2) { "" }, parts[1]) else null
+    }
+
+/** 行列表 → 多行「别名|key|endpoint」存储格式；key 为空的行不写；别名取地址 host，地址空用 official，重名追加 -2、-3… */
+private fun serializeJevPool(rows: List<JevRow>): String {
+    val seen = mutableMapOf<String, Int>()
+    return rows.mapNotNull { r ->
+        val addr = r.addr.filterNot { it == '|' || it == '\r' || it == '\n' }.trim()
+        val key = r.key.filterNot { it == '|' || it == '\r' || it == '\n' }.trim()
+        if (key.isEmpty()) return@mapNotNull null
+        val base = if (addr.isEmpty()) "official" else
+            runCatching { java.net.URI(if ("://" in addr) addr else "https://$addr").host }.getOrNull()?.takeIf { it.isNotEmpty() } ?: "custom"
+        val n = (seen[base] ?: 0) + 1
+        seen[base] = n
+        "${if (n == 1) base else "$base-$n"}|$key|$addr"
+    }.joinToString("\n")
+}
+
+/** 多渠道定稿后用 Jev 评出最佳一条自动上屏；配置存本机，测试结果在回调里回主线程 */
+@Composable
+private fun JevSettings() {
+    val p = App.prefs
+    val main = remember { Handler(Looper.getMainLooper()) }
+    var mode by remember { mutableStateOf(p.jevMode) }
+    var key by remember { mutableStateOf(p.jevKey) }
+    var endpoint by remember { mutableStateOf(p.jevEndpoint) }
+    var model by remember { mutableStateOf(p.jevModel) }
+    val rows = remember { mutableStateListOf<JevRow>().apply { addAll(parseJevPool(p.jevPool).ifEmpty { listOf(JevRow("", "")) }) } }
+    val saveRows = { p.jevPool = serializeJevPool(rows) }
+    var testing by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    val problem = if (mode == "off") null else Native.jevCheck(p.jevConfig())
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("智能选择（Jev）", style = MaterialTheme.typography.titleSmall)
+        Choice("关闭", "说完后在候选框里自己挑。", mode == "off") {
+            mode = "off"
+            p.jevMode = "off"
+        }
+        Choice("官方格式", "填一个 API Key，说完后自动选出最佳一条上屏。", mode == "official") {
+            mode = "official"
+            p.jevMode = "official"
+        }
+        Choice("自定义格式", "多组地址和密钥，一组用不了自动换下一组。", mode == "yce") {
+            mode = "yce"
+            p.jevMode = "yce"
+        }
+        if (mode == "official") {
+            OutlinedTextField(
+                key, { key = it; p.jevKey = it }, Modifier.fillMaxWidth(),
+                label = { Text("API Key") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+            )
+            OutlinedTextField(
+                endpoint, { endpoint = it; p.jevEndpoint = it }, Modifier.fillMaxWidth(),
+                label = { Text("端点（可留空）") }, placeholder = { Text("https://api.typesafe.ai") }, singleLine = true,
+            )
+            Hint("可只填域名，自动补全为 …/v1/systemone；以 /decisions 结尾按 decisions 协议发送")
+            OutlinedTextField(
+                model, { model = it; p.jevModel = it }, Modifier.fillMaxWidth(),
+                label = { Text("模型（可留空）") }, placeholder = { Text("jev-latest") }, singleLine = true,
+            )
+        }
+        if (mode == "yce") {
+            rows.forEachIndexed { i, r ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(
+                            r.addr, { rows[i] = r.copy(addr = it); saveRows() }, Modifier.fillMaxWidth(),
+                            label = { Text("地址") }, placeholder = { Text("https://api.typesafe.ai") }, singleLine = true,
+                        )
+                        OutlinedTextField(
+                            r.key, { rows[i] = r.copy(key = it); saveRows() }, Modifier.fillMaxWidth(),
+                            label = { Text("密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                        )
+                    }
+                    TextButton({ rows.removeAt(i); if (rows.isEmpty()) rows.add(JevRow("", "")); saveRows() }) { Text("删除") }
+                }
+            }
+            TextButton({ rows.add(JevRow("", "")) }) { Text("添加一组") }
+            Hint("从上到下依次尝试，一组用不了自动换下一组；地址可留空（用官方端点），只填域名会自动补全为 …/v1/systemone，以 /decisions 结尾按 decisions 协议发送")
+        }
+        if (mode != "off") {
+            problem?.let { Hint(it, color = MaterialTheme.colorScheme.error) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Hint("仅多渠道模式生效；只把转写文字发给 Jev，不发渠道名；密钥只存本机", Modifier.weight(1f))
+                OutlinedButton({
+                    testing = true
+                    result = null
+                    Native.jevTest(p.jevConfig()) { kind, text ->
+                        main.post {
+                            testing = false
+                            result = if (kind == Native.FINAL) {
+                                runCatching {
+                                    val o = JSONObject(text)
+                                    true to "选中第 ${o.getInt("index") + 1} 条：${o.getString("text")} · ${o.getLong("ms")}ms · ${o.getString("alias")} · ${o.getString("key")}"
+                                }.getOrElse { false to text }
+                            } else {
+                                false to text
+                            }
+                        }
+                    }
+                }, enabled = !testing && problem == null) { Text(if (testing) "测试中…" else "测试") }
+            }
+            result?.let { (ok, text) -> Hint(text, color = if (ok) Color(0xFF2E9E5B) else MaterialTheme.colorScheme.error) }
+        } else {
+            Hint("仅多渠道模式生效；只把转写文字发给 Jev，不发渠道名；密钥只存本机")
+        }
+    }
+}
 
 @Composable
 private fun Step(title: String, done: Boolean, action: String, onClick: () -> Unit) {
@@ -325,6 +453,40 @@ private fun Offline() {
             }
         }
         WtOffline.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+private fun UpdateSection() {
+    val ctx = LocalContext.current
+    val (code, name) = remember { Updater.currentVersion(ctx) }
+    val st = Updater.state
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("当前版本 $name（$code）", Modifier.weight(1f))
+            val busy = st == Updater.State.Checking || st is Updater.State.Downloading || st == Updater.State.Installing
+            OutlinedButton({ Updater.check(ctx, true) }, enabled = !busy) { Text(if (st == Updater.State.Checking) "检查中…" else "检查更新") }
+        }
+        when (st) {
+            is Updater.State.Available -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("新版本 ${st.m.versionName}", Modifier.weight(1f))
+                    Button({ Updater.install(ctx) }) { Text("更新") }
+                }
+                if (!ctx.packageManager.canRequestPackageInstalls()) Hint("首次更新需允许 VoiceKey 安装未知应用")
+            }
+            is Updater.State.Downloading -> {
+                Text("下载中 ${(st.progress * 100).roundToInt()}%")
+                LinearProgressIndicator({ st.progress }, Modifier.fillMaxWidth())
+            }
+            Updater.State.Installing -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("等待系统安装确认", Modifier.weight(1f))
+                OutlinedButton({ Updater.showConfirm(ctx) }, enabled = Updater.confirm != null) { Text("继续安装") }
+            }
+            Updater.State.Latest -> Text("已是最新版本")
+            is Updater.State.Error -> Text(st.msg, color = MaterialTheme.colorScheme.error)
+            else -> {}
+        }
     }
 }
 

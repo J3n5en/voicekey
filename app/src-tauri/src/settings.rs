@@ -109,6 +109,8 @@ pub struct Settings {
     /// 录音时相对原始系统音量降低的百分比；持久化为 settings.json 的 lowerSystemVolumePercent。
     pub lower_system_volume_percent: u8,
     pub onboarded: bool,
+    /// 多渠道定稿后的 Jev 智能选择配置；默认关闭
+    pub jev: voicekey_core::jev::Config,
 }
 
 impl Default for Settings {
@@ -132,6 +134,7 @@ impl Default for Settings {
             lower_system_volume: false,
             lower_system_volume_percent: LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT,
             onboarded: false,
+            jev: voicekey_core::jev::Config::default(),
         }
     }
 }

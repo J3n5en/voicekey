@@ -2,6 +2,7 @@ pub mod audio;
 pub mod baidu;
 pub mod chatterfly;
 pub mod doubao;
+pub mod jev;
 pub mod opus;
 pub mod pb;
 pub mod qwen;

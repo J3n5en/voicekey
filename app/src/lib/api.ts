@@ -11,9 +11,12 @@ import chatterfly from "../assets/logos/chatterfly.png";
 export type Channel = "doubao" | "wetype" | "qwen" | "baidu" | "sogou" | "iflytek" | "chatterfly" | "offline" | "wetypeoffline" | "all";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Combo { codes: number[]; name: string }
+export interface JevConfig { mode: "off" | "official" | "yce"; key: string; endpoint: string; model: string; pool: string }
+export interface JevTested { index: number; text: string; alias: string; ms: number; key: string }
 export interface Settings {
   channel: Channel; holdKey: string; holdCombo: Combo | null; tapShortcut: Shortcut | null; silence: number; silenceStop: boolean; streaming: boolean;
   liveText: boolean; mic: string; multi: Channel[]; lastPick: Channel | null; pickCounts: Partial<Record<Channel, number>>; autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
+  jev: JevConfig;
 }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
@@ -25,7 +28,7 @@ export interface AppInfo {
 }
 export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }
-export interface Model { recording: boolean; rows: Row[]; sel: number }
+export interface Model { recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed" }
 
 export const call = invoke;
 export const holdName = (s: Settings, keys: AppInfo["holdKeys"]) =>

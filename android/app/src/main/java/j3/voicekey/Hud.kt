@@ -75,6 +75,8 @@ class Hud(private val svc: VoiceService) {
         } else {
             val send = App.prefs.pickSend
             title.text = when {
+                s.jevBusy -> "Jev 智能选择中… · 可手选"
+                s.jevFailed -> "智能选择失败，请手动选择"
                 s.recording && send -> "多渠道 · 聆听中，点一条发送，长按上屏编辑"
                 s.recording -> "多渠道 · 聆听中，点一条结束并上屏"
                 send -> "点一条发送 · 长按上屏编辑"

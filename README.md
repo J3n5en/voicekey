@@ -57,12 +57,15 @@ Android 8+（arm64）。不替换当前输入法：开启无障碍服务「Voice
 
 ## 安装
 
-从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载桌面端安装包。iOS 与 Android 不在 Release 里，从源码构建。
+从 [Releases](https://github.com/J3n5en/voicekey/releases) 下载桌面端安装包和 Android APK。iOS 不在 Release 里，需从源码构建。
 
 | 系统 | 文件 |
 |---|---|
 | macOS 13+（Apple 芯片与 Intel 通用） | `VoiceKey-x.y.z.dmg`，打开后拖到「应用程序」 |
 | Windows 10/11 x64 | `VoiceKey-x.y.z-x64-setup.exe` 或 `.msi` |
+| Android 8+（arm64） | `VoiceKey-x.y.z-android.apk`，首次安装需允许浏览器或文件管理器安装未知应用 |
+
+Android 装好后，在应用「关于与更新」里检查并更新：首次更新要允许 VoiceKey 安装未知应用，下载校验完成后在系统弹窗里确认安装。
 
 macOS 发布包为自签名、未经 Apple 公证，首次运行前需解除隔离：
 
@@ -115,13 +118,17 @@ npx tauri build                  # Windows：nsis / msi 安装包
 
 ## 发布
 
-推送 `v*` 标签后，GitHub Actions 构建 macOS 通用 DMG 与 Windows 安装包，连同应用内更新所需的更新包与 `latest.json` 一起创建 Release：
+推送 `v*` 标签后，GitHub Actions 构建 macOS 通用 DMG、Windows 安装包和 Android 签名 APK，连同应用内更新所需的更新包、`latest.json`（桌面）与 `android.json`（Android）一起创建 Release：
 
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
 需要的 Secrets：`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（`npx tauri signer generate` 生成的更新签名密钥）、`MACOS_CERTIFICATE` / `MACOS_CERTIFICATE_PASSWORD`（`Scripts/gen-cert.sh` 生成的自签名证书，base64 编码的 p12）。
+
+Android 另需 4 个 Secrets：`ANDROID_KEYSTORE_BASE64`（release keystore 用 `base64` 编码）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。tag 构建缺任何一个都会失败，不会发出 debug 签名包。签名一旦定下就不能换，换了已装用户无法覆盖升级，只能卸载重装。
+
+Android 的 versionCode 由标签推导：`vX.Y.Z` → `X×10000 + Y×100 + Z`（如 `v1.8.0` 为 10800），所以标签必须是 `vX.Y.Z` 形式，且 minor、patch 都不能超过 99，推出的值要大于现有的 6。应用内更新靠 versionCode 比较，新版必须比已装版本大。
 
 ## 结构
 

@@ -30,6 +30,17 @@ pub enum Msg {
     /// 设置页在录音中即时调整 ducking；worker 自己负责所有权判断、平滑重定向和安全恢复。
     VolumeDucking { enabled: bool, reduction_percent: u8 },
     MicrophonesChanged(Vec<String>),
+    /// Jev 评选结果：res 是 rows 下标；gen 与 token 任一对不上都说明已过期
+    JevDone { gen: u64, token: u64, res: Result<usize, String> },
+}
+
+/// 候选框里 Jev 智能选择的进度
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum JevState {
+    Idle,
+    Busy,
+    Failed,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
@@ -55,6 +66,7 @@ struct Model<'a> {
     recording: bool,
     rows: &'a [Row],
     sel: usize,
+    jev: JevState,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -142,6 +154,11 @@ pub struct Ctl {
     sel: usize,
     user_picked: bool,
     choose_pending: bool,
+    jev: JevState,
+    /// 当前有效的 Jev 请求编号；手选或新一段录音时自增，晚到结果据此丢弃
+    jev_token: u64,
+    /// 用户做过选择类操作。`user_picked` 会被 `last_pick` 预选置位，不能代替它
+    manual: bool,
     released_at: Option<Instant>,
     front: Option<pf::FrontApp>,
     last_emit: Instant,
@@ -203,6 +220,9 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         sel: 0,
         user_picked: false,
         choose_pending: false,
+        jev: JevState::Idle,
+        jev_token: 0,
+        manual: false,
         released_at: None,
         front: None,
         last_emit: Instant::now(),
@@ -255,7 +275,11 @@ impl Ctl {
                 self.flush_pending = false;
                 self.emit_rows();
             }
-            Msg::PickChoose(i) if self.mode == Mode::Pick => self.choose(i),
+            Msg::JevDone { gen, token, res } => self.jev_done(gen, token, res),
+            Msg::PickChoose(i) if self.mode == Mode::Pick => {
+                self.take_manual();
+                self.choose(i)
+            }
             Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
             Msg::CompareToggle => match self.mode {
                 Mode::Compare if self.recording => self.end(),
@@ -528,6 +552,9 @@ impl Ctl {
         }
         self.released_at = None;
         self.choose_pending = false;
+        self.jev_token += 1;
+        self.jev = JevState::Idle;
+        self.manual = false;
         let mut targets = Vec::new();
         for (r, segs) in self.rows.iter_mut().zip(&mut self.row_segs) {
             if r.state == RowState::Skip {
@@ -558,6 +585,9 @@ impl Ctl {
         self.sel = 0;
         self.user_picked = false;
         self.choose_pending = false;
+        self.jev_token += 1;
+        self.jev = JevState::Idle;
+        self.manual = false;
         self.released_at = None;
         self.rows = channels
             .into_iter()
@@ -716,6 +746,11 @@ impl Ctl {
                 if finished {
                     self.choose_pending = false;
                     self.timeout_token += 1;
+                    self.maybe_jev();
+                    if self.mode == Mode::Idle {
+                        // 只有一条定稿时 maybe_jev 已直接上屏并收起候选框
+                        return;
+                    }
                     if self.mode == Mode::Compare {
                         self.stop_recording();
                         self.mode = Mode::Idle;
@@ -850,6 +885,9 @@ impl Ctl {
         if n == 0 {
             return;
         }
+        if matches!(k, Special::Up | Special::Down | Special::Digit(_) | Special::Enter) {
+            self.take_manual();
+        }
         match k {
             Special::Up | Special::Down => {
                 self.sel = if k == Special::Down { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
@@ -909,6 +947,61 @@ impl Ctl {
         });
     }
 
+    /// 用户做了选择类操作：从此不再自动评选，进行中的 Jev 结果作废
+    fn take_manual(&mut self) {
+        self.manual = true;
+        if self.jev == JevState::Busy {
+            self.jev_token += 1;
+            self.jev = JevState::Idle;
+        }
+    }
+
+    /// 多渠道全部定稿后触发：1 条定稿直接上屏，≥2 条交给 Jev 评选；失败时候选框保持打开
+    fn maybe_jev(&mut self) {
+        if self.mode != Mode::Pick || self.recording || self.choose_pending || self.manual || self.jev != JevState::Idle {
+            return;
+        }
+        let cfg = self.settings().jev;
+        if cfg.targets().is_err() {
+            return;
+        }
+        let finals = jev_finals(&self.rows);
+        match finals.as_slice() {
+            [] => {}
+            [(i, _)] => self.choose(*i),
+            _ => {
+                self.jev = JevState::Busy;
+                self.jev_token += 1;
+                let (gen, token, tx) = (self.gen, self.jev_token, self.tx.clone());
+                let (idxs, texts): (Vec<usize>, Vec<String>) = finals.into_iter().unzip();
+                tauri::async_runtime::spawn(async move {
+                    let res = voicekey_core::jev::pick(&cfg, &texts)
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|p| idxs.get(p.index).copied().ok_or_else(|| format!("Jev 返回了无效序号 {}", p.index)));
+                    let _ = tx.send(Msg::JevDone { gen, token, res });
+                });
+                self.emit_rows();
+            }
+        }
+    }
+
+    fn jev_done(&mut self, gen: u64, token: u64, res: Result<usize, String>) {
+        if gen != self.gen || token != self.jev_token || self.mode != Mode::Pick {
+            return;
+        }
+        match res {
+            Ok(i) if self.rows.get(i).is_some_and(|r| r.state == RowState::Final) => {
+                self.jev = JevState::Idle;
+                self.choose(i);
+            }
+            _ => {
+                self.jev = JevState::Failed;
+                self.emit_rows();
+            }
+        }
+    }
+
     /// 最多每 33ms 推送一次，避免文字跳动
     fn emit_rows(&mut self) {
         let wait = Duration::from_millis(33).saturating_sub(self.last_emit.elapsed());
@@ -924,7 +1017,7 @@ impl Ctl {
             return;
         }
         self.last_emit = Instant::now();
-        let model = Model { recording: self.recording, rows: &self.rows, sel: self.sel };
+        let model = Model { recording: self.recording, rows: &self.rows, sel: self.sel, jev: self.jev };
         match self.mode {
             Mode::Pick => {
                 let _ = self.app.emit_to("pick", "pick", model);
@@ -936,9 +1029,38 @@ impl Ctl {
     }
 }
 
+/// 取出已定稿的行（rows 下标, 文字），按 rows 顺序；Error/Skip/聆听中的行不参与评选
+fn jev_finals(rows: &[Row]) -> Vec<(usize, String)> {
+    rows.iter().enumerate().filter(|(_, r)| r.state == RowState::Final).map(|(i, r)| (i, r.text.clone())).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Segments;
+    use super::{jev_finals, Row, RowState, Segments};
+    use crate::settings::Channel;
+
+    fn row(channel: Channel, state: RowState, text: &str) -> Row {
+        Row { channel, text: text.into(), state, ms: None }
+    }
+
+    #[test]
+    fn jev_finals_keeps_only_final_rows_with_their_row_index() {
+        assert!(jev_finals(&[]).is_empty());
+        assert!(jev_finals(&[row(Channel::Doubao, RowState::Error, "超时"), row(Channel::Qwen, RowState::Skip, "跳过")]).is_empty());
+
+        let one = [row(Channel::Doubao, RowState::Error, "超时"), row(Channel::Qwen, RowState::Final, "你好")];
+        assert_eq!(jev_finals(&one), vec![(1, "你好".to_string())]);
+
+        let many = [
+            row(Channel::Doubao, RowState::Final, "今天开会"),
+            row(Channel::Wetype, RowState::Error, "失败"),
+            row(Channel::Qwen, RowState::Skip, "离线模型未下载，已跳过"),
+            row(Channel::Baidu, RowState::Final, "今天开灰"),
+            row(Channel::Sogou, RowState::Wait, ""),
+            row(Channel::Iflytek, RowState::Final, "今天开会。"),
+        ];
+        assert_eq!(jev_finals(&many), vec![(0, "今天开会".to_string()), (3, "今天开灰".to_string()), (5, "今天开会。".to_string())]);
+    }
 
     #[test]
     fn resumed_segments_join_in_order_and_wait_for_all() {

@@ -88,6 +88,8 @@
     <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
     <span class="state">
       {#if model.recording}聆听中 · 松开结束
+      {:else if model.jev === "busy"}<span class="spinner"></span>Jev 智能选择中 · 可手选
+      {:else if model.jev === "failed"}<span class="err">智能选择失败，请手动选择</span>
       {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
       {:else}<span class="ok">● 全部完成</span>{/if}
     </span>
