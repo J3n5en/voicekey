@@ -16,6 +16,8 @@ if [ "${1:-}" = "--unsigned" ]; then
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
     mkdir -p $U/Payload
     cp -R $U/VoiceKey.xcarchive/Products/Applications/VoiceKey.app $U/Payload/
+    codesign -f -s - --entitlements Keyboard/Keyboard.entitlements $U/Payload/VoiceKey.app/PlugIns/Keyboard.appex
+    codesign -f -s - --entitlements App/App.entitlements $U/Payload/VoiceKey.app
     (cd $U && zip -qry ../VoiceKey-unsigned.ipa Payload)
     echo "ios/build/VoiceKey-unsigned.ipa"
     exit 0
