@@ -16,6 +16,11 @@ if [ "${1:-}" = "--unsigned" ]; then
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
     mkdir -p $U/Payload
     cp -R $U/VoiceKey.xcarchive/Products/Applications/VoiceKey.app $U/Payload/
+    # 不签名时 entitlements 不会写进二进制，AltStore / Sideloadly 等重签工具读不到 App Group，
+    # 键盘与主 App 拿不到共享容器（client is not entitled），键盘每次点麦克风都会跳回主 App。
+    # 这里用 ad-hoc 签名把 entitlements 写进去，供重签工具读取并注册 App Group（先签扩展再签主 App）
+    codesign -f -s - --entitlements Keyboard/Keyboard.entitlements $U/Payload/VoiceKey.app/PlugIns/Keyboard.appex
+    codesign -f -s - --entitlements App/App.entitlements $U/Payload/VoiceKey.app
     (cd $U && zip -qry ../VoiceKey-unsigned.ipa Payload)
     echo "ios/build/VoiceKey-unsigned.ipa"
     exit 0
