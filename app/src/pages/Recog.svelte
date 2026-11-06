@@ -1,7 +1,8 @@
 <script lang="ts">
   import { app, save } from "../lib/store.svelte";
-  import { call, CH, LOCAL, type Channel } from "../lib/api";
+  import { call, CH, LOCAL, LOGIN, type Channel } from "../lib/api";
   import ChIcon from "../lib/ChIcon.svelte";
+  import Account from "./Account.svelte";
   import Compare from "./Compare.svelte";
   import Jev from "./Jev.svelte";
 
@@ -40,6 +41,9 @@
           {/if}
         </div>
       {/if}
+      {#if LOGIN[c]}
+        <div class="dl">{#if app.accounts[c]}<span class="ok">● 已登录</span>{:else}未登录{/if}</div>
+      {/if}
     </button>
   {/each}
   <button class="ch" class:wide={engines.length % 2 === 0} class:on={s.channel === "all"} onclick={() => pick("all")}>
@@ -59,6 +63,7 @@
   </button>
 </div>
 {#if s.channel === "all"}<Jev />{/if}
+{#if LOGIN[s.channel]}{#key s.channel}<Account ch={s.channel} />{/key}{/if}
 {#if !app.info!.offline.supported}
   <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
 {/if}
