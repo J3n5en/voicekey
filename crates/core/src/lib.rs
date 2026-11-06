@@ -1,4 +1,6 @@
+pub mod account;
 pub mod audio;
+pub mod bageshuo;
 pub mod baidu;
 pub mod chatterfly;
 pub mod doubao;
@@ -6,6 +8,7 @@ pub mod jev;
 pub mod opus;
 pub mod pb;
 pub mod qwen;
+pub mod qwenapp;
 pub mod util;
 pub mod sogou;
 pub mod wetype;
@@ -27,10 +30,12 @@ pub trait Engine: Send + Sync {
     async fn prewarm(&self) {}
 }
 
+pub use bageshuo::BageshuoEngine;
 pub use baidu::BaiduEngine;
 pub use chatterfly::ChatterflyEngine;
 pub use doubao::DoubaoEngine;
 pub use qwen::QwenEngine;
+pub use qwenapp::QwenAppEngine;
 pub use sogou::SogouEngine;
 pub use wetype::WeTypeEngine;
 pub use ifly::IflyEngine;

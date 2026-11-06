@@ -9,6 +9,7 @@ export const app = $state({
   recording: false,
   mics: [] as string[],
   models: {} as Partial<Record<Channel, OfflineStatus>>,
+  accounts: {} as Partial<Record<Channel, boolean>>,
   update: { state: "idle" } as UpdateStatus,
 });
 
@@ -36,6 +37,7 @@ export async function init() {
   app.s = info.settings;
   app.perms = info.perms;
   app.models = info.models;
+  app.accounts = info.accounts;
   app.update = info.update;
   const look = () => app.s && applyLook(info.platform, app.s.theme);
   look();
@@ -46,6 +48,7 @@ export async function init() {
   });
   on<number>("level", (v) => (app.level = v));
   on<{ ch: Channel; status: OfflineStatus }>("model", (v) => (app.models[v.ch] = v.status));
+  on<Partial<Record<Channel, boolean>>>("accounts", (v) => (app.accounts = v));
   on<UpdateStatus>("update", (v) => (app.update = v));
   on<Model>("compare", (m) => (app.compare = m));
   on<Shortcut | null>("recorded", () => (app.recording = false));

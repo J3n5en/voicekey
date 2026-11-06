@@ -2,6 +2,7 @@
 
 mod controller;
 mod hotkey;
+mod login;
 mod offline;
 mod settings;
 mod sound;
@@ -73,6 +74,17 @@ pub fn model_ready(ch: Channel) -> bool {
     }
 }
 
+/// 多渠道识别时要跳过的渠道及原因
+pub fn unavailable(ch: Channel) -> Option<&'static str> {
+    if !model_ready(ch) {
+        return Some("离线模型未下载，已跳过");
+    }
+    match ch.login() {
+        Some(login) if !login.has() => Some("未登录，已跳过"),
+        _ => None,
+    }
+}
+
 pub fn tray_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "settings" => ui::show_settings(app),
@@ -119,6 +131,7 @@ fn get_state(app: AppHandle) -> serde_json::Value {
         "channels": Channel::available(),
         "offline": { "supported": offline::SUPPORTED },
         "models": { "offline": offline::status(), "wetypeoffline": wtoffline::status() },
+        "accounts": login::status(),
         "perms": perms(),
         "update": update::status(),
     })
@@ -170,6 +183,23 @@ fn perm_action(kind: String) {
 #[tauri::command]
 fn model_download(app: AppHandle, ch: Channel) {
     download_model(&app, ch);
+}
+
+/// 粘贴的登录 Cookie，校验通过才保存
+#[tauri::command]
+async fn account_save(app: AppHandle, ch: Channel, value: String) -> Result<(), String> {
+    login::save(&app, ch, &value).await
+}
+
+/// 内置网页登录。建窗口必须在 async 命令里，Windows 上同步命令会死锁
+#[tauri::command]
+async fn account_login(app: AppHandle, ch: Channel) -> Result<(), String> {
+    login::open(&app, ch)
+}
+
+#[tauri::command]
+async fn account_logout(app: AppHandle, ch: Channel) {
+    login::logout(&app, ch);
 }
 
 #[tauri::command]
@@ -266,7 +296,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
             pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
-            update_check, update_install, jev_test, preview_sound, list_sounds
+            update_check, update_install, jev_test, preview_sound, list_sounds,
+            account_save, account_login, account_logout
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

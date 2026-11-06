@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use voicekey_core::account::Login;
 use voicekey_core::util::data_file;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -13,6 +14,8 @@ pub enum Channel {
     Sogou,
     Iflytek,
     Chatterfly,
+    QwenApp,
+    Bageshuo,
     Offline,
     WetypeOffline,
     All,
@@ -28,15 +31,26 @@ impl Channel {
             Channel::Sogou => "搜狗输入法",
             Channel::Iflytek => "讯飞输入法",
             Channel::Chatterfly => "Chatterfly",
+            Channel::QwenApp => "千问 App",
+            Channel::Bageshuo => "叭哥说",
             Channel::Offline => "豆包离线",
             Channel::WetypeOffline => "微信离线",
             Channel::All => "多渠道（说完挑选）",
         }
     }
 
+    /// 需要登录官方账号的渠道
+    pub fn login(self) -> Option<&'static Login> {
+        match self {
+            Channel::QwenApp => Some(&voicekey_core::qwenapp::LOGIN),
+            Channel::Bageshuo => Some(&voicekey_core::bageshuo::LOGIN),
+            _ => None,
+        }
+    }
+
     /// 当前平台可用的识别渠道（不含「全部」）
     pub fn engines() -> Vec<Channel> {
-        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen, Channel::Baidu, Channel::Sogou, Channel::Iflytek, Channel::Chatterfly];
+        let mut v = vec![Channel::Doubao, Channel::Wetype, Channel::Qwen, Channel::Baidu, Channel::Sogou, Channel::Iflytek, Channel::Chatterfly, Channel::QwenApp, Channel::Bageshuo];
         if crate::offline::SUPPORTED {
             v.push(Channel::Offline);
         }
@@ -138,7 +152,7 @@ impl Default for Settings {
             streaming: true,
             live_text: true,
             mic: String::new(),
-            multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
+            multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline && c.login().is_none()).collect(),
             last_pick: None,
             pick_counts: HashMap::new(),
             sound_enabled: false,

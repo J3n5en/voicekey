@@ -14,7 +14,7 @@
 
 以下为 macOS / Windows。
 
-- **多个识别渠道**：豆包、微信、千问、百度、搜狗、讯飞、Chatterfly 云端识别，以及完全本地运行的离线识别：微信离线（macOS / Windows）、豆包离线（仅 Apple 芯片 Mac）
+- **多个识别渠道**：豆包、微信、千问、百度、搜狗、讯飞、Chatterfly、千问 App、叭哥说云端识别（后两个需登录官方账号），以及完全本地运行的离线识别：微信离线（macOS / Windows）、豆包离线（仅 Apple 芯片 Mac）
 - **多渠道候选**：勾选 2 个以上渠道同时识别，光标旁弹出候选框实时显示各渠道结果，按数字键或 ↑↓ + 回车选一条上屏；默认选中上次用的渠道
 - **渠道对比**：在设置里录一段话，并排比较各渠道的结果和速度
 - **长按说话**：按住快捷键开始，松开结束
@@ -36,7 +36,7 @@
 
 iOS 17+ 的中文键盘（仅 iPhone）。默认 26 键全拼，可切九宫格；功能键和顶栏可以拖动调整。左上角麦克风说话。键盘本身不能录音，由主 App 在后台收音，再把文字送回键盘。
 
-- 云端渠道与桌面端相同，没有离线引擎
+- 云端渠道与桌面端相同（不含需登录的千问 App、叭哥说），没有离线引擎
 - 勾选多个渠道时，在键盘里对比结果再选一条上屏
 - 默认画中画待机：不占麦克风，点麦克风才录音；画中画不可用时改为常开麦
 - 操作按钮或快捷指令「VoiceKey 说话」：正在使用本键盘时开始，再按一次结束
@@ -93,6 +93,13 @@ xattr -dr com.apple.quarantine /Applications/VoiceKey.app
 
 单个修饰键可同时作为长按键和点按键：快速点一下为点按，按住超过 0.3 秒为长按。设为组合键的点按快捷键会被拦截，不再传给前台应用。
 
+**需登录的渠道**：千问 App 和叭哥说要登录官方账号才能用。在「识别渠道」选中渠道后点「登录」，会弹出官方网页，登录完成后窗口自动关闭。也可以手动粘贴浏览器里的登录 Cookie。
+
+- **千问 App**：用千问账号登录。
+- **叭哥说**：用有道账号登录，支持网易邮箱或手机验证码。服务端会保存录音。
+
+登录 Cookie 只保存在数据目录的 `accounts.json`（macOS 上仅当前用户可读）。退出登录会同时清除内置网页的登录状态。未登录时，多渠道识别和渠道对比会跳过这两个渠道。
+
 **离线识别**：首次选择离线渠道时下载模型，之后断网也能用。
 
 - **微信离线**：下载微信输入法官方离线语音包（约 100MB，来自腾讯 CDN），解出模型保存在数据目录的 `wtoffline/` 下；由本项目自己实现的 int8 推理运行，不依赖官方程序，macOS 和 Windows 都可用。
@@ -114,7 +121,7 @@ npx tauri build                  # Windows：nsis / msi 安装包
 - Android（需要 Android NDK 与 cargo-ndk）：先 `android/build-rust.sh`，再在 `android/` 执行 `./gradlew :app:assembleRelease`
 - Opus 由 `audiopus_sys` 从源码静态编译，相关环境变量见 `.cargo/config.toml`
 - 打包 DMG：`Scripts/dmg.sh out.dmg path/to/VoiceKey.app app/src-tauri/icons/icon.icns`
-- 命令行测试识别：`cargo run -p voicekey-core --bin vk-test -- doubao|wetype|qwen|baidu|sogou|iflytek file.wav`（WAV 需 16kHz 单声道）
+- 命令行测试识别：`cargo run -p voicekey-core --bin vk-test -- doubao|wetype|qwen|baidu|sogou|iflytek|chatterfly|qwenapp|bageshuo file.wav`（WAV 需 16kHz 单声道。qwenapp、bageshuo 的登录 Cookie 用环境变量 `VOICEKEY_QWENAPP`、`VOICEKEY_BAGESHUO` 传入）
 
 ## 发布
 
@@ -158,4 +165,4 @@ Android 的 versionCode 由标签推导：`vX.Y.Z` → `X×10000 + Y×100 + Z`�
 
 ## 声明
 
-本项目通过分析输入法客户端协议实现，仅供学习与个人使用，与字节跳动、腾讯、阿里巴巴无关。接口可能随时变更或失效；语音会发送到对应厂商的服务器。
+本项目通过分析输入法客户端协议实现，仅供学习与个人使用，与字节跳动、腾讯、阿里巴巴、网易无关。接口可能随时变更或失效；语音会发送到对应厂商的服务器。

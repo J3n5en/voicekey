@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tauri::async_runtime::JoinHandle;
 use voicekey_core::audio::Recorder;
-use voicekey_core::{BaiduEngine, ChatterflyEngine, DoubaoEngine, Engine, IflyEngine, QwenEngine, SogouEngine, WeTypeEngine};
+use voicekey_core::{BageshuoEngine, BaiduEngine, ChatterflyEngine, DoubaoEngine, Engine, IflyEngine, QwenAppEngine, QwenEngine, SogouEngine, WeTypeEngine};
 use voicekey_platform::{self as pf, Special, Typer};
 
 pub enum Msg {
@@ -200,6 +200,8 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
     engines.insert(Channel::Sogou, Arc::new(SogouEngine));
     engines.insert(Channel::Iflytek, Arc::new(IflyEngine));
     engines.insert(Channel::Chatterfly, Arc::new(ChatterflyEngine));
+    engines.insert(Channel::QwenApp, Arc::new(QwenAppEngine::default()));
+    engines.insert(Channel::Bageshuo, Arc::new(BageshuoEngine));
     if let Some(e) = offline::engine() {
         engines.insert(Channel::Offline, e);
     }
@@ -656,11 +658,11 @@ impl Ctl {
         self.rows = channels
             .into_iter()
             .map(|ch| {
-                let skip = !crate::model_ready(ch);
+                let skip = crate::unavailable(ch);
                 Row {
                     channel: ch,
-                    text: if skip { "离线模型未下载，已跳过".into() } else { String::new() },
-                    state: if skip { RowState::Skip } else { RowState::Listen },
+                    text: skip.unwrap_or_default().into(),
+                    state: if skip.is_some() { RowState::Skip } else { RowState::Listen },
                     ms: None,
                 }
             })
