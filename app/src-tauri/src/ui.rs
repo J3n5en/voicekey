@@ -101,12 +101,28 @@ fn overlay<R: Runtime>(app: &AppHandle<R>, label: &str, w: f64, h: f64) -> tauri
 
 pub fn create_overlays<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     overlay(app, "hud", HUD_W, HUD_H)?.set_ignore_cursor_events(true)?;
-    let pick = overlay(app, "pick", PICK_W, 300.0)?;
-    #[cfg(target_os = "macos")]
-    panel::convert(&pick);
-    #[cfg(not(target_os = "macos"))]
-    let _ = pick;
     Ok(())
+}
+
+/// 候选面板只在多渠道模式下常驻，其他模式销毁以释放 WebView 内存
+pub fn sync_pick<R: Runtime>(app: &AppHandle<R>, need: bool) {
+    match app.get_webview_window("pick") {
+        Some(w) if !need && !w.is_visible().unwrap_or(false) => {
+            let _ = w.destroy();
+        }
+        None if need => {
+            // 异步创建：同步命令里建窗口在 Windows 上会死锁
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let Ok(pick) = overlay(&app, "pick", PICK_W, 300.0) else { return };
+                #[cfg(target_os = "macos")]
+                panel::convert(&pick);
+                #[cfg(not(target_os = "macos"))]
+                let _ = pick;
+            });
+        }
+        _ => {}
+    }
 }
 
 pub fn show_settings<R: Runtime>(app: &AppHandle<R>) {
@@ -250,9 +266,9 @@ pub fn pick_resize<R: Runtime>(app: &AppHandle<R>, height: f64) {
 }
 
 pub fn pick_hide<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window("pick") {
-        let _ = w.hide();
-    }
+    let Some(w) = app.get_webview_window("pick") else { return };
+    // 挑选途中切走了多渠道：收起即销毁
+    let _ = if current_channel(app) == Channel::All { w.hide() } else { w.destroy() };
 }
 
 fn tray_menu<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) -> tauri::Result<Menu<R>> {

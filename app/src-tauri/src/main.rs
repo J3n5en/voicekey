@@ -37,6 +37,7 @@ fn apply<R: Runtime>(app: &AppHandle<R>, s: &Settings) {
         c.tap = s.tap_shortcut.clone();
     }
     ui::refresh_tray(app, s, st.hk.paused.load(Ordering::Relaxed));
+    ui::sync_pick(app, s.channel == Channel::All);
     let al = app.autolaunch();
     if al.is_enabled().unwrap_or(false) != s.autostart {
         let _ = if s.autostart { al.enable() } else { al.disable() };
