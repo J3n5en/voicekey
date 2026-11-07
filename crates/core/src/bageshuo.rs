@@ -108,9 +108,16 @@ async fn ticket(cookie: &str) -> Result<String> {
     }
     let d = if v["data"].is_object() { &v["data"] } else { &v };
     match d["websocketUrl"].as_str().filter(|s| status.is_success() && !s.is_empty()) {
-        Some(url) => Ok(url.into()),
+        Some(url) => official(url).ok_or_else(|| anyhow!("叭哥说返回的识别地址不是有道官方域名")),
         None => bail!("叭哥说获取识别会话失败：{}（{}）", v["message"].as_str().or(v["msg"].as_str()).unwrap_or("未知错误"), status.as_u16()),
     }
+}
+
+/// 识别连接会带上登录 Cookie，只连有道官方域名。返回解析后的地址，连接与校验用同一份
+fn official(url: &str) -> Option<String> {
+    let u = reqwest::Url::parse(url).ok()?;
+    let host = u.host_str()?;
+    (u.scheme() == "wss" && (host == "youdao.com" || host.ends_with(".youdao.com"))).then(|| u.into())
 }
 
 fn error(v: &Value) -> String {
@@ -181,5 +188,15 @@ mod tests {
         assert_eq!(get("abtest"), "6");
         assert_eq!(get("sign"), "7bb9c7bc03e44cd83603facb55604fba");
         assert_eq!(get("pointParam"), "abtest,appVersion,client,imei,keyfrom,keyid,mid,model,mysticTime,network,product,screen,vendor,yduuid");
+    }
+
+    #[test]
+    fn only_connects_to_youdao() {
+        assert_eq!(official("wss://dict-typeless.youdao.com/ws?ticket=1").as_deref(), Some("wss://dict-typeless.youdao.com/ws?ticket=1"));
+        assert!(official("ws://dict-typeless.youdao.com/ws").is_none());
+        assert!(official("wss://youdao.com.evil.com/ws").is_none());
+        assert!(official("wss://evil.com/youdao.com").is_none());
+        assert!(official("wss://evilyoudao.com/ws").is_none());
+        assert!(official("wss://a.youdao.com@evil.com/ws").is_none());
     }
 }

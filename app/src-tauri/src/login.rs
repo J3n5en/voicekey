@@ -1,7 +1,7 @@
 //! 需要登录的渠道：手动粘贴，或在内置网页窗口登录后自动读取登录 Cookie，校验通过才保存
 use crate::settings::Channel;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::webview::Cookie;
 use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use voicekey_core::account::Login;
@@ -60,6 +60,7 @@ pub fn open(app: &AppHandle, ch: Channel) -> Result<(), String> {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut last = String::new();
+        let mut tried = Instant::now();
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             // 窗口被关掉就停止
@@ -68,10 +69,13 @@ pub fn open(app: &AppHandle, ch: Channel) -> Result<(), String> {
             // 漏掉写在 .qianwen.com 这类父域上的登录 Cookie
             let Ok(cookies) = w.cookies() else { continue };
             let header = cookies.iter().filter(|c| on_site(c, login.domain)).map(|c| format!("{}={}", c.name(), c.value())).collect::<Vec<_>>().join("; ");
-            if header == last {
+            let Ok(picked) = login.pick(&header) else { continue };
+            // 同一组登录 Cookie 校验失败（如断网）时每 5 秒重试一次
+            if picked == last && tried.elapsed() < Duration::from_secs(5) {
                 continue;
             }
-            last = header;
+            last = picked;
+            tried = Instant::now();
             if save(&app, ch, &last).await.is_ok() {
                 let _ = w.close();
                 crate::ui::show_settings(&app);
