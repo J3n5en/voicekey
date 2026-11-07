@@ -1,7 +1,10 @@
+use crate::{Audio, Partial};
 use anyhow::{anyhow, bail, Result};
-use futures_util::{Stream, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
+use serde_json::Value;
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -56,6 +59,81 @@ pub fn data<E: std::fmt::Display>(msg: Option<Result<Message, E>>) -> Result<Opt
         Some(Ok(Message::Text(t))) => Ok(Some(t.as_bytes().to_vec())),
         Some(Ok(Message::Close(_))) => bail!("服务器关闭了连接"),
         Some(Ok(_)) => Ok(None),
+    }
+}
+
+/// 服务端一条 JSON 消息对识别结果的影响
+pub enum Update {
+    /// 从开头到当前的整段文本
+    Text(String),
+    /// 识别结束，定稿非空时替换已有文本
+    Done(Option<String>),
+    Error(String),
+    Skip,
+}
+
+/// 流式识别收发：音频帧按二进制帧发出，音频结束后发 end，服务端消息交给 parse 解释。
+/// 30 秒没有收发即超时，每 15 秒发一次 ping 保活。出错时已识别的文字照常返回
+pub async fn recognize(ws: Ws, mut audio: Audio, end: String, partial: Partial, parse: impl Fn(&Value) -> Update + Send + Sync) -> Result<String> {
+    const IDLE: Duration = Duration::from_secs(30);
+    const PING: Duration = Duration::from_secs(15);
+    let (mut tx, mut rx) = ws.split();
+    let mut text = String::new();
+    let mut sent = false;
+    let result: Result<()> = async {
+        let mut closed = false;
+        let mut idle = Instant::now() + IDLE;
+        let mut ping = tokio::time::interval_at(Instant::now() + PING, PING);
+        loop {
+            tokio::select! {
+                biased;
+                frame = audio.recv(), if !closed => {
+                    idle = Instant::now() + IDLE;
+                    match frame {
+                        Some(pcm) => {
+                            sent = true;
+                            tx.send(Message::Binary(pcm.iter().flat_map(|s| s.to_le_bytes()).collect())).await?;
+                        }
+                        None => {
+                            closed = true;
+                            tx.send(Message::Text(end.clone())).await?;
+                        }
+                    }
+                }
+                msg = rx.next() => {
+                    let Some(d) = data(msg)? else { continue };
+                    let Ok(v) = serde_json::from_slice::<Value>(&d) else { continue };
+                    idle = Instant::now() + IDLE;
+                    match parse(&v) {
+                        Update::Text(t) => {
+                            if !t.is_empty() && t != text {
+                                text = t;
+                                partial(&text);
+                            }
+                        }
+                        Update::Done(t) => {
+                            if let Some(t) = t.filter(|t| !t.is_empty()) {
+                                text = t;
+                            }
+                            return Ok(());
+                        }
+                        Update::Error(e) => bail!(e),
+                        Update::Skip => {}
+                    }
+                }
+                _ = ping.tick() => {
+                    let _ = tx.send(Message::Ping(Vec::new())).await;
+                }
+                _ = tokio::time::sleep_until(idle) => bail!("识别超时"),
+            }
+        }
+    }
+    .await;
+    let _ = tx.close().await;
+    match result {
+        Err(e) if text.is_empty() => Err(e),
+        _ if text.is_empty() && !sent => bail!("没有采集到音频"),
+        _ => Ok(text),
     }
 }
 
