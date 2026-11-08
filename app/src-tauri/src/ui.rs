@@ -108,7 +108,7 @@ pub fn create_overlays<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 pub fn sync_pick<R: Runtime>(app: &AppHandle<R>, need: bool) {
     match app.get_webview_window("pick") {
         Some(w) if !need && !w.is_visible().unwrap_or(false) => {
-            let _ = w.destroy();
+            destroy_pick(&w);
         }
         None if need => {
             // 异步创建：同步命令里建窗口在 Windows 上会死锁
@@ -123,6 +123,12 @@ pub fn sync_pick<R: Runtime>(app: &AppHandle<R>, need: bool) {
         }
         _ => {}
     }
+}
+
+fn destroy_pick<R: Runtime>(w: &WebviewWindow<R>) {
+    #[cfg(target_os = "macos")]
+    panel::restore(w);
+    let _ = w.destroy();
 }
 
 pub fn show_settings<R: Runtime>(app: &AppHandle<R>) {
@@ -268,7 +274,11 @@ pub fn pick_resize<R: Runtime>(app: &AppHandle<R>, height: f64) {
 pub fn pick_hide<R: Runtime>(app: &AppHandle<R>) {
     let Some(w) = app.get_webview_window("pick") else { return };
     // 挑选途中切走了多渠道：收起即销毁
-    let _ = if current_channel(app) == Channel::All { w.hide() } else { w.destroy() };
+    if current_channel(app) == Channel::All {
+        let _ = w.hide();
+    } else {
+        destroy_pick(&w);
+    }
 }
 
 fn tray_menu<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) -> tauri::Result<Menu<R>> {
@@ -334,10 +344,12 @@ pub fn refresh_tray<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) 
 mod panel {
     use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
     use objc2::{msg_send, sel};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tauri::{Runtime, WebviewWindow};
 
     pub static KEYABLE: AtomicBool = AtomicBool::new(false);
+    /// 换类前的原始 isa（WebKit 已在其上注册 KVO），销毁前必须换回，否则移除观察者抛 NSException 闪退
+    static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
     const NONACTIVATING: usize = 1 << 7;
 
     extern "C" {
@@ -369,12 +381,24 @@ mod panel {
         let ptr = ptr as usize;
         let _ = w.run_on_main_thread(move || unsafe {
             let obj = ptr as *mut AnyObject;
-            object_setClass(obj, class());
+            ORIGINAL.store(object_setClass(obj, class()) as usize, Ordering::Relaxed);
             let o = &*obj;
             let mask: usize = msg_send![o, styleMask];
             let _: () = msg_send![o, setStyleMask: mask | NONACTIVATING];
             let _: () = msg_send![o, setHidesOnDeactivate: Bool::NO];
             let _: () = msg_send![o, setHasShadow: Bool::NO];
+        });
+    }
+
+    /// destroy 走事件循环代理，排在本任务之后执行
+    pub fn restore<R: Runtime>(w: &WebviewWindow<R>) {
+        let Ok(ptr) = w.ns_window() else { return };
+        let ptr = ptr as usize;
+        let _ = w.run_on_main_thread(move || unsafe {
+            let cls = ORIGINAL.swap(0, Ordering::Relaxed);
+            if cls != 0 {
+                object_setClass(ptr as *mut AnyObject, cls as *const AnyClass);
+            }
         });
     }
 }
