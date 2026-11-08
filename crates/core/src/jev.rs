@@ -24,7 +24,35 @@ pub enum Mode {
     Yce,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// 提前选择使用精确比例而非百分数；未知选项回退到旧版的三分之二。
+///
+/// Early selection uses exact ratios rather than percentages; unknown options retain the legacy two-thirds default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionThreshold {
+    Half,
+    All,
+    #[default]
+    #[serde(other)]
+    TwoThirds,
+}
+
+impl SelectionThreshold {
+    pub fn reached(self, finals: usize, participating: usize) -> bool {
+        let required = match self {
+            Self::Half => participating.div_ceil(2),
+            Self::TwoThirds => participating - participating / 3,
+            Self::All => participating,
+        };
+        participating > 0 && finals >= required
+    }
+}
+
+pub const SELECTION_WAIT_DEFAULT_MS: u64 = 2500;
+pub const SELECTION_WAIT_MIN_MS: u64 = 500;
+pub const SELECTION_WAIT_MAX_MS: u64 = 5000;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Config {
     pub mode: Mode,
@@ -32,6 +60,29 @@ pub struct Config {
     pub endpoint: String,
     pub model: String,
     pub pool: String,
+    pub selection_threshold: SelectionThreshold,
+    #[serde(deserialize_with = "deserialize_selection_wait")]
+    pub selection_wait_ms: u64,
+}
+
+fn deserialize_selection_wait<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    let ms = value.as_u64().or_else(|| value.as_i64().map(|n| n.max(0) as u64));
+    Ok(ms.unwrap_or(SELECTION_WAIT_DEFAULT_MS).clamp(SELECTION_WAIT_MIN_MS, SELECTION_WAIT_MAX_MS))
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            mode: Mode::default(),
+            key: String::new(),
+            endpoint: String::new(),
+            model: String::new(),
+            pool: String::new(),
+            selection_threshold: SelectionThreshold::default(),
+            selection_wait_ms: SELECTION_WAIT_DEFAULT_MS,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,9 +264,18 @@ pub fn mask(key: &str) -> String {
 }
 
 impl Config {
+    /// 在读取和保存边界限制等待时长；会话再取副本，避免设置变化改写正在等待的截止时间。
+    ///
+    /// Bound the wait duration at load/save boundaries; sessions take a copy so edits cannot change an active deadline.
+    pub fn sanitize_selection(&mut self) {
+        self.selection_wait_ms = self.selection_wait_ms.clamp(SELECTION_WAIT_MIN_MS, SELECTION_WAIT_MAX_MS);
+    }
+
     /// 解析失败返回 Default（Off）
     pub fn from_json(s: &str) -> Config {
-        serde_json::from_str(s).unwrap_or_default()
+        let mut config: Config = serde_json::from_str(s).unwrap_or_default();
+        config.sanitize_selection();
+        config
     }
 
     pub fn targets(&self) -> Result<Vec<Target>, String> {
@@ -565,6 +625,7 @@ mod tests {
             endpoint: endpoint.to_string(),
             model: model.to_string(),
             pool: pool.to_string(),
+            ..Config::default()
         }
     }
 
@@ -625,6 +686,47 @@ mod tests {
         assert_eq!(cfg(Mode::Official, "k", "", " my-model ", "").model(), "my-model");
         assert_eq!(cfg(Mode::Yce, "", "", "my-model", "a|k").model(), DEFAULT_MODEL);
         assert_eq!(cfg(Mode::Off, "", "", "my-model", "").model(), DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn selection_defaults_keep_legacy_config_and_credentials() {
+        let c = Config::from_json(r#"{"mode":"official","key":"test-key"}"#);
+        assert_eq!(c.selection_threshold, SelectionThreshold::TwoThirds);
+        assert_eq!(c.selection_wait_ms, 2500);
+        assert_eq!(c.key, "test-key");
+        let unknown = Config::from_json(r#"{"mode":"official","key":"test-key","selectionThreshold":"future"}"#);
+        assert_eq!(unknown, c);
+    }
+
+    #[test]
+    fn selection_config_round_trips_and_bounds_wait_without_losing_credentials() {
+        for threshold in [SelectionThreshold::Half, SelectionThreshold::TwoThirds, SelectionThreshold::All] {
+            for ms in [500, 2500, 5000] {
+                let c = Config { selection_threshold: threshold, selection_wait_ms: ms, ..Config::default() };
+                assert_eq!(Config::from_json(&serde_json::to_string(&c).unwrap()), c);
+            }
+        }
+        for (value, expected) in [(json!(-1), 500), (json!(0), 500), (json!(99999), 5000), (Value::Null, 2500), (json!("bad"), 2500), (json!(1.5), 2500)] {
+            let c = Config::from_json(&json!({"mode":"official","key":"test-key","selectionWaitMs":value}).to_string());
+            assert_eq!(c.selection_wait_ms, expected);
+            assert_eq!(c.mode, Mode::Official);
+            assert_eq!(c.key, "test-key");
+        }
+    }
+
+    #[test]
+    fn selection_thresholds_use_exact_upward_rounding() {
+        for participants in 1usize..=10 {
+            for (threshold, required) in [
+                (SelectionThreshold::Half, participants.div_ceil(2)),
+                (SelectionThreshold::TwoThirds, (participants * 2).div_ceil(3)),
+                (SelectionThreshold::All, participants),
+            ] {
+                assert!(!threshold.reached(required - 1, participants));
+                assert!(threshold.reached(required, participants));
+                assert!(!threshold.reached(0, 0));
+            }
+        }
     }
 
     // ---- best ----

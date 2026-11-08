@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -66,7 +68,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import kotlin.math.roundToInt
 import org.json.JSONObject
 
@@ -309,7 +314,12 @@ private fun serializeJevPool(rows: List<JevRow>): String {
     }.joinToString("\n")
 }
 
-/** 多渠道定稿后用 Jev 评出最佳一条自动上屏；配置存本机，测试结果在回调里回主线程 */
+/**
+ * 多渠道候选按选择时机交给 Jev 推荐，上屏与发送沿用 pickSend；配置存本机，测试结果回主线程。
+ *
+ * Multi-channel candidates reach Jev according to selection timing; insertion and sending retain
+ * pickSend semantics. Settings stay local, and test results return to the main thread.
+ */
 @Composable
 private fun JevSettings() {
     val p = App.prefs
@@ -395,8 +405,76 @@ private fun JevSettings() {
                 }, enabled = !testing && problem == null) { Text(if (testing) "测试中…" else "测试") }
             }
             result?.let { (ok, text) -> Hint(text, color = if (ok) Color(0xFF2E9E5B) else MaterialTheme.colorScheme.error) }
+            JevTimingSettings()
         } else {
             Hint("仅多渠道模式生效；只把转写文字发给 Jev，不发渠道名；密钥只存本机")
+        }
+    }
+}
+
+@Composable
+private fun JevTimingSettings() {
+    val p = App.prefs
+    var expanded by remember { mutableStateOf(false) }
+    var threshold by remember { mutableStateOf(p.jevSelectionThreshold) }
+    var waitMs by remember { mutableIntStateOf(p.jevSelectionWaitMs) }
+    fun seconds(ms: Int) = String.format(Locale.ROOT, "%.1f", ms / 1000.0)
+    var draft by remember { mutableStateOf(seconds(waitMs)) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val saveWait = {
+        val ms = JevSelectionTiming.parseWaitSeconds(draft)
+        if (ms == null) {
+            draft = seconds(waitMs)
+            error = "请输入 0.5–5 秒、步长为 0.5 秒的数值；已恢复上次保存值"
+        } else {
+            waitMs = ms
+            p.jevSelectionWaitMs = ms
+            draft = seconds(ms)
+            error = null
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton({ expanded = !expanded }) { Text(if (expanded) "▾ 选择时机" else "▸ 选择时机") }
+        if (expanded) {
+            Text("提前评选门槛", style = MaterialTheme.typography.titleSmall)
+            for ((value, title) in listOf(
+                JevSelectionThreshold.Half to "半数",
+                JevSelectionThreshold.TwoThirds to "三分之二（推荐）",
+                JevSelectionThreshold.All to "全部",
+            )) {
+                Row(Modifier.fillMaxWidth().clickable { threshold = value; p.jevSelectionThreshold = value }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(threshold == value, null)
+                    Text(title)
+                }
+            }
+            Text("候选补齐等待时间", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    draft, { draft = it }, Modifier.weight(1f),
+                    label = { Text("等待时间（秒）") }, singleLine = true, isError = error != null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { saveWait() }),
+                )
+                TextButton({ saveWait() }) { Text("保存") }
+            }
+            error?.let { Hint(it, color = MaterialTheme.colorScheme.error) }
+            Slider(waitMs / 1000f, {
+                waitMs = (it * 2).roundToInt() * 500
+                p.jevSelectionWaitMs = waitMs
+                draft = seconds(waitMs)
+                error = null
+            }, valueRange = 0.5f..5f, steps = 8)
+            Hint("0.5–5 秒，步长 0.5 秒；输入后点“保存”，无效输入会恢复上次保存值。")
+            TextButton({
+                p.resetJevSelectionTiming()
+                threshold = p.jevSelectionThreshold
+                waitMs = p.jevSelectionWaitMs
+                draft = seconds(waitMs)
+                error = null
+            }) { Text("恢复默认") }
+            Hint("仅恢复门槛（三分之二）和等待时间（2.5 秒），不改模式或 API Key。")
+            Hint("停录后达到门槛立即选择；未达到时，从首条可用定稿起等待配置时长（录音中已有定稿则从停录起算）。全渠道终结会提前推进；“全部”也受等待上限限制。等待不包含 Jev 请求耗时；修改在下一次录音生效。")
         }
     }
 }

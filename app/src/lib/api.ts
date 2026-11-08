@@ -13,7 +13,10 @@ import bageshuo from "../assets/logos/bageshuo.png";
 export type Channel = "doubao" | "wetype" | "qwen" | "baidu" | "sogou" | "iflytek" | "chatterfly" | "qwenapp" | "bageshuo" | "offline" | "wetypeoffline" | "all";
 export interface Shortcut { code: number; mods: number; name: string }
 export interface Combo { codes: number[]; name: string }
-export interface JevConfig { mode: "off" | "official" | "yce"; key: string; endpoint: string; model: string; pool: string }
+export interface JevConfig {
+  mode: "off" | "official" | "yce"; key: string; endpoint: string; model: string; pool: string;
+  selectionThreshold: "half" | "twoThirds" | "all"; selectionWaitMs: number;
+}
 export interface JevTested { index: number; text: string; alias: string; ms: number; key: string }
 export interface Settings {
   channel: Channel; holdKey: string; holdCombo: Combo | null; tapShortcut: Shortcut | null; silence: number; silenceStop: boolean; streaming: boolean;
