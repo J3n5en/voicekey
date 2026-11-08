@@ -5,6 +5,9 @@
   const MODES: [JevConfig["mode"], string][] = [["off", "关闭"], ["official", "官方格式"], ["yce", "自定义格式"]];
   // 输入框绑本地草稿，失焦才写回设置
   let d = $state<JevConfig>({ ...app.s!.jev });
+  const THRESHOLDS: [JevConfig["selectionThreshold"], string][] = [["half", "半数"], ["twoThirds", "三分之二（推荐）"], ["all", "全部"]];
+  let waitSeconds = $state<number | undefined>(d.selectionWaitMs / 1000);
+  let waitError = $state("");
   let busy = $state(false);
   let result = $state<{ ok: boolean; text: string } | null>(null);
 
@@ -49,6 +52,23 @@
   const hasKey = $derived(d.key.trim() !== "");
   const hasPool = $derived(rows.some((r) => r.key.trim() !== ""));
   const commit = () => save({ jev: { ...d } });
+  const commitWait = () => {
+    if (waitSeconds === undefined || !Number.isFinite(waitSeconds) || waitSeconds < 0.5 || waitSeconds > 5 || !Number.isInteger(waitSeconds * 2)) {
+      waitSeconds = d.selectionWaitMs / 1000;
+      waitError = "请输入 0.5～5 秒，步长为 0.5 秒；已恢复上次保存的值";
+      return;
+    }
+    d.selectionWaitMs = Math.round(waitSeconds * 1000);
+    waitError = "";
+    commit();
+  };
+  const resetSelection = () => {
+    d.selectionThreshold = "twoThirds";
+    d.selectionWaitMs = 2500;
+    waitSeconds = 2.5;
+    waitError = "";
+    commit();
+  };
   const syncPool = () => {
     d.pool = toPool(rows);
     commit();
@@ -77,7 +97,7 @@
 <h3>智能选择（Jev）</h3>
 <div class="group">
   <div class="row">
-    <div class="lbl">说完后由 Jev 自动挑一条上屏<small>仅多渠道模式生效；只把转写文字发给 Jev，不发渠道名；密钥只存本机</small></div>
+    <div class="lbl">说完后由 Jev 自动挑一条上屏<small>仅多渠道且 Jev 启用、配置有效时生效；关闭或配置不可用时由你手选；只发送转写文字，不发渠道名；密钥只存本机</small></div>
     <div class="segc">
       {#each MODES as [k, v]}<button class:on={d.mode === k} onclick={() => setMode(k)}>{v}</button>{/each}
     </div>
@@ -110,6 +130,24 @@
     </div>
   {/if}
   {#if d.mode !== "off"}
+    <details class="selection">
+      <summary>选择时机 <span>{THRESHOLDS.find(([value]) => value === d.selectionThreshold)?.[1]} · {d.selectionWaitMs / 1000} 秒</span></summary>
+      <div class="row">
+        <label class="lbl" for="jev-threshold">提前评选门槛<small>参与渠道中达到该比例定稿，即开始选择；按渠道数向上取整</small></label>
+        <select id="jev-threshold" class="in" bind:value={d.selectionThreshold} onchange={commit}>
+          {#each THRESHOLDS as [value, label]}<option {value}>{label}</option>{/each}
+        </select>
+      </div>
+      <div class="row">
+        <label class="lbl" for="jev-wait">候选补齐等待时间<small>未达到门槛时，从停录后首条可用定稿起最多再等多久</small></label>
+        <div class="wait-input"><input id="jev-wait" class="in" type="number" min="0.5" max="5" step="0.5" bind:value={waitSeconds} onblur={commitWait} onkeydown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} aria-describedby="jev-wait-hint" /><span>秒</span></div>
+      </div>
+      <div class="selection-note" id="jev-wait-hint">
+        {#if waitError}<p class="err" role="alert">{waitError}</p>{/if}
+        <p>范围 0.5～5 秒。所有渠道提前结束时立即选择；门槛选“全部”仍受此等待上限限制。没有定稿时保留识别超时兜底，等待时间不包含 Jev 请求耗时。</p>
+        <div class="selection-footer"><span>下一次录音生效（含续录）；用户手选始终优先。</span><button class="btn" onclick={resetSelection}>恢复默认</button></div>
+      </div>
+    </details>
     <div class="row">
       <div class="lbl">
         {#if result}<small class={result.ok ? "ok" : "err"}>{result.text}</small>{:else}<small>用两条示例转写真发一次请求，验证配置</small>{/if}
@@ -120,6 +158,17 @@
 </div>
 
 <style>
+  .selection { border-top: 1px solid var(--line); }
+  .selection summary { cursor: pointer; padding: 14px 16px; font-weight: 600; }
+  .selection summary span { margin-left: 8px; color: var(--fg3); font-size: 11.5px; font-weight: 400; }
+  .selection .in { width: 180px; }
+  .wait-input { display: flex; align-items: center; gap: 8px; flex: none; }
+  .wait-input .in { width: 120px; }
+  .selection-note { padding: 0 16px 14px; color: var(--fg3); font-size: 11.5px; line-height: 1.6; }
+  .selection-note p { margin: 4px 0 10px; }
+  .selection-note .err { color: var(--err); }
+  .selection-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .selection summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .in { width: 280px; flex: none; border: 1px solid var(--line); background: var(--card2); border-radius: var(--rs); padding: 5px 10px; outline: none; -webkit-user-select: text; user-select: text; cursor: text; }
   .in:focus { border-color: var(--accent); }
   .in::placeholder { color: var(--fg3); }

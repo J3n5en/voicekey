@@ -187,6 +187,7 @@ impl Settings {
 
     /// 不可用的渠道/按键回落默认
     pub fn sanitize(&mut self) {
+        self.jev.sanitize_selection();
         if !Channel::available().contains(&self.channel) {
             self.channel = Channel::Doubao;
         }
@@ -243,6 +244,19 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_jev_selection_defaults_and_new_values_are_sanitized() {
+        let mut settings: Settings = serde_json::from_str(r#"{"jev":{"mode":"official","key":"test-key"}}"#).unwrap();
+        assert_eq!(settings.jev.selection_threshold, voicekey_core::jev::SelectionThreshold::TwoThirds);
+        assert_eq!(settings.jev.selection_wait_ms, 2500);
+        for (input, expected) in [(0, 500), (500, 500), (5000, 5000), (u64::MAX, 5000)] {
+            settings.jev.selection_wait_ms = input;
+            settings.sanitize();
+            assert_eq!(settings.jev.selection_wait_ms, expected);
+            assert_eq!(settings.jev.key, "test-key");
+        }
+    }
 
     #[test]
     fn missing_duck_percent_uses_default() {

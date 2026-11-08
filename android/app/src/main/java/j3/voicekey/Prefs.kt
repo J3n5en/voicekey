@@ -51,13 +51,42 @@ class Prefs(ctx: Context) {
         get() = sp.getString("jevPool", "") ?: ""
         set(v) = sp.edit().putString("jevPool", v).apply()
 
-    /** core jev::Config 的 camelCase JSON，交给 Native.jevCheck / jevPick / jevTest */
-    fun jevConfig(): String = JSONObject()
+    var jevSelectionThreshold: JevSelectionThreshold
+        get() = JevSelectionThreshold.of(sp.getString("jevSelectionThreshold", null))
+        set(v) = sp.edit().putString("jevSelectionThreshold", v.id).apply()
+
+    var jevSelectionWaitMs: Int
+        get() = JevSelectionTiming.clampWait(sp.getInt("jevSelectionWaitMs", JevSelectionTiming.DEFAULT_WAIT_MS))
+        set(v) = sp.edit().putInt("jevSelectionWaitMs", JevSelectionTiming.clampWait(v)).apply()
+
+    fun jevSelectionTiming() = JevSelectionTiming(jevSelectionThreshold, jevSelectionWaitMs)
+
+    /**
+     * 只恢复选择时机，不修改模式、密钥及其他 Jev 设置。
+     *
+     * Restore only selection timing, leaving the mode, credentials, and other Jev settings untouched.
+     */
+    fun resetJevSelectionTiming() {
+        sp.edit()
+            .putString("jevSelectionThreshold", JevSelectionThreshold.TwoThirds.id)
+            .putInt("jevSelectionWaitMs", JevSelectionTiming.DEFAULT_WAIT_MS)
+            .apply()
+    }
+
+    /**
+     * core jev::Config 的 camelCase JSON；会话传入录音快照，设置页默认使用当前选择时机。
+     *
+     * Produce camelCase JSON for core jev::Config. Sessions supply a recording snapshot;
+     * the settings screen defaults to the current selection timing.
+     */
+    fun jevConfig(timing: JevSelectionTiming = jevSelectionTiming()): String = JSONObject()
         .put("mode", jevMode)
         .put("key", jevKey)
         .put("endpoint", jevEndpoint)
         .put("model", jevModel)
         .put("pool", jevPool)
+        .put("selectionThreshold", timing.threshold.id)
+        .put("selectionWaitMs", timing.waitMs)
         .toString()
 
     /** 点按说话时静音多少秒自动结束 */

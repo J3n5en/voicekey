@@ -27,6 +27,7 @@ fn official(key: &str, endpoint: &str) -> Config {
         endpoint: endpoint.to_string(),
         model: String::new(),
         pool: String::new(),
+        ..Config::default()
     }
 }
 
@@ -68,6 +69,7 @@ async fn yce_pool_swaps_bad_key_to_live() {
         endpoint: String::new(),
         model: String::new(),
         pool,
+        ..Config::default()
     };
     let t = match jev::test(&cfg).await {
         Ok(t) => t,
