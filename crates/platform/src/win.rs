@@ -1,5 +1,5 @@
 use crate::volume::{OutputVolumeSnapshot, OutputVolumeValue};
-use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, META, SHIFT};
+use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, META, MOUSE_BASE, SHIFT};
 use std::sync::Mutex;
 use std::time::Duration;
 use windows::core::{Interface, PCWSTR};
@@ -22,7 +22,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId,
     SetForegroundWindow, SetWindowsHookExW, TranslateMessage, GUITHREADINFO, HC_ACTION, KBDLLHOOKSTRUCT, MSG,
-    WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+    MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_SYSKEYDOWN,
+    WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
 /// 自己注入的事件打标记（dwExtraInfo），钩子里跳过
@@ -72,6 +73,35 @@ unsafe extern "system" fn ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     CallNextHookEx(None, code, wparam, lparam)
 }
 
+/// 鼠标中键与侧键（XBUTTON1/2）按下、松开，按键盘事件的形式交给同一个回调；左右键与移动直接放行
+unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        let m = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+        let msg = wparam.0 as u32;
+        let button = match msg {
+            WM_MBUTTONDOWN | WM_MBUTTONUP => Some(2),
+            WM_XBUTTONDOWN | WM_XBUTTONUP => match (m.mouseData >> 16) & 0xFFFF {
+                1 => Some(3),
+                2 => Some(4),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(b) = button.filter(|_| m.dwExtraInfo != MAGIC) {
+            let pressed = msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN;
+            let mut st = STATE.lock().unwrap();
+            let kind = if pressed { KeyKind::Down } else { KeyKind::Up };
+            let ev = KeyEvent { kind, code: MOUSE_BASE + b, mods: mods(&st.down), repeat: false, chars: None };
+            if let Some(f) = st.hook.as_mut() {
+                if f(&ev) {
+                    return LRESULT(1);
+                }
+            }
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
 pub fn start_hook(f: HookFn) {
     STATE.lock().unwrap().hook = Some(f);
     std::thread::spawn(|| unsafe {
@@ -79,6 +109,8 @@ pub fn start_hook(f: HookFn) {
         if SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_proc), module.map(Into::into), 0).is_err() {
             return;
         }
+        // 鼠标钩子失败不影响键盘快捷键
+        let _ = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module.map(Into::into), 0);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);

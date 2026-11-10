@@ -22,7 +22,7 @@
 </script>
 
 <h2>快捷键</h2>
-<div class="sub">两种方式可同时使用；同一个修饰键也可以既长按又点按。</div>
+<div class="sub">两种方式可同时使用；同一个修饰键也可以既长按又点按。也支持鼠标中键和侧键，录制时按一下即可。</div>
 <div class="keys">
   <div class="kcard">
     <div class="art"><span class="kbd press">{hold}</span><span class="hint">按住说话 · 松开结束</span></div>
@@ -33,7 +33,7 @@
       {#if s.holdCombo}<option value="custom">{s.holdCombo.name}</option>{/if}
     </select>
     <button class="rec hold" class:active={rec("hold")} onclick={() => record("hold")}>
-      {#if rec("hold")}按住组合键再松开…（Esc 取消）{:else}自定义组合键，如 {mac ? "⌃ + ⌥" : "Ctrl + Alt"} 或 修饰键 + 空格{/if}
+      {#if rec("hold")}按住组合键或鼠标键再松开…（Esc 取消）{:else}自定义组合键，如 {mac ? "⌃ + ⌥" : "Ctrl + Alt"}、修饰键 + 空格 或 鼠标侧键{/if}
     </button>
   </div>
   <div class="kcard">
@@ -42,7 +42,7 @@
     <small>适合长段口述，再点一次可提前结束</small>
     <div class="recrow">
       <button class="rec" class:active={rec("tap")} onclick={() => record("tap")}>
-        {#if rec("tap")}请按下快捷键…（Esc 取消）{:else}<span class="kbd mini">{tap}</span>点击后按下新的快捷键{/if}
+        {#if rec("tap")}请按下快捷键或鼠标键…（Esc 取消）{:else}<span class="kbd mini">{tap}</span>点击后按下新的快捷键{/if}
       </button>
       {#if s.tapShortcut && !rec("tap")}<button class="clear" title="关闭点按快捷键" onclick={() => save({ tapShortcut: null })}>✕</button>{/if}
     </div>

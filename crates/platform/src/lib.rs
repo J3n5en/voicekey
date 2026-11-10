@@ -1,4 +1,4 @@
-//! 平台相关能力：全局键盘钩子、模拟输入、光标位置、权限
+//! 平台相关能力：全局键盘/鼠标按键钩子、模拟输入、光标位置、权限
 
 #[cfg(target_os = "macos")]
 mod mac;
@@ -31,7 +31,7 @@ pub enum KeyKind {
 #[derive(Clone, Debug)]
 pub struct KeyEvent {
     pub kind: KeyKind,
-    /// 平台原生键码（macOS virtual keycode / Windows VK）
+    /// 平台原生键码（macOS virtual keycode / Windows VK）；鼠标按键为 MOUSE_BASE + 序号
     pub code: u32,
     /// 事件发生时按住的修饰键（CTRL|ALT|SHIFT|META|FN）
     pub mods: u8,
@@ -54,6 +54,29 @@ pub enum Special {
 
 pub use imp::keys::{hold_keys, is_function_key, modifier, special};
 
+/// 鼠标按键的伪键码基数：不与 macOS keycode / Windows VK（均 < 256）冲突。
+/// 键码 = MOUSE_BASE + 按键序号（2 中键，3 侧键后退，4 侧键前进，更大的为多键鼠标的其他按键）。
+/// 左右键不会上报，避免误伤正常点击。
+pub const MOUSE_BASE: u32 = 0x1_0000;
+
+/// 鼠标按键的序号；不是鼠标键时为 None
+pub fn mouse_button(code: u32) -> Option<u32> {
+    code.checked_sub(MOUSE_BASE).filter(|b| (2..32).contains(b))
+}
+
+pub fn is_mouse_button(code: u32) -> bool {
+    mouse_button(code).is_some()
+}
+
+fn mouse_name(button: u32) -> String {
+    match button {
+        2 => "鼠标中键".into(),
+        3 => "鼠标侧键（后退）".into(),
+        4 => "鼠标侧键（前进）".into(),
+        n => format!("鼠标按键 {}", n + 1),
+    }
+}
+
 /// 长按说话可选的修饰键
 pub struct HoldKey {
     pub id: &'static str,
@@ -62,6 +85,9 @@ pub struct HoldKey {
 }
 
 pub fn key_name(e: &KeyEvent) -> String {
+    if let Some(b) = mouse_button(e.code) {
+        return mouse_name(b);
+    }
     if let Some((_, n)) = modifier(e.code) {
         return n.into();
     }
