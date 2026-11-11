@@ -322,6 +322,39 @@ pub fn caret() -> Option<Rect> {
     }
 }
 
+/// 焦点元素是否接受文本输入：按 AXRole 判断，可输入角色为真，明确不收文本的控件为假，
+/// 取不到焦点或角色未知时按可输入处理——宁可照常粘贴，也不要在拿不准的应用里吞掉文字。
+pub fn has_text_target() -> bool {
+    objc2::rc::autoreleasepool(|_| unsafe {
+        let Some(el) = focused_element() else { return true };
+        let Some(role) = ax_string(el.as_CFTypeRef() as Ref, "AXRole") else { return true };
+        if matches!(role.as_str(), "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" | "AXWebArea") {
+            return true;
+        }
+        !matches!(
+            role.as_str(),
+            "AXStaticText" | "AXImage" | "AXButton" | "AXCheckBox" | "AXRadioButton" | "AXMenuItem"
+                | "AXMenuBar" | "AXMenu" | "AXToolbar" | "AXTabGroup" | "AXWindow" | "AXSheet"
+        )
+    })
+}
+
+fn ax_string(el: Ref, name: &str) -> Option<String> {
+    let v = ax_attr(el, name)?;
+    unsafe { Some(CFString::wrap_under_get_rule(v.as_CFTypeRef() as CFStringRef).to_string()) }
+}
+
+/// 只写剪贴板，不发 ⌘V，也不恢复原内容：焦点没有输入框时把文字留在这里
+pub fn copy(text: &str) {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    objc2::rc::autoreleasepool(|_| unsafe {
+        let pb = NSPasteboard::generalPasteboard();
+        pb.clearContents();
+        pb.setString_forType(&NSString::from_str(text), NSPasteboardTypeString);
+    });
+}
+
 unsafe fn bounds_for(el: Ref, range: Ref) -> Option<CGRect> {
     let attr = CFString::new("AXBoundsForRange");
     let mut out: Ref = std::ptr::null_mut();
