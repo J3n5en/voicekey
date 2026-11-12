@@ -37,6 +37,11 @@ bytes = "1"
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
 
+# iOS：Jev 从 Security.framework 取系统锚点（桌面走 rustls-native-certs）
+[target.'cfg(target_os = "ios")'.dependencies]
+security-framework = "3"
+core-foundation = "0.10"
+
 [[bin]]
 name = "vk-test"
 path = "src/bin/vk-test.rs"

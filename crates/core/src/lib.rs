@@ -5,6 +5,7 @@ pub mod baidu;
 pub mod chatterfly;
 pub mod doubao;
 pub mod jev;
+mod platform_roots;
 pub mod opus;
 pub mod pb;
 pub mod qwen;

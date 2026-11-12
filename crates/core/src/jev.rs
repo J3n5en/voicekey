@@ -326,10 +326,20 @@ impl Tested {
 }
 
 fn client() -> Result<reqwest::Client, JevError> {
-    let b = reqwest::Client::builder();
+    let mut b = reqwest::Client::builder();
     // 单测只打回环假服务，不能被本机代理环境变量带偏
     #[cfg(test)]
-    let b = b.no_proxy();
+    {
+        b = b.no_proxy();
+    }
+    for raw in crate::platform_roots::load() {
+        let Ok(cert) = reqwest::Certificate::from_der(&raw)
+            .or_else(|_| reqwest::Certificate::from_pem(&raw))
+        else {
+            continue;
+        };
+        b = b.add_root_certificate(cert);
+    }
     b.build().map_err(net)
 }
 
