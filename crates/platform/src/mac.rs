@@ -1,5 +1,5 @@
 use crate::volume::{OutputVolumeSnapshot, OutputVolumeValue};
-use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, FN, META, SHIFT};
+use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, FN, META, MOUSE_BASE, SHIFT};
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
@@ -63,6 +63,11 @@ extern "C" {
 const KEY_DOWN: u32 = 10;
 const KEY_UP: u32 = 11;
 const FLAGS_CHANGED: u32 = 12;
+/// kCGEventOtherMouseDown / Up：左右键以外的鼠标按键（中键、侧键等）
+const OTHER_MOUSE_DOWN: u32 = 25;
+const OTHER_MOUSE_UP: u32 = 26;
+/// kCGMouseEventButtonNumber
+const FIELD_MOUSE_BUTTON: u32 = 3;
 const FIELD_KEYCODE: u32 = 9;
 const FIELD_AUTOREPEAT: u32 = 8;
 const FIELD_USER_DATA: u32 = 42;
@@ -109,8 +114,23 @@ extern "C" fn tap_cb(_proxy: Ref, kind: u32, event: Ref, _refcon: Ref) -> Ref {
     if unsafe { CGEventGetIntegerValueField(event, FIELD_USER_DATA) } == MAGIC {
         return event;
     }
-    let code = unsafe { CGEventGetIntegerValueField(event, FIELD_KEYCODE) } as u32;
     let flags = unsafe { CGEventGetFlags(event) };
+    if kind == OTHER_MOUSE_DOWN || kind == OTHER_MOUSE_UP {
+        let button = unsafe { CGEventGetIntegerValueField(event, FIELD_MOUSE_BUTTON) };
+        if !(2..32).contains(&button) {
+            return event;
+        }
+        let ev = KeyEvent {
+            kind: if kind == OTHER_MOUSE_DOWN { KeyKind::Down } else { KeyKind::Up },
+            code: MOUSE_BASE + button as u32,
+            mods: mods(flags),
+            repeat: false,
+            chars: None,
+        };
+        let swallow = HOOK.lock().unwrap().as_mut().is_some_and(|f| f(&ev));
+        return if swallow { std::ptr::null_mut() } else { event };
+    }
+    let code = unsafe { CGEventGetIntegerValueField(event, FIELD_KEYCODE) } as u32;
     let kind = match kind {
         KEY_DOWN => KeyKind::Down,
         KEY_UP => KeyKind::Up,
@@ -137,11 +157,15 @@ extern "C" fn tap_cb(_proxy: Ref, kind: u32, event: Ref, _refcon: Ref) -> Ref {
     if swallow { std::ptr::null_mut() } else { event }
 }
 
-/// 安装全局键盘钩子；无辅助功能权限时每 2 秒重试直到授权
+/// 安装全局键盘钩子（含鼠标中键/侧键）；无辅助功能权限时每 2 秒重试直到授权
 pub fn start_hook(f: HookFn) {
     *HOOK.lock().unwrap() = Some(f);
     std::thread::spawn(|| loop {
-        let mask = (1u64 << KEY_DOWN) | (1 << KEY_UP) | (1 << FLAGS_CHANGED);
+        let mask = (1u64 << KEY_DOWN)
+            | (1 << KEY_UP)
+            | (1 << FLAGS_CHANGED)
+            | (1 << OTHER_MOUSE_DOWN)
+            | (1 << OTHER_MOUSE_UP);
         let tap = unsafe { CGEventTapCreate(1, 0, 0, mask, tap_cb, std::ptr::null_mut()) };
         if tap.is_null() {
             std::thread::sleep(Duration::from_secs(2));
@@ -320,6 +344,39 @@ pub fn caret() -> Option<Rect> {
         let f = frame.filter(|f| f.w > 0.0 && f.h > 0.0)?;
         Some(Rect { x: f.x + 8.0, y: f.y, w: 0.0, h: f.h.min(22.0), physical: false })
     }
+}
+
+/// 焦点元素是否接受文本输入：按 AXRole 判断，可输入角色为真，明确不收文本的控件为假，
+/// 取不到焦点或角色未知时按可输入处理——宁可照常粘贴，也不要在拿不准的应用里吞掉文字。
+pub fn has_text_target() -> bool {
+    objc2::rc::autoreleasepool(|_| unsafe {
+        let Some(el) = focused_element() else { return true };
+        let Some(role) = ax_string(el.as_CFTypeRef() as Ref, "AXRole") else { return true };
+        if matches!(role.as_str(), "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" | "AXWebArea") {
+            return true;
+        }
+        !matches!(
+            role.as_str(),
+            "AXStaticText" | "AXImage" | "AXButton" | "AXCheckBox" | "AXRadioButton" | "AXMenuItem"
+                | "AXMenuBar" | "AXMenu" | "AXToolbar" | "AXTabGroup" | "AXWindow" | "AXSheet"
+        )
+    })
+}
+
+fn ax_string(el: Ref, name: &str) -> Option<String> {
+    let v = ax_attr(el, name)?;
+    unsafe { Some(CFString::wrap_under_get_rule(v.as_CFTypeRef() as CFStringRef).to_string()) }
+}
+
+/// 只写剪贴板，不发 ⌘V，也不恢复原内容：焦点没有输入框时把文字留在这里
+pub fn copy(text: &str) {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    objc2::rc::autoreleasepool(|_| {
+        let pb = NSPasteboard::generalPasteboard();
+        pb.clearContents();
+        pb.setString_forType(&NSString::from_str(text), NSPasteboardTypeString);
+    });
 }
 
 unsafe fn bounds_for(el: Ref, range: Ref) -> Option<CGRect> {

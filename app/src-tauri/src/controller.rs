@@ -300,6 +300,28 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
     tauri::async_runtime::spawn(ctl.run(rx));
 }
 
+/// 焦点能接收文字，且当前不是安全输入（密码框）。流式上屏、粘贴、候选框延迟上屏都走这一条件。
+fn allow_text_input(has_text_target: bool, secure_input: bool) -> bool {
+    has_text_target && !secure_input
+}
+
+const CLIPBOARD_HINT: &str = "没有可输入的位置，文字已复制到剪贴板";
+
+/// 能输入就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。
+fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    if allow_text_input(pf::has_text_target(), pf::secure_input()) {
+        pf::paste(text);
+        return true;
+    }
+    pf::copy(text);
+    ui::hud(app, "info", CLIPBOARD_HINT, ch);
+    ui::hud_hide(app, 2600);
+    false
+}
+
 impl Ctl {
     async fn run(mut self, mut rx: UnboundedReceiver<Msg>) {
         let mut retry = tokio::time::interval(Duration::from_secs(2));
@@ -664,7 +686,8 @@ impl Ctl {
         self.auto_stop = auto_stop;
         self.gen += 1;
         self.mode = Mode::Single(s.channel);
-        self.typer = s.streaming.then(Typer::default);
+        // 没有可输入焦点，或安全输入（密码框）时不边说边打：退格和字符都会进到前台。结束时改走 deliver_text。
+        self.typer = (s.streaming && allow_text_input(pf::has_text_target(), pf::secure_input())).then(Typer::default);
         self.segs = Segments::default();
         let seg = self.segs.start();
         ui::hud(&self.app, "listen", "", s.channel);
@@ -806,6 +829,11 @@ impl Ctl {
         }
     }
 
+    /// 上屏：焦点接受文本就粘贴；没有输入框（或安全输入）时只写剪贴板并提示，避免整段文字丢失
+    fn insert(&self, text: &str, ch: Channel) -> bool {
+        deliver_text(&self.app, text, ch)
+    }
+
     fn done(&mut self, ch: Channel, seg: usize, res: Result<String, String>) {
         match self.mode {
             Mode::Single(_) => {
@@ -833,7 +861,7 @@ impl Ctl {
                 }
                 if let Some(e) = error {
                     if !streamed && !text.is_empty() {
-                        pf::paste(&text);
+                        self.insert(&text, ch);
                     }
                     let msg = if text.is_empty() {
                         format!("识别失败：{e}")
@@ -854,7 +882,7 @@ impl Ctl {
                     self.play_after_restore(SoundEvent::Error);
                 } else {
                     ui::hud_hide(&self.app, 0);
-                    pf::paste(&text);
+                    self.insert(&text, ch);
                 }
             }
             Mode::Pick | Mode::Compare => {
@@ -1009,12 +1037,14 @@ impl Ctl {
         if message.is_some() && !streamed && !partial.is_empty() {
             if mode == Mode::Pick {
                 let text = partial.clone();
+                let ch = self.rows.get(self.sel).map(|r| r.channel).unwrap_or(self.settings().channel);
+                let app = self.app.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(80)).await;
-                    pf::paste(&text);
+                    deliver_text(&app, &text, ch);
                 });
-            } else {
-                pf::paste(&partial);
+            } else if let Mode::Single(ch) = mode {
+                self.insert(&partial, ch);
             }
         }
         match message {
@@ -1106,13 +1136,14 @@ impl Ctl {
             *s.pick_counts.entry(ch).or_default() += 1;
         });
         let front = self.front.take();
+        let app = self.app.clone();
         self.cancel();
         tauri::async_runtime::spawn(async move {
             if let Some(f) = front {
                 f.activate();
             }
             tokio::time::sleep(Duration::from_millis(80)).await;
-            pf::paste(&text);
+            deliver_text(&app, &text, ch);
         });
     }
 
@@ -1505,5 +1536,14 @@ mod tests {
         streamed.partial(c, "已上屏".into());
         streamed.done(c, Ok(String::new()), true);
         assert_eq!(streamed.text(), "已上屏");
+    }
+
+    #[test]
+    fn secure_input_blocks_streaming_and_paste() {
+        assert!(super::allow_text_input(true, false));
+        assert!(!super::allow_text_input(true, true));
+        assert!(!super::allow_text_input(false, false));
+        assert!(!super::allow_text_input(false, true));
+        assert_eq!(super::CLIPBOARD_HINT, "没有可输入的位置，文字已复制到剪贴板");
     }
 }

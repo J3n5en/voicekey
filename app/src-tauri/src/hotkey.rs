@@ -1,4 +1,4 @@
-//! 长按键：按住超过阈值开始、松开结束（单个修饰键或自定义组合）。点按快捷键：单个修饰键在阈值内松开，或 组合键按下（吞掉不传给前台 App）
+//! 长按键：按住超过阈值开始、松开结束（单个修饰键、鼠标中键/侧键或自定义组合）。点按快捷键：单个修饰键在阈值内松开，或 组合键按下（吞掉不传给前台 App）
 use crate::settings::{Combo, Shortcut};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -25,7 +25,7 @@ pub enum HotEvent {
 
 #[derive(Default)]
 pub struct Config {
-    /// 单个修饰键长按；自定义组合时为 0
+    /// 单个修饰键或鼠标键长按；自定义组合时为 0
     pub hold: u32,
     pub chord: Option<Chord>,
     pub tap: Option<Shortcut>,
@@ -42,7 +42,8 @@ impl Config {
     pub fn set_hold(&mut self, codes: &[u32]) {
         (self.hold, self.chord) = match codes {
             [] => (0, None),
-            [c] if pf::modifier(*c).is_some() => (*c, None),
+            // 单个鼠标键必须走长按路径。放进空修饰的 Chord 时，track() 会在任意键盘 Down 上覆盖 held_key，按住侧键时再按别的键就会结束录音。
+            [c] if pf::modifier(*c).is_some() || pf::is_mouse_button(*c) => (*c, None),
             _ => {
                 let (mods, keys): (Vec<u32>, Vec<u32>) = codes.iter().partition(|c| pf::modifier(**c).is_some());
                 (0, Some(Chord { mods, key: keys.first().copied() }))
@@ -51,13 +52,13 @@ impl Config {
     }
 }
 
-/// 可作长按的组合：纯修饰键；单个 F 键；或 修饰键+一个键（只有 Shift 时不行，否则打不了大写）
+/// 可作长按的组合：纯修饰键；单个 F 键或鼠标中键/侧键；或 修饰键+一个键（只有 Shift 时不行，否则打不了大写）
 pub fn valid_hold(codes: &[u32]) -> bool {
     let keys: Vec<u32> = codes.iter().copied().filter(|c| pf::modifier(*c).is_none()).collect();
     let strong_mod = codes.iter().any(|c| pf::modifier(*c).is_some_and(|(f, _)| f != pf::SHIFT));
     match keys.as_slice() {
         [] => !codes.is_empty(),
-        [k] => pf::is_function_key(*k) || strong_mod,
+        [k] => pf::is_function_key(*k) || pf::is_mouse_button(*k) || strong_mod,
         _ => false,
     }
 }
@@ -130,6 +131,27 @@ fn handle(sh: &Shared, st: &Arc<Mutex<State>>, tx: &UnboundedSender<HotEvent>, e
             if pf::special(e.code) == Some(Special::Escape) && !e.repeat {
                 let _ = tx.send(HotEvent::Escape);
             }
+            // 鼠标键没有 Modifier 事件。单独绑定时和修饰键长按一样：超过阈值才开始，一旦激活，别的键不打断，松开才结束。
+            if pf::is_mouse_button(e.code) && e.code == cfg.hold {
+                if s.down_code.is_none() && !e.repeat {
+                    s.down_code = Some(e.code);
+                    s.pressed_at = Some(Instant::now());
+                    s.cancelled = false;
+                    s.tapped = false;
+                    s.gen += 1;
+                    let _ = tx.send(HotEvent::Press);
+                    let (gen, st, tx) = (s.gen, st.clone(), tx.clone());
+                    std::thread::spawn(move || {
+                        std::thread::sleep(THRESHOLD);
+                        let mut s = st.lock().unwrap();
+                        if s.gen == gen && s.down_code.is_some() && !s.cancelled {
+                            s.active = true;
+                            let _ = tx.send(HotEvent::LongPress);
+                        }
+                    });
+                }
+                return true;
+            }
             if let Some(t) = cfg.tap.as_ref().filter(|t| !t.is_modifier()) {
                 if e.code == t.code && e.mods & MOD_MASK == t.mods {
                     s.swallowed_code = Some(e.code);
@@ -147,6 +169,24 @@ fn handle(sh: &Shared, st: &Arc<Mutex<State>>, tx: &UnboundedSender<HotEvent>, e
         KeyKind::Up => {
             if s.swallowed_code == Some(e.code) {
                 s.swallowed_code = None;
+                return true;
+            }
+            if s.down_code == Some(e.code) && pf::is_mouse_button(e.code) {
+                let tap_code = cfg.tap.as_ref().filter(|t| pf::is_mouse_button(t.code)).map(|t| t.code);
+                s.down_code = None;
+                s.gen += 1;
+                if s.active {
+                    s.active = false;
+                    let _ = tx.send(HotEvent::Release);
+                } else if Some(e.code) == tap_code
+                    && !s.cancelled
+                    && s.pressed_at.is_some_and(|t| t.elapsed() < THRESHOLD)
+                {
+                    s.tapped = true;
+                    let _ = tx.send(HotEvent::Tap);
+                } else if !s.cancelled {
+                    let _ = tx.send(HotEvent::Cancel);
+                }
                 return true;
             }
             false
@@ -290,7 +330,7 @@ fn track(s: &mut State, e: &KeyEvent) {
     }
 }
 
-/// 录制下一次按键：单独点按一个修饰键，或按下 修饰键+键；Esc 取消
+/// 录制下一次按键：单独点按一个修饰键，或按下 修饰键+键、F 键、鼠标中键/侧键；Esc 取消
 fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
     let done = |sc: Option<Shortcut>| {
         sh.recording.store(false, Ordering::Relaxed);
@@ -301,7 +341,7 @@ fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEve
             let mods = e.mods & MOD_MASK;
             if pf::special(e.code) == Some(Special::Escape) && mods == 0 {
                 done(None);
-            } else if mods != 0 || pf::is_function_key(e.code) {
+            } else if mods != 0 || pf::is_function_key(e.code) || pf::is_mouse_button(e.code) {
                 done(Some(Shortcut { code: e.code, mods, name: pf::key_name(e) }));
             }
         }
@@ -396,6 +436,62 @@ mod tests {
         assert!(!valid_hold(&[shift, k]));
         assert!(!valid_hold(&[k]));
         assert!(!valid_hold(&[]));
+        assert!(valid_hold(&[pf::MOUSE_BASE + 4]));
+        assert!(valid_hold(&[ctrl, pf::MOUSE_BASE + 2]));
+        assert!(!valid_hold(&[pf::MOUSE_BASE + 3, pf::MOUSE_BASE + 4]));
+    }
+
+    #[test]
+    fn mouse_button_hold_long_press_and_release() {
+        let side = pf::MOUSE_BASE + 4;
+        let sh = Shared::default();
+        {
+            let mut cfg = sh.config.write().unwrap();
+            cfg.set_hold(&[side]);
+            assert_eq!(cfg.hold, side);
+            assert!(cfg.chord.is_none());
+        }
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let step = |e: KeyEvent| handle(&sh, &st, &tx, &e);
+        assert!(step(ev(KeyKind::Down, side, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Press)));
+        std::thread::sleep(THRESHOLD + Duration::from_millis(100));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::LongPress)));
+        assert!(step(ev(KeyKind::Up, side, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Release)));
+    }
+
+    #[test]
+    fn mouse_button_hold_keeps_recording_when_another_key_is_pressed() {
+        let side = pf::MOUSE_BASE + 4;
+        let sh = Shared::default();
+        sh.config.write().unwrap().set_hold(&[side]);
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let step = |e: KeyEvent| handle(&sh, &st, &tx, &e);
+        assert!(step(ev(KeyKind::Down, side, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Press)));
+        std::thread::sleep(THRESHOLD + Duration::from_millis(100));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::LongPress)));
+        assert!(!step(ev(KeyKind::Down, plain_key(), 0)));
+        assert!(rx.try_recv().is_err(), "holding the side button must keep recording");
+        assert!(step(ev(KeyKind::Up, side, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Release)));
+    }
+
+    #[test]
+    fn records_mouse_button_as_tap_shortcut() {
+        let sh = Shared::default();
+        sh.recording.store(true, Ordering::Relaxed);
+        let mut s = State::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(record(&sh, &mut s, &tx, &ev(KeyKind::Down, pf::MOUSE_BASE + 3, 0)));
+        match rx.try_recv() {
+            Ok(HotEvent::Recorded(Some(sc))) => assert_eq!(sc.code, pf::MOUSE_BASE + 3),
+            other => panic!("unexpected: {other:?}"),
+        }
+        assert!(!sh.recording.load(Ordering::Relaxed));
     }
 
     #[test]
