@@ -1,4 +1,4 @@
-use crate::account::Login;
+use crate::account::{Expired, Login};
 use crate::ws::{self, Update, Ws};
 use crate::{Audio, Engine, Partial};
 use anyhow::{anyhow, bail, Result};
@@ -53,7 +53,7 @@ async fn fetch(cookie: &str) -> Result<Token> {
         .map_err(|e| anyhow!("千问 App 响应异常：{e}"))?;
     if v["success"].as_bool() != Some(true) {
         if v["errorCode"] == "NOT_LOGIN" {
-            bail!("千问 App 登录已失效，请重新登录");
+            return Err(Expired("千问 App 登录已失效，请重新登录".into()).into());
         }
         bail!("千问 App 换取识别 token 失败：{}", v["errorMsg"].as_str().or(v["errorCode"].as_str()).unwrap_or("未知错误"));
     }
@@ -136,7 +136,7 @@ impl Engine for QwenAppEngine {
     async fn run(&self, audio: Audio, partial: Partial) -> Result<String> {
         let cookie = LOGIN.get();
         if cookie.is_empty() {
-            bail!("千问 App 未登录，请在设置的识别渠道里登录");
+            return Err(Expired("千问 App 未登录，请在设置的识别渠道里登录".into()).into());
         }
         let token = self.token(&cookie).await?;
         let sid = id();

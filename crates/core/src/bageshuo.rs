@@ -1,4 +1,4 @@
-use crate::account::Login;
+use crate::account::{Expired, Login};
 use crate::util::{data_file, now_ms};
 use crate::ws::{self, Update, Ws};
 use crate::{Audio, Engine, Partial};
@@ -104,7 +104,7 @@ async fn ticket(cookie: &str) -> Result<String> {
     let status = resp.status();
     let v: Value = resp.json().await.unwrap_or_default();
     if status.as_u16() == 401 {
-        bail!("叭哥说登录已失效，请重新登录");
+        return Err(Expired("叭哥说登录已失效，请重新登录".into()).into());
     }
     let d = if v["data"].is_object() { &v["data"] } else { &v };
     match d["websocketUrl"].as_str().filter(|s| status.is_success() && !s.is_empty()) {
@@ -161,7 +161,7 @@ impl Engine for BageshuoEngine {
     async fn run(&self, audio: Audio, partial: Partial) -> Result<String> {
         let cookie = LOGIN.get();
         if cookie.is_empty() {
-            bail!("叭哥说未登录，请在设置的识别渠道里登录");
+            return Err(Expired("叭哥说未登录，请在设置的识别渠道里登录".into()).into());
         }
         let uid = uuid::Uuid::new_v4().to_string();
         let ws = open(&cookie, &uid).await?;

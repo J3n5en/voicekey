@@ -22,6 +22,23 @@ pub struct Login {
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// 未登录或服务端判定登录失效：重试无用，只能重新登录
+#[derive(Debug)]
+pub struct Expired(pub String);
+
+impl std::fmt::Display for Expired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Expired {}
+
+/// 失败是否因为未登录或登录失效
+pub fn expired(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Expired>().is_some()
+}
+
 fn load() -> BTreeMap<String, String> {
     std::fs::read(data_file("accounts.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
@@ -100,6 +117,15 @@ mod tests {
 
     const TICKET: Login = Login { id: "unit", page: "", domain: "", cookies: &[&["t"]], check: ok };
     const PAIR: Login = Login { id: "unitpair", page: "", domain: "", cookies: &[&["P"], &["S", "L"]], check: ok };
+
+    #[test]
+    fn expired_survives_context_and_differs_from_other_errors() {
+        let e: anyhow::Error = Expired("登录已失效".into()).into();
+        assert_eq!(e.to_string(), "登录已失效");
+        assert!(expired(&e));
+        assert!(expired(&e.context("外层")));
+        assert!(!expired(&anyhow::anyhow!("网络中断")));
+    }
 
     #[test]
     fn parses_cookie_header_and_devtools_lines() {

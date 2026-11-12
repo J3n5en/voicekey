@@ -519,11 +519,10 @@ private fun ChannelRow(ch: Channel, selected: Boolean, onClick: () -> Unit, onCh
                         style = MaterialTheme.typography.bodySmall,
                         color = if (ch.loggedIn) Color(0xFF2E9E5B) else MaterialTheme.colorScheme.error,
                     )
-                    TextButton({
-                        ctx.startActivity(Intent(ctx, LoginActivity::class.java).putExtra(LoginActivity.EXTRA_ID, ch.id))
-                    }) { Text(if (ch.loggedIn) "重新登录" else "登录") }
+                    TextButton({ LoginActivity.open(ctx, ch.id) }) { Text(if (ch.loggedIn) "重新登录" else "登录") }
                     if (ch.loggedIn) TextButton({
                         Native.loginSet(ch.id, "")
+                        LoginActivity.clearWebData()
                         onChanged()
                     }) { Text("退出") }
                 }
