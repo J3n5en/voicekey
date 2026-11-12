@@ -230,6 +230,18 @@ pub fn secure_input() -> bool {
     false
 }
 
+/// 焦点处是否接受文本：以能否取到插入符为准（Win32 caret，Chromium 等应用走 MSAA caret）
+pub fn has_text_target() -> bool {
+    caret().is_some()
+}
+
+/// 只写剪贴板，不发 Ctrl+V，也不恢复原内容：焦点没有输入框时把文字留在这里
+pub fn copy(text: &str) {
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text);
+    }
+}
+
 impl FrontApp {
     pub fn activate(&self) {
         unsafe {
