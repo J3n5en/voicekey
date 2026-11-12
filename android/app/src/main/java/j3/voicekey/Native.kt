@@ -43,4 +43,21 @@ object Native {
 
     /** 恰好回调一次 FINAL 或 ERROR，FINAL 文本为 JSON（Tested：index/text/alias/ms/key）；在 Rust 工作线程回调 */
     external fun jevTest(config: String, listener: Listener)
+
+    /** 保存登录 Cookie。空串退出；内容不全则不写 */
+    external fun loginSet(id: String, cookie: String)
+
+    /** 已保存的登录 Cookie，未登录为空串 */
+    external fun loginGet(id: String): String
+
+    external fun loginHas(id: String): Boolean
+
+    /** 官方登录页，未知渠道为空串 */
+    external fun loginPage(id: String): String
+
+    /** 登录 Cookie 的域，未知渠道为空串 */
+    external fun loginDomain(id: String): String
+
+    /** Cookie 是否已包含该渠道要求的登录项 */
+    external fun loginSatisfied(id: String, cookie: String): Boolean
 }

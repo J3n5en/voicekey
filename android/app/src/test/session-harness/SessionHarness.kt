@@ -364,6 +364,13 @@ fun main() {
         f.noDuplicateFrees()
     }
 
+    test("未登录的渠道在开始时提示去登录，不进入识别") {
+        val f = Fixture { App.prefs.channel = Channel.J }
+        equal(listOf("J未登录，请在 VoiceKey 里登录"), f.svc.hud.errors)
+        check(!f.session.active)
+        check(f.svc.inserted.isEmpty())
+    }
+
     for (configError in listOf("disabled", "invalid configuration")) {
         for (send in listOf(false, true)) {
             test("$configError with pickSend=$send preserves a single final for manual choice") {

@@ -54,7 +54,7 @@ class Session(private val svc: VoiceService) {
     private fun channels(): List<Channel> = App.prefs.channel?.let { listOf(it) } ?: App.prefs.multi
 
     fun prewarm() {
-        if (!active) channels().filter { it.ready }.forEach { Native.prewarm(it.id) }
+        if (!active) channels().filter { it.ready && it.loggedIn }.forEach { Native.prewarm(it.id) }
     }
 
     /** 点按：没在说就开始（静音自动结束），在录就结束，候选框开着就取消 */
@@ -74,8 +74,12 @@ class Session(private val svc: VoiceService) {
 
     private fun begin(auto: Boolean) {
         val chs = channels()
-        val ready = chs.filter { it.ready }
-        if (ready.isEmpty()) return svc.hud.error("${chs.first().title}模型未下载，请在 VoiceKey 里下载")
+        val ready = chs.filter { it.ready && it.loggedIn }
+        if (ready.isEmpty()) {
+            val blocked = chs.firstOrNull { it.needsLogin && !it.loggedIn }
+            val msg = if (blocked != null) "${blocked.title}未登录，请在 VoiceKey 里登录" else "${chs.first().title}模型未下载，请在 VoiceKey 里下载"
+            return svc.hud.error(msg)
+        }
         MicService.start(svc)
         val g = ++gen
         selectionTiming = App.prefs.jevSelectionTiming()

@@ -47,9 +47,24 @@ fn engine(name: &str) -> Option<Box<dyn Engine>> {
         "sogou" => Box::new(SogouEngine),
         "iflytek" => Box::new(IflyEngine),
         "chatterfly" => Box::new(ChatterflyEngine),
+        "qwenapp" => Box::new(QwenAppEngine::default()),
+        "bageshuo" => Box::new(BageshuoEngine),
         "wetypeoffline" => Box::new(LocalEngine { dir: wtoffline_dir() }),
         _ => return None,
     })
+}
+
+/// 需要登录的渠道。页面和域名只在这里对应 core 的 LOGIN
+fn login_of(id: &str) -> Option<&'static account::Login> {
+    Some(match id {
+        "qwenapp" => &qwenapp::LOGIN,
+        "bageshuo" => &bageshuo::LOGIN,
+        _ => return None,
+    })
+}
+
+fn jstring_of(env: &mut JNIEnv, s: &str) -> jstring {
+    env.new_string(s).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
 /// 断线重连：录音未结束时连接失败，回放已录的音频再接实时流重试
@@ -149,6 +164,54 @@ pub extern "system" fn Java_j3_voicekey_Native_init(mut env: JNIEnv, _: JClass, 
     if let Some(d) = string(&mut env, &dir) {
         util::set_data_dir(PathBuf::from(d));
     }
+}
+
+/// 保存登录 Cookie。空串退出；凑不齐登录项则不写
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginSet(mut env: JNIEnv, _: JClass, id: JString, cookie: JString) {
+    let (Some(id), Some(cookie)) = (string(&mut env, &id), string(&mut env, &cookie)) else { return };
+    let Some(login) = login_of(&id) else { return };
+    let value = if cookie.trim().is_empty() {
+        String::new()
+    } else {
+        let Ok(v) = login.pick(&cookie) else { return };
+        v
+    };
+    let _ = login.set(&value);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginGet(mut env: JNIEnv, _: JClass, id: JString) -> jstring {
+    let s = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.get())).unwrap_or_default();
+    jstring_of(&mut env, &s)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginHas(mut env: JNIEnv, _: JClass, id: JString) -> jboolean {
+    let ok = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.has())).unwrap_or(false);
+    if ok { JNI_TRUE } else { JNI_FALSE }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginPage(mut env: JNIEnv, _: JClass, id: JString) -> jstring {
+    let s = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.page)).unwrap_or("");
+    jstring_of(&mut env, s)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginDomain(mut env: JNIEnv, _: JClass, id: JString) -> jstring {
+    let s = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.domain)).unwrap_or("");
+    jstring_of(&mut env, s)
+}
+
+/// 这串 Cookie 是否已包含该渠道要求的登录项
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginSatisfied(mut env: JNIEnv, _: JClass, id: JString, cookie: JString) -> jboolean {
+    let ok = match (string(&mut env, &id), string(&mut env, &cookie)) {
+        (Some(id), Some(cookie)) => login_of(&id).is_some_and(|l| l.pick(&cookie).is_ok()),
+        _ => false,
+    };
+    if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
 #[no_mangle]
