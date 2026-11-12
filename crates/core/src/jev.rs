@@ -502,6 +502,14 @@ mod tests {
         }
     }
 
+    // ---- client ----
+
+    /// 信任链来自操作系统根证书：读不到时 reqwest 直接构建失败，Jev 会全线不可用，先在单测里兜住
+    #[test]
+    fn client_builds_with_system_roots() {
+        assert!(client().is_ok());
+    }
+
     // ---- protocol ----
 
     #[test]
