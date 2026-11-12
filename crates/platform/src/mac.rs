@@ -372,7 +372,7 @@ fn ax_string(el: Ref, name: &str) -> Option<String> {
 pub fn copy(text: &str) {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
     use objc2_foundation::NSString;
-    objc2::rc::autoreleasepool(|_| unsafe {
+    objc2::rc::autoreleasepool(|_| {
         let pb = NSPasteboard::generalPasteboard();
         pb.clearContents();
         pb.setString_forType(&NSString::from_str(text), NSPasteboardTypeString);
