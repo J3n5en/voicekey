@@ -375,7 +375,8 @@ pub fn copy(text: &str) {
     objc2::rc::autoreleasepool(|_| {
         let pb = NSPasteboard::generalPasteboard();
         pb.clearContents();
-        pb.setString_forType(&NSString::from_str(text), NSPasteboardTypeString);
+        // NSPasteboardTypeString 是 Objective-C extern static，新版 rustc 要求在 unsafe 中访问
+        pb.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
     });
 }
 
