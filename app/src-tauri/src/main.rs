@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod controller;
+mod history;
 mod hotkey;
 mod login;
 mod offline;
@@ -53,6 +54,7 @@ pub fn update_settings<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut Setti
         g.save();
         g.clone()
     };
+    history::configure(&s);
     apply(app, &s);
     download_model(app, s.channel);
     let _ = app.emit("settings", &s);
@@ -166,6 +168,17 @@ fn set_settings(app: AppHandle, mut settings: Settings) {
 #[tauri::command]
 fn perm_status() -> serde_json::Value {
     perms()
+}
+
+#[tauri::command]
+fn get_recognition_history() -> Vec<history::HistoryEntry> {
+    history::list()
+}
+
+#[tauri::command]
+fn clear_recognition_history(app: AppHandle) {
+    history::clear();
+    let _ = app.emit("history", history::list());
 }
 
 #[tauri::command]
@@ -298,7 +311,7 @@ fn main() {
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
             pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
             update_check, update_install, jev_test, preview_sound, list_sounds,
-            account_save, account_login, account_logout
+            account_save, account_login, account_logout, get_recognition_history, clear_recognition_history
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

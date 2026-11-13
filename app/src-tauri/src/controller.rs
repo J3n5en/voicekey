@@ -307,19 +307,21 @@ fn allow_text_input(has_text_target: bool, secure_input: bool) -> bool {
 
 const CLIPBOARD_HINT: &str = "没有可输入的位置，文字已复制到剪贴板";
 
-/// 能输入就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。
+/// 能输入就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。结果同时记入识别历史。
 fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
     if text.is_empty() {
         return false;
     }
-    if allow_text_input(pf::has_text_target(), pf::secure_input()) {
+    let ok = allow_text_input(pf::has_text_target(), pf::secure_input());
+    if ok {
         pf::paste(text);
-        return true;
+    } else {
+        pf::copy(text);
+        ui::hud(app, "info", CLIPBOARD_HINT, ch);
+        ui::hud_hide(app, 2600);
     }
-    pf::copy(text);
-    ui::hud(app, "info", CLIPBOARD_HINT, ch);
-    ui::hud_hide(app, 2600);
-    false
+    crate::history::record(app, text, ch, ok);
+    ok
 }
 
 impl Ctl {
@@ -858,6 +860,7 @@ impl Ctl {
                         t.update(&text);
                     }
                     t.finish();
+                    crate::history::record(&self.app, &text, ch, true);
                 }
                 if let Some(e) = error {
                     if !streamed && !text.is_empty() {
@@ -1034,6 +1037,11 @@ impl Ctl {
             return;
         }
         // 超时打断时，非流式还没写进输入框的中间结果补上；用户主动取消不补写
+        if message.is_some() && streamed {
+            if let Mode::Single(ch) = mode {
+                crate::history::record(&self.app, &partial, ch, true);
+            }
+        }
         if message.is_some() && !streamed && !partial.is_empty() {
             if mode == Mode::Pick {
                 let text = partial.clone();

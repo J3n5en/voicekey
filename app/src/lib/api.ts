@@ -23,8 +23,9 @@ export interface Settings {
   liveText: boolean; mic: string; multi: Channel[]; lastPick: Channel | null; pickCounts: Partial<Record<Channel, number>>;
   soundEnabled: boolean; soundStart: string; soundProcessing: string; soundError: string;
   autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
-  jev: JevConfig;
+  jev: JevConfig; historyEnabled: boolean; historyLimit: number;
 }
+export interface HistoryEntry { text: string; ts: number; channel: Channel; delivered: boolean }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
 export interface UpdateStatus { state: "idle" | "checking" | "latest" | "available" | "downloading" | "error"; version?: string; progress?: number; error?: string }

@@ -8,6 +8,7 @@
   import Audio from "./pages/Audio.svelte";
   import Output from "./pages/Output.svelte";
   import General from "./pages/General.svelte";
+  import History from "./pages/History.svelte";
   import Onboard from "./pages/Onboard.svelte";
 
   const PAGES = [
@@ -15,6 +16,7 @@
     { id: "keys", name: "快捷键", icon: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>' },
     { id: "audio", name: "音频", icon: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>' },
     { id: "output", name: "输出", icon: '<path d="M4 6h16M4 12h10M4 18h7M17 15l3 3-3 3"/>' },
+    { id: "history", name: "历史", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
     { id: "general", name: "通用", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>' },
   ];
   let page = $state("recog");
@@ -58,6 +60,7 @@
         {:else if page === "keys"}<Keys />
         {:else if page === "audio"}<Audio />
         {:else if page === "output"}<Output />
+        {:else if page === "history"}<History />
         {:else}<General rerun={() => (onboarding = true)} />{/if}
       </main>
     </div>
