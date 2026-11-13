@@ -20,7 +20,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_UNICODE, MAPVK_VK_TO_CHAR, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId,
+    CallNextHookEx, DispatchMessageW, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetParent,
+    GetWindowThreadProcessId,
     SetForegroundWindow, SetWindowsHookExW, TranslateMessage, GUITHREADINFO, HC_ACTION, KBDLLHOOKSTRUCT, MSG,
     MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_SYSKEYDOWN,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
@@ -230,9 +231,46 @@ pub fn secure_input() -> bool {
     false
 }
 
-/// 焦点处是否接受文本：以能否取到插入符为准（Win32 caret，Chromium 等应用走 MSAA caret）
+/// 焦点处是否接受文本。取到插入符必定可输入；取不到时拿不准（微信、Windows Terminal 等自绘
+/// 输入框不提供系统插入符），与 macOS 一致按可输入处理。只有能确认焦点在桌面、任务栏或
+/// 资源管理器文件列表这类不收文字的地方时才返回 false，避免退格键送进去误删文件。
 pub fn has_text_target() -> bool {
-    caret().is_some()
+    if caret().is_some() {
+        return true;
+    }
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() {
+            return false;
+        }
+        if matches!(class_name(fg).as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            return false;
+        }
+        let tid = GetWindowThreadProcessId(fg, None);
+        let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        let focus = if GetGUIThreadInfo(tid, &mut gti).is_ok() && !gti.hwndFocus.is_invalid() { gti.hwndFocus } else { fg };
+        // 焦点或其祖先是外壳文件视图（桌面图标、资源管理器文件列表）或列表/树控件：确定不收文字
+        let mut h = focus;
+        for _ in 0..8 {
+            if h.is_invalid() {
+                break;
+            }
+            if matches!(class_name(h).as_str(), "SHELLDLL_DefView" | "SysListView32" | "SysTreeView32") {
+                return false;
+            }
+            match GetParent(h) {
+                Ok(p) => h = p,
+                Err(_) => break,
+            }
+        }
+        true
+    }
+}
+
+fn class_name(h: HWND) -> String {
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetClassNameW(h, &mut buf) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
 }
 
 /// 只写剪贴板，不发 Ctrl+V，也不恢复原内容：焦点没有输入框时把文字留在这里
