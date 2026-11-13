@@ -5,9 +5,17 @@ package j3.voicekey
 import android.view.accessibility.AccessibilityNodeInfo
 import android.content.Context
 
-enum class Channel(val id: String, val title: String, val short: String, val ready: Boolean = true) {
+enum class Channel(
+    val id: String,
+    val title: String,
+    val short: String,
+    val ready: Boolean = true,
+    val needsLogin: Boolean = false,
+    val loggedIn: Boolean = true,
+) {
     A("a", "A", "A"), B("b", "B", "B"), C("c", "C", "C"), D("d", "D", "D"),
-    E("e", "E", "E"), F("f", "F", "F"), G("g", "G", "G"), H("h", "H", "H"), I("i", "I", "I")
+    E("e", "E", "E"), F("f", "F", "F"), G("g", "G", "G"), H("h", "H", "H"), I("i", "I", "I"),
+    J("j", "J", "J", needsLogin = true, loggedIn = false)
     ;
     companion object {
         val online = entries.take(3)

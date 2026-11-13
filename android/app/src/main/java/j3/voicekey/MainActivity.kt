@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -194,11 +195,12 @@ private fun Screen(tick: Int, refresh: () -> Unit) {
 
         Section("识别渠道") {
             Channel.entries.forEach { ch ->
-                ChannelRow(ch, channel == ch) {
+                ChannelRow(ch, channel == ch, {
                     channel = ch
                     p.channel = ch
                     if (!ch.ready) WtOffline.download()
-                }
+                    if (ch.needsLogin && !ch.loggedIn) Toast.makeText(ctx, "${ch.title}需要登录后才能识别", Toast.LENGTH_LONG).show()
+                }) { refresh() }
             }
             Choice("多渠道（说完挑选）", "勾选的渠道同时识别，在候选框里点一条上屏。", channel == null) {
                 channel = null
@@ -208,16 +210,25 @@ private fun Screen(tick: Int, refresh: () -> Unit) {
                 Channel.entries.forEach { ch ->
                     Row(
                         Modifier.fillMaxWidth().clickable {
-                            val next = if (ch in multi) multi - ch else multi + ch
+                            val adding = ch !in multi
+                            val next = if (adding) multi + ch else multi - ch
                             if (next.size >= 2) {
                                 multi = next
                                 p.multi = Channel.entries.filter { it in next }
+                                if (adding && ch.needsLogin && !ch.loggedIn) {
+                                    Toast.makeText(ctx, "${ch.title}未登录，识别时会跳过", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }.padding(start = 40.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        val skip = when {
+                            !ch.ready -> "（未下载，跳过）"
+                            ch.needsLogin && !ch.loggedIn -> "（未登录，跳过）"
+                            else -> ""
+                        }
                         Checkbox(ch in multi, null)
-                        Text(ch.title + if (ch.ready) "" else "（未下载，跳过）")
+                        Text(ch.title + skip)
                     }
                 }
                 Toggle("选中后自动上屏并发送", if (pickSend) "手动点选和 Jev 自动选中的候选上屏后随即发送；长按候选只上屏、可继续编辑" else "Jev 只高亮推荐的一条，你点它才上屏；手动点选也只上屏不发送", pickSend) {
@@ -490,7 +501,8 @@ private fun Step(title: String, done: Boolean, action: String, onClick: () -> Un
 }
 
 @Composable
-private fun ChannelRow(ch: Channel, selected: Boolean, onClick: () -> Unit) {
+private fun ChannelRow(ch: Channel, selected: Boolean, onClick: () -> Unit, onChanged: () -> Unit) {
+    val ctx = LocalContext.current
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         RadioButton(selected, null)
         Spacer(Modifier.width(8.dp))
@@ -499,6 +511,22 @@ private fun ChannelRow(ch: Channel, selected: Boolean, onClick: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(ch.title)
             Hint(ch.desc)
+            if (ch.needsLogin) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (ch.loggedIn) "已登录" else "未登录",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (ch.loggedIn) Color(0xFF2E9E5B) else MaterialTheme.colorScheme.error,
+                    )
+                    TextButton({ LoginActivity.open(ctx, ch.id) }) { Text(if (ch.loggedIn) "重新登录" else "登录") }
+                    if (ch.loggedIn) TextButton({
+                        Native.loginSet(ch.id, "")
+                        LoginActivity.clearWebData()
+                        onChanged()
+                    }) { Text("退出") }
+                }
+            }
         }
     }
 }

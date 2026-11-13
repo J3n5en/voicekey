@@ -38,23 +38,47 @@ fn wtoffline_dir() -> PathBuf {
     data_dir().join("wtoffline")
 }
 
-fn engine(name: &str) -> Option<Box<dyn Engine>> {
+/// 千问 App 的 prewarm 把预取 token 存在引擎实例里，prewarm 与随后的识别必须是同一个实例，
+/// 否则 token 随实例丢弃、每次按键多换一次 token。其它引擎仍每次新建，保持原有行为
+fn qwenapp_engine() -> Arc<QwenAppEngine> {
+    static E: OnceLock<Arc<QwenAppEngine>> = OnceLock::new();
+    E.get_or_init(Default::default).clone()
+}
+
+fn engine(name: &str) -> Option<Arc<dyn Engine>> {
     Some(match name {
-        "doubao" => Box::new(DoubaoEngine),
-        "wetype" => Box::new(WeTypeEngine::default()),
-        "qwen" => Box::new(QwenEngine::default()),
-        "baidu" => Box::new(BaiduEngine),
-        "sogou" => Box::new(SogouEngine),
-        "iflytek" => Box::new(IflyEngine),
-        "chatterfly" => Box::new(ChatterflyEngine),
-        "wetypeoffline" => Box::new(LocalEngine { dir: wtoffline_dir() }),
+        "doubao" => Arc::new(DoubaoEngine),
+        "wetype" => Arc::new(WeTypeEngine::default()),
+        "qwen" => Arc::new(QwenEngine::default()),
+        "baidu" => Arc::new(BaiduEngine),
+        "sogou" => Arc::new(SogouEngine),
+        "iflytek" => Arc::new(IflyEngine),
+        "chatterfly" => Arc::new(ChatterflyEngine),
+        "qwenapp" => qwenapp_engine(),
+        "bageshuo" => Arc::new(BageshuoEngine),
+        "wetypeoffline" => Arc::new(LocalEngine { dir: wtoffline_dir() }),
         _ => return None,
     })
 }
 
+/// 需要登录的渠道。页面和域名只在这里对应 core 的 LOGIN
+fn login_of(id: &str) -> Option<&'static account::Login> {
+    Some(match id {
+        "qwenapp" => &qwenapp::LOGIN,
+        "bageshuo" => &bageshuo::LOGIN,
+        _ => return None,
+    })
+}
+
+fn jstring_of(env: &mut JNIEnv, s: &str) -> jstring {
+    env.new_string(s).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
 /// 断线重连：录音未结束时连接失败，回放已录的音频再接实时流重试
 struct Retry {
-    engine: Box<dyn Engine>,
+    engine: Arc<dyn Engine>,
+    /// 需登录渠道：开始识别时保存的登录 Cookie
+    login: Option<(&'static account::Login, String)>,
     sink: Arc<Sink>,
     live: mpsc::UnboundedReceiver<Vec<i16>>,
     buf: Vec<Vec<i16>>,
@@ -71,6 +95,15 @@ impl Retry {
             // 引擎返回即已丢弃 rx，feed 随即自己结束，不用 abort（abort 会丢掉缓冲）
             match res {
                 Ok(t) => return self.sink.emit(FINAL, &t),
+                Err(err) if account::expired(&err) => {
+                    // 登录失效重试无用：清掉这份失效的 Cookie 让界面显示未登录（期间重新登录过则不动）
+                    if let Some((l, c)) = &self.login {
+                        if !c.is_empty() && l.get() == *c {
+                            let _ = l.set("");
+                        }
+                    }
+                    return self.sink.emit(ERROR, &format!("{err:#}"));
+                }
                 Err(err) => {
                     let Ok((done, frames, live)) = feed.await else { return self.sink.emit(ERROR, &format!("{err:#}")) };
                     self.live = live;
@@ -151,6 +184,69 @@ pub extern "system" fn Java_j3_voicekey_Native_init(mut env: JNIEnv, _: JClass, 
     }
 }
 
+/// 保存登录 Cookie。空串退出；凑不齐登录项则不写
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginSet(mut env: JNIEnv, _: JClass, id: JString, cookie: JString) {
+    let (Some(id), Some(cookie)) = (string(&mut env, &id), string(&mut env, &cookie)) else { return };
+    let Some(login) = login_of(&id) else { return };
+    let value = if cookie.trim().is_empty() {
+        String::new()
+    } else {
+        let Ok(v) = login.pick(&cookie) else { return };
+        v
+    };
+    let _ = login.set(&value);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginHas(mut env: JNIEnv, _: JClass, id: JString) -> jboolean {
+    let ok = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.has())).unwrap_or(false);
+    if ok { JNI_TRUE } else { JNI_FALSE }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginPage(mut env: JNIEnv, _: JClass, id: JString) -> jstring {
+    let s = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.page)).unwrap_or("");
+    jstring_of(&mut env, s)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginDomain(mut env: JNIEnv, _: JClass, id: JString) -> jstring {
+    let s = string(&mut env, &id).and_then(|id| login_of(&id).map(|l| l.domain)).unwrap_or("");
+    jstring_of(&mut env, s)
+}
+
+/// 只留该渠道要求的登录项拼成 Cookie 头，凑不齐返回空串
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginPick(mut env: JNIEnv, _: JClass, id: JString, cookie: JString) -> jstring {
+    let s = match (string(&mut env, &id), string(&mut env, &cookie)) {
+        (Some(id), Some(cookie)) => login_of(&id).and_then(|l| l.pick(&cookie).ok()).unwrap_or_default(),
+        _ => String::new(),
+    };
+    jstring_of(&mut env, &s)
+}
+
+/// 联网校验登录 Cookie，同桌面 login.check。恰好回调一次：通过 FINAL（空串），失败 ERROR（原因）
+#[no_mangle]
+pub extern "system" fn Java_j3_voicekey_Native_loginCheck(mut env: JNIEnv, _: JClass, id: JString, cookie: JString, listener: JObject) {
+    let Ok(cb) = env.new_global_ref(listener) else { return };
+    let sink = Sink(cb);
+    let (Some(id), Some(cookie)) = (string(&mut env, &id), string(&mut env, &cookie)) else {
+        return sink.emit(ERROR, "参数错误");
+    };
+    let Some(login) = login_of(&id) else { return sink.emit(ERROR, "该渠道不需要登录") };
+    let cookie = match login.pick(&cookie) {
+        Ok(c) => c,
+        Err(e) => return sink.emit(ERROR, &e.to_string()),
+    };
+    rt().spawn(async move {
+        match (login.check)(&cookie).await {
+            Ok(()) => sink.emit(FINAL, ""),
+            Err(e) => sink.emit(ERROR, &format!("{e:#}")),
+        }
+    });
+}
+
 #[no_mangle]
 pub extern "system" fn Java_j3_voicekey_Native_start(
     mut env: JNIEnv,
@@ -159,11 +255,13 @@ pub extern "system" fn Java_j3_voicekey_Native_start(
     rate: jint,
     listener: JObject,
 ) -> jlong {
-    let Some(e) = string(&mut env, &name).and_then(|n| engine(&n)) else { return 0 };
+    let Some(name) = string(&mut env, &name) else { return 0 };
+    let Some(e) = engine(&name) else { return 0 };
     let (Ok(framer), Ok(cb)) = (Framer::new(rate as u32), env.new_global_ref(listener)) else { return 0 };
+    let login = login_of(&name).map(|l| (l, l.get()));
     let (tx, rx) = mpsc::unbounded_channel();
     rt().spawn(async move {
-        Retry { engine: e, sink: Arc::new(Sink(cb)), live: rx, buf: Vec::new(), attempts: 0 }.run().await;
+        Retry { engine: e, login, sink: Arc::new(Sink(cb)), live: rx, buf: Vec::new(), attempts: 0 }.run().await;
     });
     Box::into_raw(Box::new(Session(Mutex::new(Some((tx, framer)))))) as jlong
 }

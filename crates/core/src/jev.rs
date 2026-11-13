@@ -326,10 +326,20 @@ impl Tested {
 }
 
 fn client() -> Result<reqwest::Client, JevError> {
-    let b = reqwest::Client::builder();
+    let mut b = reqwest::Client::builder();
     // 单测只打回环假服务，不能被本机代理环境变量带偏
     #[cfg(test)]
-    let b = b.no_proxy();
+    {
+        b = b.no_proxy();
+    }
+    for raw in crate::platform_roots::load() {
+        let Ok(cert) = reqwest::Certificate::from_der(&raw)
+            .or_else(|_| reqwest::Certificate::from_pem(&raw))
+        else {
+            continue;
+        };
+        b = b.add_root_certificate(cert);
+    }
     b.build().map_err(net)
 }
 
@@ -500,6 +510,14 @@ mod tests {
                 assert_eq!(c[&format!("cand_{i}")], format!("文本{i}"));
             }
         }
+    }
+
+    // ---- client ----
+
+    /// 信任链来自操作系统根证书：读不到时 reqwest 直接构建失败，Jev 会全线不可用，先在单测里兜住
+    #[test]
+    fn client_builds_with_system_roots() {
+        assert!(client().is_ok());
     }
 
     // ---- protocol ----
