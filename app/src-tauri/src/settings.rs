@@ -95,6 +95,8 @@ const LOWER_SYSTEM_VOLUME_PERCENT_MIN: u8 = 20;
 const LOWER_SYSTEM_VOLUME_PERCENT_MAX: u8 = 100;
 const LOWER_SYSTEM_VOLUME_PERCENT_STEP: u8 = 5;
 const LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT: u8 = 70;
+const HISTORY_LIMIT_MAX: u32 = 100;
+const HISTORY_LIMIT_DEFAULT: u32 = 20;
 
 /// 「无」保留字：音效逐事件的显式停用取值
 pub const NONE: &str = "none";
@@ -137,6 +139,9 @@ pub struct Settings {
     pub onboarded: bool,
     /// 多渠道定稿后的 Jev 智能选择配置；默认关闭
     pub jev: voicekey_core::jev::Config,
+    /// 识别历史（只存内存）；默认关闭，隐私优先
+    pub history_enabled: bool,
+    pub history_limit: u32,
 }
 
 impl Default for Settings {
@@ -165,6 +170,8 @@ impl Default for Settings {
             lower_system_volume_percent: LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT,
             onboarded: false,
             jev: voicekey_core::jev::Config::default(),
+            history_enabled: false,
+            history_limit: HISTORY_LIMIT_DEFAULT,
         }
     }
 }
@@ -196,6 +203,7 @@ impl Settings {
             self.hold_key = voicekey_platform::hold_keys()[0].id.into();
         }
         self.silence = self.silence.clamp(1.0, 5.0);
+        self.history_limit = self.history_limit.clamp(1, HISTORY_LIMIT_MAX);
         for (id, default) in [
             (&mut self.sound_start, crate::sound::DEFAULT_START),
             (&mut self.sound_processing, crate::sound::DEFAULT_PROCESSING),
@@ -264,6 +272,23 @@ mod tests {
         value.as_object_mut().unwrap().remove("lowerSystemVolumePercent");
         let settings: Settings = serde_json::from_value(value).unwrap();
         assert_eq!(settings.lower_system_volume_percent, LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT);
+    }
+
+    #[test]
+    fn legacy_config_without_history_fields_defaults_off_with_limit_20() {
+        let s: Settings = serde_json::from_str(r#"{"channel":"doubao","mic":""}"#).unwrap();
+        assert!(!s.history_enabled);
+        assert_eq!(s.history_limit, 20);
+    }
+
+    #[test]
+    fn history_limit_is_clamped() {
+        let mut s = Settings::default();
+        for (input, expected) in [(0, 1), (20, 20), (1000, HISTORY_LIMIT_MAX)] {
+            s.history_limit = input;
+            s.sanitize();
+            assert_eq!(s.history_limit, expected);
+        }
     }
 
     #[test]
