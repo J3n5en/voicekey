@@ -15,4 +15,8 @@
     <div class="lbl">胶囊显示实时文字<small>在屏幕底部胶囊中预览识别内容</small></div>
     <button class="sw" class:on={s.liveText} onclick={() => save({ liveText: !s.liveText })} aria-label="胶囊显示实时文字"></button>
   </div>
+  <div class="row">
+    <div class="lbl">去除标点<small>上屏前删掉逗号、句号等标点；小数点、千分位、时间和网址中的符号保留</small></div>
+    <button class="sw" class:on={s.stripPunctuation} onclick={() => save({ stripPunctuation: !s.stripPunctuation })} aria-label="去除标点"></button>
+  </div>
 </div>

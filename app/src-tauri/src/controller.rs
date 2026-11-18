@@ -307,8 +307,20 @@ fn allow_text_input(has_text_target: bool, secure_input: bool) -> bool {
 
 const CLIPBOARD_HINT: &str = "没有可输入的位置，文字已复制到剪贴板";
 
+/// 上屏前按设置去除标点；只用于真正写入焦点/剪贴板/历史的文字
+fn output_text(strip: bool, text: String) -> String {
+    if strip {
+        voicekey_core::util::strip_punctuation(&text)
+    } else {
+        text
+    }
+}
+
 /// 能输入就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。结果同时记入识别历史。
 fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
+    let state = app.state::<AppState>();
+    let strip = state.settings.read().unwrap().strip_punctuation;
+    let text = &output_text(strip, text.to_owned());
     if text.is_empty() {
         return false;
     }
@@ -349,6 +361,10 @@ impl Ctl {
 
     fn settings(&self) -> Settings {
         self.settings.read().unwrap().clone()
+    }
+
+    fn output_text(&self, text: String) -> String {
+        output_text(self.settings.read().unwrap().strip_punctuation, text)
     }
 
     fn handle(&mut self, m: Msg) {
@@ -808,8 +824,11 @@ impl Ctl {
                 if changed {
                     self.speaking();
                 }
-                if let Some(t) = self.typer.as_mut() {
-                    t.update(&self.segs.text());
+                if self.typer.is_some() {
+                    let text = self.output_text(self.segs.text());
+                    if let Some(t) = self.typer.as_mut() {
+                        t.update(&text);
+                    }
                 }
                 self.hud_single(ch);
             }
@@ -841,9 +860,10 @@ impl Ctl {
             Mode::Single(_) => {
                 self.segs.done(seg, res, self.typer.is_some());
                 let text = self.segs.text();
+                let shown = self.output_text(text.clone());
                 if !self.segs.finished() {
                     if let Some(t) = self.typer.as_mut().filter(|_| !text.is_empty()) {
-                        t.update(&text);
+                        t.update(&shown);
                     }
                     return;
                 }
@@ -857,10 +877,10 @@ impl Ctl {
                 if let Some(mut t) = typer {
                     // 定稿可能与流式结果不同（数字/标点整理），按差异修正；之后到达的迟到片段丢弃
                     if !text.is_empty() {
-                        t.update(&text);
+                        t.update(&shown);
                     }
                     t.finish();
-                    crate::history::record(&self.app, &text, ch, true);
+                    crate::history::record(&self.app, &shown, ch, true);
                 }
                 if let Some(e) = error {
                     if !streamed && !text.is_empty() {
@@ -1039,7 +1059,7 @@ impl Ctl {
         // 超时打断时，非流式还没写进输入框的中间结果补上；用户主动取消不补写
         if message.is_some() && streamed {
             if let Mode::Single(ch) = mode {
-                crate::history::record(&self.app, &partial, ch, true);
+                crate::history::record(&self.app, &self.output_text(partial.clone()), ch, true);
             }
         }
         if message.is_some() && !streamed && !partial.is_empty() {

@@ -142,6 +142,8 @@ pub struct Settings {
     /// 识别历史（只存内存）；默认关闭，隐私优先
     pub history_enabled: bool,
     pub history_limit: u32,
+    /// 上屏前去除句读标点；默认关闭，候选池与 Jev 仍用原文
+    pub strip_punctuation: bool,
 }
 
 impl Default for Settings {
@@ -172,6 +174,7 @@ impl Default for Settings {
             jev: voicekey_core::jev::Config::default(),
             history_enabled: false,
             history_limit: HISTORY_LIMIT_DEFAULT,
+            strip_punctuation: false,
         }
     }
 }
@@ -279,6 +282,7 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"channel":"doubao","mic":""}"#).unwrap();
         assert!(!s.history_enabled);
         assert_eq!(s.history_limit, 20);
+        assert!(!s.strip_punctuation);
     }
 
     #[test]
