@@ -144,6 +144,8 @@ pub struct Settings {
     pub history_limit: u32,
     /// 上屏前去除句读标点；默认关闭，候选池与 Jev 仍用原文
     pub strip_punctuation: bool,
+    /// 识别不到输入位置时仍直接粘贴（不只复制）；默认关闭，可能贴到错误位置
+    pub force_paste_without_target: bool,
 }
 
 impl Default for Settings {
@@ -175,6 +177,7 @@ impl Default for Settings {
             history_enabled: false,
             history_limit: HISTORY_LIMIT_DEFAULT,
             strip_punctuation: false,
+            force_paste_without_target: false,
         }
     }
 }
@@ -283,6 +286,16 @@ mod tests {
         assert!(!s.history_enabled);
         assert_eq!(s.history_limit, 20);
         assert!(!s.strip_punctuation);
+        assert!(!s.force_paste_without_target);
+    }
+
+    #[test]
+    fn force_paste_without_target_round_trips() {
+        let s = Settings { force_paste_without_target: true, ..Settings::default() };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["forcePasteWithoutTarget"], true);
+        let back: Settings = serde_json::from_value(v).unwrap();
+        assert!(back.force_paste_without_target);
     }
 
     #[test]

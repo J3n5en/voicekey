@@ -24,6 +24,7 @@ export interface Settings {
   soundEnabled: boolean; soundStart: string; soundProcessing: string; soundError: string;
   autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
   jev: JevConfig; historyEnabled: boolean; historyLimit: number; stripPunctuation: boolean;
+  forcePasteWithoutTarget: boolean;
 }
 export interface HistoryEntry { text: string; ts: number; channel: Channel; delivered: boolean }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }

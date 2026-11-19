@@ -307,6 +307,11 @@ fn allow_text_input(has_text_target: bool, secure_input: bool) -> bool {
 
 const CLIPBOARD_HINT: &str = "没有可输入的位置，文字已复制到剪贴板";
 
+/// 焦点可输入，或用户开启了「无输入位置时也强制上屏」，就走粘贴；否则只写剪贴板
+fn should_paste(allowed: bool, force: bool) -> bool {
+    allowed || force
+}
+
 /// 上屏前按设置去除标点；只用于真正写入焦点/剪贴板/历史的文字
 fn output_text(strip: bool, text: String) -> String {
     if strip {
@@ -316,15 +321,18 @@ fn output_text(strip: bool, text: String) -> String {
     }
 }
 
-/// 能输入就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。结果同时记入识别历史。
+/// 能输入（或开启强制上屏）就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。结果同时记入识别历史。
 fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
     let state = app.state::<AppState>();
-    let strip = state.settings.read().unwrap().strip_punctuation;
+    let (strip, force) = {
+        let s = state.settings.read().unwrap();
+        (s.strip_punctuation, s.force_paste_without_target)
+    };
     let text = &output_text(strip, text.to_owned());
     if text.is_empty() {
         return false;
     }
-    let ok = allow_text_input(pf::has_text_target(), pf::secure_input());
+    let ok = should_paste(allow_text_input(pf::has_text_target(), pf::secure_input()), force);
     if ok {
         pf::paste(text);
     } else {
@@ -1573,5 +1581,15 @@ mod tests {
         assert!(!super::allow_text_input(false, false));
         assert!(!super::allow_text_input(false, true));
         assert_eq!(super::CLIPBOARD_HINT, "没有可输入的位置，文字已复制到剪贴板");
+    }
+
+    #[test]
+    fn force_paste_overrides_missing_target() {
+        assert!(super::should_paste(true, false));
+        assert!(!super::should_paste(false, false));
+        assert!(super::should_paste(false, true));
+        assert!(super::should_paste(true, true));
+        assert!(super::should_paste(super::allow_text_input(false, false), true));
+        assert!(!super::should_paste(super::allow_text_input(false, false), false));
     }
 }

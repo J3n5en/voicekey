@@ -19,4 +19,8 @@
     <div class="lbl">去除标点<small>上屏前删掉逗号、句号等标点；小数点、千分位、时间和网址中的符号保留</small></div>
     <button class="sw" class:on={s.stripPunctuation} onclick={() => save({ stripPunctuation: !s.stripPunctuation })} aria-label="去除标点"></button>
   </div>
+  <div class="row">
+    <div class="lbl">无输入位置时也强制上屏<small>开启后即使识别不到输入框也会直接粘贴，可能贴到错误位置，默认关闭</small></div>
+    <button class="sw" class:on={s.forcePasteWithoutTarget} onclick={() => save({ forcePasteWithoutTarget: !s.forcePasteWithoutTarget })} aria-label="无输入位置时也强制上屏"></button>
+  </div>
 </div>
