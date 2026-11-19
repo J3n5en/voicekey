@@ -1,5 +1,6 @@
 use crate::volume::{OutputVolumeSnapshot, OutputVolumeValue};
 use crate::{HookFn, KeyEvent, KeyKind, MicStatus, Rect, ALT, CTRL, META, MOUSE_BASE, SHIFT};
+use arboard::SetExtWindows;
 use std::sync::Mutex;
 use std::time::Duration;
 use windows::core::{Interface, PCWSTR};
@@ -155,7 +156,8 @@ pub(crate) fn type_text(text: &str) {
     send(&inputs);
 }
 
-/// 借剪贴板 + Ctrl+V 上屏，随后恢复原剪贴板（文本/图片）
+/// 借剪贴板 + Ctrl+V 上屏，随后恢复原剪贴板（文本/图片）。两次写入都带
+/// ExcludeClipboardContentFromMonitorProcessing 标记，不进系统剪贴板历史与云同步
 pub fn paste(text: &str) {
     let Ok(mut cb) = arboard::Clipboard::new() else {
         type_text(text);
@@ -163,7 +165,7 @@ pub fn paste(text: &str) {
     };
     let saved_text = cb.get_text().ok();
     let saved_image = if saved_text.is_none() { cb.get_image().ok() } else { None };
-    if cb.set_text(text).is_err() {
+    if cb.set().exclude_from_monitoring().text(text).is_err() {
         type_text(text);
         return;
     }
@@ -184,9 +186,9 @@ pub fn paste(text: &str) {
         }
         if let Ok(mut cb) = arboard::Clipboard::new() {
             if let Some(t) = saved_text {
-                let _ = cb.set_text(t);
+                let _ = cb.set().exclude_from_monitoring().text(t);
             } else if let Some(i) = saved_image {
-                let _ = cb.set_image(i);
+                let _ = cb.set().exclude_from_monitoring().image(i);
             }
         }
     });
