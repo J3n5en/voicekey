@@ -19,12 +19,14 @@ use voicekey_platform::{self as pf, Special, Typer};
 pub enum Msg {
     Hot(HotEvent),
     Level(f32),
+    FirstFrame { gen: u64, ms: u64 },
     Partial { gen: u64, ch: Channel, seg: usize, text: String },
     Done { gen: u64, ch: Channel, seg: usize, res: Result<String, String> },
     Timeout { token: u64 },
     PickGrace { gen: u64, token: u64 },
     Flush,
     PickChoose(usize),
+    PickChooseFinal,
     PickKey(Special),
     CompareToggle,
     CompareStop,
@@ -35,6 +37,37 @@ pub enum Msg {
     MicrophonesChanged(Vec<String>),
     /// Jev 评选结果：res 是 rows 下标；gen 与 token 任一对不上都说明已过期
     JevDone { gen: u64, token: u64, res: Result<usize, String> },
+    /// LLM 流式融合增量文本
+    LlmDelta { gen: u64, token: u64, text: String },
+    /// LLM 融合定稿完成
+    LlmDone { gen: u64, token: u64, res: Result<voicekey_core::llm::FuseResult, String> },
+}
+
+/// 候选框里 LLM 融合定稿行的状态
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmState {
+    Idle,
+    Busy,
+    Ready,
+    Skipped,
+    Failed,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizedRow {
+    state: LlmState,
+    text: String,
+    ms: Option<u64>,
+    note: Option<String>,
+    source_channel: Option<Channel>,
+}
+
+impl FinalizedRow {
+    fn idle() -> Self {
+        Self { state: LlmState::Idle, text: String::new(), ms: None, note: None, source_channel: None }
+    }
 }
 
 /// 候选框里 Jev 智能选择的进度
@@ -70,6 +103,11 @@ struct Model<'a> {
     rows: &'a [Row],
     sel: usize,
     jev: JevState,
+    #[serde(rename = "wakeupMs")]
+    wakeup_ms: Option<u64>,
+    finalized: Option<&'a FinalizedRow>,
+    #[serde(rename = "selFinal")]
+    sel_final: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -211,6 +249,12 @@ pub struct Ctl {
     jev: JevState,
     /// 当前有效的 Jev 请求编号；手选或新一段录音时自增，晚到结果据此丢弃
     jev_token: u64,
+    /// 候选框顶部的「最终定稿」行（启用 LLM 融合定稿时存在）
+    finalized: Option<FinalizedRow>,
+    /// 当前有效的 LLM 请求编号；手选或新一段录音时自增，晚到结果据此丢弃
+    llm_token: u64,
+    /// 当前焦点是否在顶部的「最终定稿」行上
+    sel_final: bool,
     /// 用户做过选择类操作。`user_picked` 会被 `last_pick` 预选置位，不能代替它
     manual: bool,
     released_at: Option<Instant>,
@@ -227,6 +271,10 @@ pub struct Ctl {
     chime_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
+    /// 录音会话代数，用于匹配首帧到达事件
+    mic_gen: u64,
+    /// 从开始唤醒采集管线到真正收到第一帧音频的耗时（ms）
+    first_frame_ms: Option<u64>,
 }
 
 /// 预开麦：先环形缓存，确认录音后转成实时帧流
@@ -287,6 +335,9 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         pick: PickProgress::default(),
         jev: JevState::Idle,
         jev_token: 0,
+        finalized: None,
+        llm_token: 0,
+        sel_final: false,
         manual: false,
         released_at: None,
         front: None,
@@ -296,6 +347,8 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         ducked: false,
         chime_gen: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         primed: None,
+        mic_gen: 0,
+        first_frame_ms: None,
     };
     tauri::async_runtime::spawn(ctl.run(rx));
 }
@@ -382,6 +435,14 @@ impl Ctl {
                 let _ = self.app.emit("level", v);
                 self.check_silence(v);
             }
+            Msg::FirstFrame { gen, ms } if gen == self.mic_gen && self.mode != Mode::Idle => {
+                self.first_frame_ms = Some(ms);
+                match self.mode {
+                    Mode::Single(ch) => self.hud_single(ch),
+                    Mode::Pick | Mode::Compare => self.emit_rows(),
+                    Mode::Idle => {}
+                }
+            }
             Msg::Partial { gen, ch, seg, text } if gen == self.gen => self.partial(ch, seg, text),
             Msg::Done { gen, ch, seg, res } if gen == self.gen => self.done(ch, seg, res),
             Msg::Timeout { token } if token == self.timeout_token && self.mode != Mode::Idle => {
@@ -393,7 +454,7 @@ impl Ctl {
             }
             Msg::PickGrace { gen, token } if gen == self.gen && self.mode == Mode::Pick && !self.recording && self.pick.expired(token, Instant::now()) => {
                 self.pick.cancel_grace();
-                if self.choose_pending || (!self.manual && self.settings().jev.targets().is_ok()) {
+                if self.choose_pending || (!self.manual && (self.llm_active() || self.settings().jev.targets().is_ok())) {
                     self.finish_slow_rows();
                 }
                 self.advance_pick();
@@ -406,9 +467,15 @@ impl Ctl {
                 self.emit_rows();
             }
             Msg::JevDone { gen, token, res } => self.jev_done(gen, token, res),
+            Msg::LlmDelta { gen, token, text } => self.llm_delta(gen, token, text),
+            Msg::LlmDone { gen, token, res } => self.llm_done(gen, token, res),
             Msg::PickChoose(i) if self.mode == Mode::Pick => {
                 self.take_manual();
+                self.sel_final = false;
                 self.choose(i)
+            }
+            Msg::PickChooseFinal if self.mode == Mode::Pick => {
+                self.choose_final()
             }
             Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
             Msg::CompareToggle => match self.mode {
@@ -550,6 +617,15 @@ impl Ctl {
             self.last_voice = Instant::now();
             audio
         };
+        self.first_frame_ms = None;
+        self.mic_gen += 1;
+        let mic_gen = self.mic_gen;
+        if let Some(r) = &self.recorder {
+            let tx = self.tx.clone();
+            r.on_first_frame(move |ms| {
+                let _ = tx.send(Msg::FirstFrame { gen: mic_gen, ms });
+            });
+        }
 
         // 成功开麦（含预开麦转正）发开始音。开始音必须在压低音量之前发
         // （cometix-dictation 同序：开麦 → 播开始音 → 压音量），否则音没播完就被压掉。
@@ -716,7 +792,7 @@ impl Ctl {
         self.typer = (s.streaming && allow_text_input(pf::has_text_target(), pf::secure_input())).then(Typer::default);
         self.segs = Segments::default();
         let seg = self.segs.start();
-        ui::hud(&self.app, "listen", "", s.channel);
+        self.hud_single(s.channel);
         self.spawn_engine(s.channel, seg, audio);
     }
 
@@ -738,6 +814,9 @@ impl Ctl {
         self.pick.begin(self.settings().jev);
         self.jev_token += 1;
         self.jev = JevState::Idle;
+        self.llm_token += 1;
+        self.sel_final = false;
+        self.finalized = self.llm_active().then(FinalizedRow::idle);
         self.manual = false;
         let mut targets = Vec::new();
         for (r, segs) in self.rows.iter_mut().zip(&mut self.row_segs) {
@@ -754,7 +833,7 @@ impl Ctl {
 
     fn hud_single(&self, ch: Channel) {
         let text = if self.settings.read().unwrap().live_text { self.segs.text() } else { String::new() };
-        ui::hud(&self.app, if self.recording { "listen" } else { "wait" }, &text, ch);
+        ui::hud_with_wakeup(&self.app, if self.recording { "listen" } else { "wait" }, &text, ch, self.first_frame_ms);
     }
 
     fn begin_multi(&mut self, mode: Mode, mut channels: Vec<Channel>, auto_stop: bool) {
@@ -771,6 +850,9 @@ impl Ctl {
         self.choose_pending = false;
         self.jev_token += 1;
         self.jev = JevState::Idle;
+        self.llm_token += 1;
+        self.sel_final = false;
+        self.finalized = (mode == Mode::Pick && self.llm_active()).then(FinalizedRow::idle);
         self.manual = false;
         self.released_at = None;
         self.pick.begin(self.settings().jev);
@@ -1009,7 +1091,7 @@ impl Ctl {
             self.play_after_restore(SoundEvent::Processing);
         }
         match self.mode {
-            Mode::Single(ch) => ui::hud(&self.app, "wait", "", ch),
+            Mode::Single(ch) => ui::hud_with_wakeup(&self.app, "wait", "", ch, self.first_frame_ms),
             Mode::Pick | Mode::Compare => {
                 self.released_at = Some(Instant::now());
                 for r in &mut self.rows {
@@ -1104,6 +1186,10 @@ impl Ctl {
         }
         // cancel 可能发生在预开麦阶段；丢弃 Primed 会经 Recorder::Drop 同步停麦。
         self.primed = None;
+        self.first_frame_ms = None;
+        self.llm_token += 1;
+        self.sel_final = false;
+        self.finalized = None;
         self.stop_recording();
         if let Some(mut t) = self.typer.take() {
             t.finish();
@@ -1115,17 +1201,40 @@ impl Ctl {
         self.mode = Mode::Idle;
     }
 
+    fn final_selectable(&self) -> bool {
+        self.finalized
+            .as_ref()
+            .is_some_and(|f| matches!(f.state, LlmState::Ready | LlmState::Skipped) && !f.text.is_empty())
+    }
+
     fn pick_key(&mut self, k: Special) {
         let n = self.rows.len();
         if n == 0 {
             return;
         }
-        if matches!(k, Special::Up | Special::Down | Special::Digit(_) | Special::Enter) {
+        let has_final_row = self.final_selectable();
+        if matches!(k, Special::Up | Special::Down | Special::Digit(_))
+            || (k == Special::Enter && !(self.sel_final && has_final_row))
+        {
             self.take_manual();
         }
         match k {
             Special::Up | Special::Down => {
-                self.sel = if k == Special::Down { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
+                if has_final_row {
+                    if self.sel_final {
+                        self.sel_final = false;
+                        self.sel = if k == Special::Down { 0 } else { n - 1 };
+                    } else if k == Special::Down && self.sel + 1 == n {
+                        self.sel_final = true;
+                    } else if k == Special::Up && self.sel == 0 {
+                        self.sel_final = true;
+                    } else {
+                        self.sel = if k == Special::Down { self.sel + 1 } else { self.sel - 1 };
+                    }
+                } else {
+                    self.sel_final = false;
+                    self.sel = if k == Special::Down { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
+                }
                 self.user_picked = true;
                 self.emit_rows();
             }
@@ -1134,17 +1243,44 @@ impl Ctl {
                 if i >= n {
                     return;
                 }
-                if self.sel == i {
+                if !self.sel_final && self.sel == i {
                     self.choose(i);
                 } else {
+                    self.sel_final = false;
                     self.sel = i;
                     self.user_picked = true;
                     self.emit_rows();
                 }
             }
-            Special::Enter => self.choose(self.sel),
+            Special::Enter => {
+                if self.sel_final && has_final_row {
+                    self.choose_final();
+                } else {
+                    self.choose(self.sel);
+                }
+            }
             Special::Escape => self.abort(None),
         }
+    }
+
+    /// 选中顶部的「最终定稿」行上屏
+    fn choose_final(&mut self) {
+        let Some(f) = self.finalized.clone() else { return };
+        if !matches!(f.state, LlmState::Ready | LlmState::Skipped) || f.text.is_empty() {
+            return;
+        }
+        let ch = f.source_channel.unwrap_or(Channel::All);
+        let front = self.front.take();
+        let app = self.app.clone();
+        let text = f.text;
+        self.cancel();
+        tauri::async_runtime::spawn(async move {
+            if let Some(f) = front {
+                f.activate();
+            }
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            deliver_text(&app, &text, ch);
+        });
     }
 
     /// 选中一行上屏；聆听/识别中的行先结束录音，定稿后自动上屏；失败的行抖动提示
@@ -1183,13 +1319,24 @@ impl Ctl {
         });
     }
 
-    /// 用户做了选择类操作：从此不再自动评选，进行中的 Jev 结果作废
+    /// 用户做了选择类操作：从此不再自动评选，进行中的 Jev / LLM 结果作废
     fn take_manual(&mut self) {
         self.manual = true;
         if self.jev == JevState::Busy {
             self.jev_token += 1;
             self.jev = JevState::Idle;
         }
+        if self.finalized.as_ref().is_some_and(|f| f.state == LlmState::Busy) {
+            self.llm_token += 1;
+            if let Some(f) = self.finalized.as_mut() {
+                f.state = LlmState::Idle;
+                f.text.clear();
+            }
+        }
+    }
+
+    fn llm_active(&self) -> bool {
+        self.settings().llm.is_ready()
     }
 
     /// 仅为有效 Jev 提前评选；停录后达到本次录音快照的门槛立即推进，否则从首条可用定稿起等待快照时长。
@@ -1207,7 +1354,7 @@ impl Ctl {
         if has_final {
             self.timeout_token += 1;
         }
-        let auto = self.settings().jev.targets().is_ok();
+        let auto = self.llm_active() || self.settings().jev.targets().is_ok();
         let mut waiting = self.rows.iter().any(|r| matches!(r.state, RowState::Listen | RowState::Wait));
         if waiting && auto && !self.manual && !self.choose_pending && jev_ready(&self.rows, self.pick.threshold) {
             self.finish_slow_rows();
@@ -1235,7 +1382,11 @@ impl Ctl {
         }
         if !waiting {
             self.choose_pending = false;
-            self.maybe_jev();
+            if self.llm_active() {
+                self.maybe_llm();
+            } else {
+                self.maybe_jev();
+            }
         }
     }
 
@@ -1298,6 +1449,159 @@ impl Ctl {
         }
     }
 
+    /// 启用 LLM 融合定稿时：单条定稿直接采纳；多条定稿先尝试本地高相似度跳过（省 Token），未命中再调 OpenAI 兼容 API
+    fn maybe_llm(&mut self) {
+        if self.mode != Mode::Pick || self.recording || self.choose_pending || self.manual {
+            return;
+        }
+        if self.finalized.as_ref().is_some_and(|f| f.state != LlmState::Idle) {
+            return;
+        }
+        let cfg = self.settings().llm;
+        if !cfg.is_ready() {
+            return;
+        }
+        let finals: Vec<(usize, Channel, String, Option<u64>)> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.state == RowState::Final && !r.text.is_empty())
+            .map(|(i, r)| (i, r.channel, r.text.clone(), r.ms))
+            .collect();
+        if finals.is_empty() {
+            return;
+        }
+        if finals.len() == 1 {
+            let (_, ch, text, _) = finals.into_iter().next().unwrap();
+            self.timeout_token += 1;
+            self.finalized = Some(FinalizedRow {
+                state: LlmState::Skipped,
+                text,
+                ms: Some(0),
+                note: Some("仅 1 路有效定稿 · 已省去 LLM".into()),
+                source_channel: Some(ch),
+            });
+            if cfg.auto_insert {
+                self.choose_final();
+            } else {
+                self.sel_final = true;
+                self.emit_rows();
+            }
+            return;
+        }
+
+        let candidates: Vec<voicekey_core::llm::CandidateInput> = finals
+            .iter()
+            .map(|(_, ch, text, ms)| voicekey_core::llm::CandidateInput {
+                channel: ch.id().to_string(),
+                text: text.clone(),
+                elapsed_ms: *ms,
+                hints: Vec::new(),
+            })
+            .collect();
+        let pref: Vec<usize> = (0..finals.len()).collect();
+
+        // 本地高相似度跳过（省 Token）
+        if let Some(skip) = voicekey_core::llm::try_skip_similar(&cfg, &candidates, &pref) {
+            let (_, ch, text, _) = &finals[skip.picked_index];
+            self.timeout_token += 1;
+            self.finalized = Some(FinalizedRow {
+                state: LlmState::Skipped,
+                text: text.clone(),
+                ms: Some(0),
+                note: Some(format!(
+                    "{} 路一致 · 相似度 {:.0}% · 已省去 LLM",
+                    skip.agree_count,
+                    skip.avg_similarity * 100.0
+                )),
+                source_channel: Some(*ch),
+            });
+            if cfg.auto_insert {
+                self.choose_final();
+            } else {
+                self.sel_final = true;
+                self.emit_rows();
+            }
+            return;
+        }
+
+        // 调用 OpenAI 兼容 LLM 接口融合定稿
+        self.timeout_token += 1;
+        self.llm_token += 1;
+        self.finalized = Some(FinalizedRow {
+            state: LlmState::Busy,
+            text: String::new(),
+            ms: None,
+            note: Some(cfg.model.clone()),
+            source_channel: None,
+        });
+        let (gen, token, tx) = (self.gen, self.llm_token, self.tx.clone());
+        let dtx = tx.clone();
+        let on_delta: Option<Box<dyn Fn(&str) + Send + Sync>> = cfg.stream.then(|| {
+            Box::new(move |text: &str| {
+                let _ = dtx.send(Msg::LlmDelta { gen, token, text: text.to_string() });
+            }) as Box<dyn Fn(&str) + Send + Sync>
+        });
+        tauri::async_runtime::spawn(async move {
+            let res = voicekey_core::llm::fuse(&cfg, &candidates, on_delta)
+                .await
+                .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Msg::LlmDone { gen, token, res });
+        });
+        self.emit_rows();
+    }
+
+    fn llm_delta(&mut self, gen: u64, token: u64, text: String) {
+        if gen != self.gen || token != self.llm_token || self.mode != Mode::Pick {
+            return;
+        }
+        if let Some(f) = self.finalized.as_mut() {
+            if f.state == LlmState::Busy {
+                f.text = text;
+                self.emit_rows();
+            }
+        }
+    }
+
+    fn llm_done(&mut self, gen: u64, token: u64, res: Result<voicekey_core::llm::FuseResult, String>) {
+        if gen != self.gen || token != self.llm_token || self.mode != Mode::Pick {
+            return;
+        }
+        let cfg = self.settings().llm;
+        match res {
+            Ok(out) => {
+                let note = match &out.usage {
+                    Some(u) => format!("{} · {} tok", out.model, u.total_tokens),
+                    None => out.model.clone(),
+                };
+                self.finalized = Some(FinalizedRow {
+                    state: LlmState::Ready,
+                    text: out.text,
+                    ms: Some(out.ms),
+                    note: Some(note),
+                    source_channel: None,
+                });
+                if cfg.auto_insert && !self.manual {
+                    self.choose_final();
+                } else {
+                    self.sel_final = true;
+                    self.emit_rows();
+                }
+            }
+            Err(e) => {
+                self.sel_final = false;
+                self.finalized = Some(FinalizedRow {
+                    state: LlmState::Failed,
+                    text: e,
+                    ms: None,
+                    note: Some(cfg.model),
+                    source_channel: None,
+                });
+                self.emit_rows();
+            }
+        }
+    }
+
     /// 最多每 33ms 推送一次，避免文字跳动
     fn emit_rows(&mut self) {
         let wait = Duration::from_millis(33).saturating_sub(self.last_emit.elapsed());
@@ -1313,7 +1617,15 @@ impl Ctl {
             return;
         }
         self.last_emit = Instant::now();
-        let model = Model { recording: self.recording, rows: &self.rows, sel: self.sel, jev: self.jev };
+        let model = Model {
+            recording: self.recording,
+            rows: &self.rows,
+            sel: self.sel,
+            jev: self.jev,
+            wakeup_ms: self.first_frame_ms,
+            finalized: self.finalized.as_ref(),
+            sel_final: self.sel_final,
+        };
         match self.mode {
             Mode::Pick => {
                 let _ = self.app.emit_to("pick", "pick", model);

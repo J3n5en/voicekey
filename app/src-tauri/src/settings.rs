@@ -22,6 +22,23 @@ pub enum Channel {
 }
 
 impl Channel {
+    pub fn id(self) -> &'static str {
+        match self {
+            Channel::Doubao => "doubao",
+            Channel::Wetype => "wetype",
+            Channel::Qwen => "qwen",
+            Channel::Baidu => "baidu",
+            Channel::Sogou => "sogou",
+            Channel::Iflytek => "iflytek",
+            Channel::Chatterfly => "chatterfly",
+            Channel::QwenApp => "qwenapp",
+            Channel::Bageshuo => "bageshuo",
+            Channel::Offline => "offline",
+            Channel::WetypeOffline => "wetypeoffline",
+            Channel::All => "all",
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Channel::Doubao => "豆包输入法",
@@ -139,6 +156,8 @@ pub struct Settings {
     pub onboarded: bool,
     /// 多渠道定稿后的 Jev 智能选择配置；默认关闭
     pub jev: voicekey_core::jev::Config,
+    /// 多渠道定稿后的自动 LLM 融合定稿配置（OpenAI 兼容）；默认关闭
+    pub llm: voicekey_core::llm::Config,
     /// 识别历史（只存内存）；默认关闭，隐私优先
     pub history_enabled: bool,
     pub history_limit: u32,
@@ -174,6 +193,7 @@ impl Default for Settings {
             lower_system_volume_percent: LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT,
             onboarded: false,
             jev: voicekey_core::jev::Config::default(),
+            llm: voicekey_core::llm::Config::default(),
             history_enabled: false,
             history_limit: HISTORY_LIMIT_DEFAULT,
             strip_punctuation: false,
@@ -201,6 +221,7 @@ impl Settings {
     /// 不可用的渠道/按键回落默认
     pub fn sanitize(&mut self) {
         self.jev.sanitize_selection();
+        self.llm.sanitize();
         if !Channel::available().contains(&self.channel) {
             self.channel = Channel::Doubao;
         }
