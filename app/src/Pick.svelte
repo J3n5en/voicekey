@@ -88,20 +88,69 @@
     <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
     <span class="state">
       {#if model.recording}聆听中 · 松开结束
+      {:else if model.finalized?.state === "busy"}<span class="spinner"></span>LLM 融合定稿中 · 可手选
+      {:else if model.finalized?.state === "failed"}<span class="err">LLM 定稿失败，请手动选择</span>
+      {:else if model.finalized?.state === "skipped"}<span class="ok">● 已省去 LLM · 按回车上屏</span>
+      {:else if model.finalized?.state === "ready"}<span class="ok">● LLM 定稿完成 · 按回车上屏</span>
       {:else if model.jev === "busy"}<span class="spinner"></span>Jev 智能选择中 · 可手选
       {:else if model.jev === "failed"}<span class="err">智能选择失败，请手动选择</span>
       {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
       {:else}<span class="ok">● 全部完成</span>{/if}
     </span>
+    {#if model.recording || model.wakeupMs != null}
+      <span class="wakeup" class:pending={model.wakeupMs == null}>
+        {#if model.wakeupMs != null}首帧 {model.wakeupMs}ms{:else}唤醒中…{/if}
+      </span>
+    {/if}
     <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
       <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
     </button>
   </div>
   <div class="rows">
+  {#if model.finalized}
+    {@const f = model.finalized}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="row final-row"
+      class:active={!!model.selFinal}
+      class:disabled={f.state === "idle" || f.state === "busy" || f.state === "failed"}
+      onclick={() => {
+        if (f.state === "ready" || f.state === "skipped") call("pick_choose_final");
+      }}
+    >
+      <span class="num star">✦</span>
+      <span class="name">
+        <span class="sdot s-{f.state === 'ready' || f.state === 'skipped' ? 'final' : f.state === 'failed' ? 'error' : 'wait'}"></span>
+        最终定稿
+      </span>
+      <div
+        class="text"
+        class:live={f.state === "busy"}
+        class:muted={f.state === "idle" || (f.state === "busy" && !f.text)}
+        class:bad={f.state === "failed"}
+        data-ch="llm"
+      >
+        {#if f.state === "idle"}
+          等待各渠道定稿后生成…
+        {:else if f.state === "busy"}
+          {f.text || "LLM 正在综合对比各渠道结果…"}{#if f.text}<span class="cur"></span>{/if}
+        {:else}
+          {f.text}
+        {/if}
+        {#if f.note && (f.state === "ready" || f.state === "skipped")}
+          <div class="fnote">{f.note}</div>
+        {/if}
+      </div>
+      <span class="meta">
+        {#if f.state === "busy"}<span class="spinner"></span>{:else if f.state === "skipped"}省 Token{:else if f.ms != null}{(f.ms / 1000).toFixed(2)}s{/if}
+      </span>
+    </div>
+  {/if}
   {#each model.rows as r, i (r.channel)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="row" class:active={i === model.sel} class:shake={i === shake} onclick={() => call("pick_choose", { index: i })}>
+    <div class="row" class:active={!model.selFinal && i === model.sel} class:shake={i === shake} onclick={() => call("pick_choose", { index: i })}>
       <span class="num">{i + 1}</span>
       <span class="name"><span class="sdot s-{r.state}"></span><ChIcon ch={r.channel} size="xs" />{CH[r.channel].short}</span>
       <div
@@ -141,13 +190,22 @@
   .wave { flex: 1; min-width: 0; }
   .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--err); animation: pulse 1.2s infinite; flex: none; }
   .state { font-size: 11.5px; color: var(--fg2); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .wakeup {
+    flex: none; white-space: nowrap; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 999px;
+    background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg2); font-variant-numeric: tabular-nums;
+  }
+  .wakeup.pending { opacity: 0.72; }
   .close { flex: none; width: 20px; height: 20px; margin-right: -4px; border: 0; border-radius: 6px; background: transparent; color: var(--fg3); display: grid; place-items: center; cursor: pointer; padding: 0; }
   .close:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--fg); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px 9px 14px; cursor: pointer; position: relative; border-top: 1px solid var(--line); }
+  .row.final-row { background: color-mix(in srgb, var(--accent) 6%, transparent); border-bottom: 1.5px solid color-mix(in srgb, var(--accent) 28%, var(--line)); }
+  .row.final-row.disabled { cursor: default; }
   .row.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .row.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--accent); }
   .row.shake { animation: shake 0.3s; }
   .num { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line); font-size: 11px; display: grid; place-items: center; color: var(--fg2); flex: none; margin-top: 2px; }
+  .num.star { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); font-size: 12px; }
+  .fnote { font-size: 11px; color: var(--fg3); margin-top: 2px; }
   .row.active .num { background: var(--accent); color: #fff; border-color: transparent; }
   .name { width: 88px; flex: none; font-size: 12px; color: var(--fg2); margin-top: 2px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .text {

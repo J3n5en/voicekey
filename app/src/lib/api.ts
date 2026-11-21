@@ -18,12 +18,27 @@ export interface JevConfig {
   selectionThreshold: "half" | "twoThirds" | "all"; selectionWaitMs: number;
 }
 export interface JevTested { index: number; text: string; alias: string; ms: number; key: string }
+export interface LlmConfig {
+  enabled: boolean; baseUrl: string; apiKey: string; model: string;
+  autoInsert: boolean; stream: boolean; timeoutMs: number; systemPrompt: string;
+  skipSimilar: boolean; similarityThreshold: number; minAgreeChannels: number;
+}
+export interface LlmUsage { promptTokens: number; completionTokens: number; totalTokens: number }
+export interface LlmTested { text: string; ms: number; model: string; usage?: LlmUsage | null }
+export interface PromptPreview {
+  system: string; user: string; defaultSystem: string;
+  estimatedTokens: number; source: string;
+}
+export type LlmState = "idle" | "busy" | "ready" | "skipped" | "failed";
+export interface FinalizedRow {
+  state: LlmState; text: string; ms: number | null; note?: string | null; sourceChannel?: Channel | null;
+}
 export interface Settings {
   channel: Channel; holdKey: string; holdCombo: Combo | null; tapShortcut: Shortcut | null; silence: number; silenceStop: boolean; streaming: boolean;
   liveText: boolean; mic: string; multi: Channel[]; lastPick: Channel | null; pickCounts: Partial<Record<Channel, number>>;
   soundEnabled: boolean; soundStart: string; soundProcessing: string; soundError: string;
   autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
-  jev: JevConfig; historyEnabled: boolean; historyLimit: number; stripPunctuation: boolean;
+  jev: JevConfig; llm: LlmConfig; historyEnabled: boolean; historyLimit: number; stripPunctuation: boolean;
   forcePasteWithoutTarget: boolean;
 }
 export interface HistoryEntry { text: string; ts: number; channel: Channel; delivered: boolean }
@@ -38,7 +53,10 @@ export interface AppInfo {
 }
 export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }
-export interface Model { recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed" }
+export interface Model {
+  recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed"; wakeupMs?: number | null;
+  finalized?: FinalizedRow | null; selFinal?: boolean;
+}
 
 export const call = invoke;
 export const previewSound = (id: string) => call("preview_sound", { id });

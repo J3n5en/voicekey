@@ -234,6 +234,11 @@ fn pick_choose(app: AppHandle, index: usize) {
 }
 
 #[tauri::command]
+fn pick_choose_final(app: AppHandle) {
+    send(&app, Msg::PickChooseFinal);
+}
+
+#[tauri::command]
 fn pick_key(app: AppHandle, key: String) {
     use voicekey_platform::Special;
     let k = match key.as_str() {
@@ -297,6 +302,19 @@ async fn jev_test(config: voicekey_core::jev::Config) -> Result<voicekey_core::j
     voicekey_core::jev::test(&config).await.map_err(|e| e.to_string())
 }
 
+/// 设置页 LLM「测试连接」按钮：用内置多渠道示例调用 OpenAI 兼容接口
+#[tauri::command]
+async fn llm_test(config: voicekey_core::llm::Config) -> Result<voicekey_core::llm::Tested, String> {
+    voicekey_core::llm::test(&config).await.map_err(|e| format!("{e:#}"))
+}
+
+/// 设置页 LLM Prompt 实时预览
+#[tauri::command]
+fn llm_preview_prompt(config: voicekey_core::llm::Config) -> voicekey_core::llm::PromptPreview {
+    let cands = voicekey_core::llm::sample_candidates();
+    voicekey_core::llm::preview_prompt(&config, &cands, "内置示例")
+}
+
 fn main() {
     if let Some(code) = offline::worker_main() {
         std::process::exit(code);
@@ -309,8 +327,9 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
-            update_check, update_install, jev_test, preview_sound, list_sounds,
+            pick_choose, pick_choose_final, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
+            update_check, update_install, jev_test, llm_test, llm_preview_prompt,
+            preview_sound, list_sounds,
             account_save, account_login, account_logout, get_recognition_history, clear_recognition_history
         ])
         .setup(move |app| {
