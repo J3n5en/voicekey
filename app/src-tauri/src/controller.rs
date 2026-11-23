@@ -72,11 +72,19 @@ struct Model<'a> {
     jev: JevState,
 }
 
+#[derive(Clone, Serialize)]
+struct HistoryModel<'a> {
+    items: &'a [crate::history::HistoryEntry],
+    sel: usize,
+    enabled: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
     Idle,
     Single(Channel),
     Pick,
+    History,
     Compare,
 }
 
@@ -227,6 +235,9 @@ pub struct Ctl {
     chime_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
+    /// 历史快捷上屏面板当前展示的条目与选中下标
+    history_items: Vec<crate::history::HistoryEntry>,
+    history_sel: usize,
 }
 
 /// 预开麦：先环形缓存，确认录音后转成实时帧流
@@ -296,6 +307,8 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         ducked: false,
         chime_gen: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         primed: None,
+        history_items: Vec::new(),
+        history_sel: 0,
     };
     tauri::async_runtime::spawn(ctl.run(rx));
 }
@@ -342,6 +355,21 @@ fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
     }
     crate::history::record(app, text, ch, ok);
     ok
+}
+
+/// 历史快捷上屏：直接粘贴（或复制）原文，不再重复写入历史
+fn deliver_history_text(app: &AppHandle, text: &str, ch: Channel) {
+    if text.is_empty() {
+        return;
+    }
+    let force = app.state::<AppState>().settings.read().unwrap().force_paste_without_target;
+    if should_paste(allow_text_input(pf::has_text_target(), pf::secure_input()), force) {
+        pf::paste(text);
+    } else {
+        pf::copy(text);
+        ui::hud(app, "info", CLIPBOARD_HINT, ch);
+        ui::hud_hide(app, 2600);
+    }
 }
 
 impl Ctl {
@@ -410,7 +438,9 @@ impl Ctl {
                 self.take_manual();
                 self.choose(i)
             }
+            Msg::PickChoose(i) if self.mode == Mode::History => self.choose_history(i),
             Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
+            Msg::PickKey(k) if self.mode == Mode::History => self.history_key(k),
             Msg::CompareToggle => match self.mode {
                 Mode::Compare if self.recording => self.end(),
                 Mode::Idle => self.begin_multi(Mode::Compare, Channel::engines(), false),
@@ -470,6 +500,10 @@ impl Ctl {
             HotEvent::Cancel => self.disarm(),
             HotEvent::LongPress => match self.mode {
                 Mode::Single(_) | Mode::Pick => self.resume(false),
+                Mode::History => {
+                    self.cancel();
+                    self.begin(false);
+                }
                 _ => self.begin(false),
             },
             HotEvent::Release => {
@@ -486,6 +520,9 @@ impl Ctl {
                     self.end()
                 } else if matches!(self.mode, Mode::Single(_) | Mode::Pick) {
                     self.resume(true)
+                } else if self.mode == Mode::History {
+                    self.cancel();
+                    self.begin(true);
                 } else if self.mode != Mode::Idle {
                     self.abort(None)
                 } else {
@@ -493,11 +530,12 @@ impl Ctl {
                 }
             }
             HotEvent::Escape => {
-                if matches!(self.mode, Mode::Single(_) | Mode::Pick) {
+                if matches!(self.mode, Mode::Single(_) | Mode::Pick | Mode::History) {
                     self.abort(None)
                 }
             }
             HotEvent::Pick(k) if self.mode == Mode::Pick => self.pick_key(k),
+            HotEvent::Pick(k) if self.mode == Mode::History => self.history_key(k),
             HotEvent::Pick(_) => {}
             HotEvent::Recorded(sc) => {
                 let _ = self.app.emit_to("main", "recorded", sc.clone());
@@ -854,7 +892,7 @@ impl Ctl {
                 }
                 self.emit_rows();
             }
-            Mode::Idle => {}
+            Mode::Idle | Mode::History => {}
         }
     }
 
@@ -972,7 +1010,7 @@ impl Ctl {
                 }
                 self.emit_rows();
             }
-            Mode::Idle => {}
+            Mode::Idle | Mode::History => {}
         }
     }
 
@@ -1019,7 +1057,7 @@ impl Ctl {
                 }
                 self.emit_rows();
             }
-            Mode::Idle => return,
+            Mode::Idle | Mode::History => return,
         }
         self.timeout_token += 1;
         let (token, tx) = (self.timeout_token, self.tx.clone());
@@ -1040,14 +1078,14 @@ impl Ctl {
         let partial = match mode {
             Mode::Single(_) => self.segs.text(),
             Mode::Pick => self.rows.get(self.sel).map(|r| r.text.clone()).unwrap_or_default(),
-            Mode::Compare | Mode::Idle => String::new(),
+            Mode::History | Mode::Compare | Mode::Idle => String::new(),
         };
         self.cancel();
         // 超时等异常打断发失败音；用户取消（message 为 None）保持安静
         if message.is_some() {
             self.play_after_restore(SoundEvent::Error);
         }
-        if mode == Mode::Pick {
+        if matches!(mode, Mode::Pick | Mode::History) {
             if let Some(f) = self.front.take() {
                 f.activate();
             }
@@ -1108,14 +1146,89 @@ impl Ctl {
         if let Some(mut t) = self.typer.take() {
             t.finish();
         }
-        if self.mode == Mode::Pick {
+        if matches!(self.mode, Mode::Pick | Mode::History) {
             self.hk.picking.store(false, Ordering::Relaxed);
             ui::pick_hide(&self.app);
         }
+        self.history_items.clear();
+        self.history_sel = 0;
         self.mode = Mode::Idle;
     }
 
+    /// 从候选浮窗原地切到历史记录：停录并取消本轮识别，保持浮窗打开与原焦点记录
+    fn enter_history(&mut self) {
+        self.gen += 1;
+        self.timeout_token += 1;
+        self.pick.reset();
+        self.chime_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.ducked = false;
+        for t in self.tasks.drain(..) {
+            t.abort();
+        }
+        self.primed = None;
+        self.stop_recording();
+        self.mode = Mode::History;
+        self.history_items = crate::history::list();
+        self.history_sel = 0;
+        self.emit_history();
+    }
+
+    fn history_key(&mut self, k: Special) {
+        if matches!(k, Special::Escape | Special::Tab) {
+            self.abort(None);
+            return;
+        }
+        let n = self.history_items.len();
+        if n == 0 {
+            return;
+        }
+        match k {
+            Special::Up | Special::Down => {
+                self.history_sel = if k == Special::Down { (self.history_sel + 1) % n } else { (self.history_sel + n - 1) % n };
+                self.emit_history();
+            }
+            Special::Digit(d) => {
+                let i = d as usize - 1;
+                if i >= n {
+                    return;
+                }
+                if self.history_sel == i {
+                    self.choose_history(i);
+                } else {
+                    self.history_sel = i;
+                    self.emit_history();
+                }
+            }
+            Special::Enter => self.choose_history(self.history_sel),
+            Special::Escape | Special::Tab => self.abort(None),
+        }
+    }
+
+    fn choose_history(&mut self, i: usize) {
+        let Some(entry) = self.history_items.get(i).cloned() else { return };
+        let front = self.front.take();
+        let app = self.app.clone();
+        self.cancel();
+        tauri::async_runtime::spawn(async move {
+            if let Some(f) = front {
+                f.activate();
+            }
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            deliver_history_text(&app, &entry.text, entry.channel);
+        });
+    }
+
+    fn emit_history(&self) {
+        let enabled = self.settings.read().unwrap().history_enabled;
+        let model = HistoryModel { items: &self.history_items, sel: self.history_sel, enabled };
+        let _ = self.app.emit_to("pick", "pick-history", model);
+    }
+
     fn pick_key(&mut self, k: Special) {
+        if k == Special::Tab {
+            self.enter_history();
+            return;
+        }
         let n = self.rows.len();
         if n == 0 {
             return;
@@ -1144,6 +1257,7 @@ impl Ctl {
             }
             Special::Enter => self.choose(self.sel),
             Special::Escape => self.abort(None),
+            Special::Tab => self.enter_history(),
         }
     }
 

@@ -241,6 +241,7 @@ fn pick_key(app: AppHandle, key: String) {
         "ArrowDown" => Special::Down,
         "Enter" => Special::Enter,
         "Escape" => Special::Escape,
+        "Tab" => Special::Tab,
         d => match d.parse::<u8>() {
             Ok(n @ 1..=9) => Special::Digit(n),
             _ => return,

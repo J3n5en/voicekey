@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { call, on, applyLook, diffMark, esc, CH, type AppInfo, type Model, type Settings } from "./lib/api";
+  import { call, on, applyLook, diffMark, esc, CH, type AppInfo, type HistoryModel, type Model, type Settings } from "./lib/api";
   import ChIcon from "./lib/ChIcon.svelte";
   import Wave from "./lib/Wave.svelte";
 
+  let mode = $state<"pick" | "history">("pick");
   let model = $state<Model>({ recording: false, rows: [], sel: 0 });
+  let hist = $state<HistoryModel>({ items: [], sel: 0, enabled: true });
   let level = $state(0);
   let shake = $state(-1);
   let platform = $state("mac");
@@ -15,10 +17,13 @@
   const waiting = $derived(model.rows.filter((r) => r.state === "wait" || r.state === "listen").length);
   const done = $derived(model.rows.filter((r) => r.state === "final").length);
   // 路数越多单条越矮，长文本在条目内滚动，避免把后面的候选顶出屏幕
-  const lines = $derived(model.rows.length <= 2 ? 8 : model.rows.length === 3 ? 5 : 4);
+  const count = $derived(mode === "history" ? hist.items.length : model.rows.length);
+  const lines = $derived(count <= 2 ? 8 : count === 3 ? 5 : 4);
+  const histKeys = $derived(Math.min(hist.items.length, 9));
   const streaming = new Set<string>();
 
   function receive(m: Model) {
+    mode = "pick";
     if (m.recording && m.rows.every((r) => !r.text || r.state === "skip")) {
       drafts.clear();
       finals.clear();
@@ -35,23 +40,42 @@
     report();
   }
 
+  function receiveHistory(h: HistoryModel) {
+    mode = "history";
+    hist = h;
+    report();
+  }
+
+  function relTime(ts: number) {
+    const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (sec < 60) return "刚刚";
+    if (sec < 3600) return `${Math.floor(sec / 60)}分钟前`;
+    return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   async function report() {
     await tick();
     if (!root) return;
-    for (const node of root.querySelectorAll(".text")) {
-      if (!(node instanceof HTMLElement)) continue;
-      const ch = node.dataset.ch ?? "";
-      if (node.classList.contains("live")) {
-        node.scrollTop = node.scrollHeight;
-        streaming.add(ch);
-      } else if (streaming.delete(ch)) node.scrollTop = 0;
+    if (mode === "history") {
+      const active = root.querySelector(".row.active");
+      if (active instanceof HTMLElement) active.scrollIntoView({ block: "nearest" });
+    } else {
+      for (const node of root.querySelectorAll(".text")) {
+        if (!(node instanceof HTMLElement)) continue;
+        const ch = node.dataset.ch ?? "";
+        if (node.classList.contains("live")) {
+          node.scrollTop = node.scrollHeight;
+          streaming.add(ch);
+        } else if (streaming.delete(ch)) node.scrollTop = 0;
+      }
     }
     // 窗口被工作区卡住时，面板可见高度小于内容高度，用列表 scrollHeight 量自然高度
     const list = root.querySelector(".rows");
     const box = root.getBoundingClientRect().height;
     const natural = list instanceof HTMLElement ? box - list.getBoundingClientRect().height + list.scrollHeight : box;
-    // 10px 上下边距，再留 8px 给缩放取整
-    call("pick_resize", { height: Math.ceil(natural) + 28 });
+    // 10px 上下边距，再留 8px 给缩放取整；历史列表最多展示约半屏高度，超出内部滚动
+    const h = Math.ceil(natural) + 28;
+    call("pick_resize", { height: mode === "history" ? Math.min(h, 520) : h });
   }
 
   onMount(() => {
@@ -68,6 +92,7 @@
     window.addEventListener("keydown", onKey);
     const un = [
       on<Model>("pick", receive),
+      on<HistoryModel>("pick-history", receiveHistory),
       on<number>("level", (v) => (level = v)),
       on<Settings>("settings", (s) => applyLook(platform, s.theme)),
       on<number>("pick-shake", (i) => {
@@ -83,50 +108,86 @@
 </script>
 
 <div class="pick" bind:this={root} style:--lines={lines}>
-  <div class="hd">
-    {#if model.recording}<span class="rec"></span>{/if}
-    <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
-    <span class="state">
-      {#if model.recording}聆听中 · 松开结束
-      {:else if model.jev === "busy"}<span class="spinner"></span>Jev 智能选择中 · 可手选
-      {:else if model.jev === "failed"}<span class="err">智能选择失败，请手动选择</span>
-      {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
-      {:else}<span class="ok">● 全部完成</span>{/if}
-    </span>
-    <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
-      <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-    </button>
-  </div>
-  <div class="rows">
-  {#each model.rows as r, i (r.channel)}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="row" class:active={i === model.sel} class:shake={i === shake} onclick={() => call("pick_choose", { index: i })}>
-      <span class="num">{i + 1}</span>
-      <span class="name"><span class="sdot s-{r.state}"></span><ChIcon ch={r.channel} size="xs" />{CH[r.channel].short}</span>
-      <div
-        class="text"
-        class:live={r.state === "listen" || r.state === "wait"}
-        class:muted={r.state === "skip" || r.state === "error" || !r.text}
-        class:bad={r.state === "error"}
-        data-ch={r.channel}
-      >
-        {#if r.state === "final"}
-          {@html finals.get(r.channel) ?? esc(r.text)}
-        {:else}
-          {r.text}{#if r.state === "listen" || r.state === "wait"}<span class="cur"></span>{/if}
-        {/if}
-      </div>
-      <span class="meta">
-        {#if r.state === "wait"}<span class="spinner"></span>{:else if r.ms != null}{(r.ms / 1000).toFixed(2)}s{/if}
-      </span>
+  {#if mode === "history"}
+    <div class="hd">
+      <span class="hic"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+      <span class="htitle">识别历史</span>
+      <span class="hsub">最近 {hist.items.length} 条</span>
+      <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
+        <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+      </button>
     </div>
-  {/each}
-  </div>
-  <div class="ft">
-    <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span>
-    {#if model.recording}<span class="tip">可提前预选</span>{/if}
-  </div>
+    <div class="rows">
+      {#each hist.items as e, i (`${e.ts}-${i}`)}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="row" class:active={i === hist.sel} onclick={() => call("pick_choose", { index: i })}>
+          <span class="num">{i < 9 ? i + 1 : "•"}</span>
+          <span class="name"><span class="sdot" class:s-final={e.delivered} class:s-error={!e.delivered}></span><ChIcon ch={e.channel} size="xs" />{CH[e.channel]?.short ?? e.channel}</span>
+          <div class="text">{e.text}</div>
+          <span class="meta hmeta">
+            <span>{relTime(e.ts)}</span>
+            {#if !e.delivered}<span class="err">未输入</span>{/if}
+          </span>
+        </div>
+      {:else}
+        <div class="empty">{hist.enabled ? "暂无识别历史" : "识别历史未开启，请在「设置 → 历史」中打开"}</div>
+      {/each}
+    </div>
+    <div class="ft">
+      {#if hist.items.length}
+        <span><kbd>{histKeys > 1 ? `1-${histKeys}` : "1"}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span>
+        <span class="tip">点击直接上屏</span>
+      {:else}
+        <span><kbd>Esc</kbd>关闭</span>
+      {/if}
+    </div>
+  {:else}
+    <div class="hd">
+      {#if model.recording}<span class="rec"></span>{/if}
+      <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
+      <span class="state">
+        {#if model.recording}聆听中 · 松开结束
+        {:else if model.jev === "busy"}<span class="spinner"></span>Jev 智能选择中 · 可手选
+        {:else if model.jev === "failed"}<span class="err">智能选择失败，请手动选择</span>
+        {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
+        {:else}<span class="ok">● 全部完成</span>{/if}
+      </span>
+      <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
+        <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+      </button>
+    </div>
+    <div class="rows">
+    {#each model.rows as r, i (r.channel)}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="row" class:active={i === model.sel} class:shake={i === shake} onclick={() => call("pick_choose", { index: i })}>
+        <span class="num">{i + 1}</span>
+        <span class="name"><span class="sdot s-{r.state}"></span><ChIcon ch={r.channel} size="xs" />{CH[r.channel].short}</span>
+        <div
+          class="text"
+          class:live={r.state === "listen" || r.state === "wait"}
+          class:muted={r.state === "skip" || r.state === "error" || !r.text}
+          class:bad={r.state === "error"}
+          data-ch={r.channel}
+        >
+          {#if r.state === "final"}
+            {@html finals.get(r.channel) ?? esc(r.text)}
+          {:else}
+            {r.text}{#if r.state === "listen" || r.state === "wait"}<span class="cur"></span>{/if}
+          {/if}
+        </div>
+        <span class="meta">
+          {#if r.state === "wait"}<span class="spinner"></span>{:else if r.ms != null}{(r.ms / 1000).toFixed(2)}s{/if}
+        </span>
+      </div>
+    {/each}
+    </div>
+    <div class="ft">
+      <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span><button class="ft-btn" onclick={() => call("pick_key", { key: "Tab" })}><kbd>Tab</kbd>历史</button>
+      {#if model.recording}<span class="tip">可提前预选</span>{/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -157,7 +218,15 @@
   .text.muted { color: var(--fg3); font-size: 13px; }
   .text.bad { color: var(--err); }
   .meta { font-size: 11px; color: var(--fg3); white-space: nowrap; margin-top: 3px; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
-  .ft { display: flex; gap: 14px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); flex: none; }
+  .hmeta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 48px; }
+  .hic { color: var(--accent); display: grid; place-items: center; flex: none; }
+  .htitle { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+  .hsub { font-size: 11.5px; color: var(--fg3); margin-left: auto; }
+  .empty { padding: 20px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--fg3); text-align: center; }
+  .ft { display: flex; align-items: center; gap: 14px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); flex: none; }
   .ft kbd { font: inherit; padding: 0 4px; border-radius: 4px; border: 1px solid var(--line); color: var(--fg2); margin-right: 3px; }
+  .ft-btn { border: 0; background: none; padding: 0; color: inherit; cursor: pointer; display: inline-flex; align-items: center; }
+  .ft-btn:hover { color: var(--fg); }
+  .ft-btn:hover kbd { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--fg); }
   .tip { margin-left: auto; }
 </style>

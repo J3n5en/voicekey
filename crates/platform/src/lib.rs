@@ -47,6 +47,7 @@ pub type HookFn = Box<dyn FnMut(&KeyEvent) -> bool + Send>;
 pub enum Special {
     Escape,
     Enter,
+    Tab,
     Up,
     Down,
     Digit(u8),

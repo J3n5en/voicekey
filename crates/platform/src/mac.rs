@@ -676,6 +676,7 @@ pub mod keys {
         Some(match code {
             53 => Special::Escape,
             36 | 76 => Special::Enter,
+            48 => Special::Tab,
             126 => Special::Up,
             125 => Special::Down,
             18 => Special::Digit(1),

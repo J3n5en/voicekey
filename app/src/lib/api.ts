@@ -27,6 +27,7 @@ export interface Settings {
   forcePasteWithoutTarget: boolean;
 }
 export interface HistoryEntry { text: string; ts: number; channel: Channel; delivered: boolean }
+export interface HistoryModel { items: HistoryEntry[]; sel: number; enabled: boolean }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
 export interface UpdateStatus { state: "idle" | "checking" | "latest" | "available" | "downloading" | "error"; version?: string; progress?: number; error?: string }
