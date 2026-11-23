@@ -15,7 +15,8 @@
   const waiting = $derived(model.rows.filter((r) => r.state === "wait" || r.state === "listen").length);
   const done = $derived(model.rows.filter((r) => r.state === "final").length);
   // 路数越多单条越矮，长文本在条目内滚动，避免把后面的候选顶出屏幕
-  const lines = $derived(model.rows.length <= 2 ? 8 : model.rows.length === 3 ? 5 : 4);
+  const count = $derived(model.history ? model.history.items.length : model.rows.length);
+  const lines = $derived(count <= 2 ? 8 : count === 3 ? 5 : 4);
   const streaming = new Set<string>();
 
   function receive(m: Model) {
@@ -35,9 +36,17 @@
     report();
   }
 
+  function relTime(ts: number) {
+    const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (sec < 60) return "刚刚";
+    if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+    return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   async function report() {
     await tick();
     if (!root) return;
+    if (model.history) root.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
     for (const node of root.querySelectorAll(".text")) {
       if (!(node instanceof HTMLElement)) continue;
       const ch = node.dataset.ch ?? "";
@@ -50,8 +59,9 @@
     const list = root.querySelector(".rows");
     const box = root.getBoundingClientRect().height;
     const natural = list instanceof HTMLElement ? box - list.getBoundingClientRect().height + list.scrollHeight : box;
-    // 10px 上下边距，再留 8px 给缩放取整
-    call("pick_resize", { height: Math.ceil(natural) + 28 });
+    // 10px 上下边距，再留 8px 给缩放取整；历史列表限高，超出在列表内滚动
+    const h = Math.ceil(natural) + 28;
+    call("pick_resize", { height: model.history ? Math.min(h, 520) : h });
   }
 
   onMount(() => {
@@ -61,7 +71,7 @@
     });
     // 面板仅在安全输入开启时取得焦点，此时由这里接收选择按键
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || (e.key === "Tab" && e.shiftKey)) return;
       e.preventDefault();
       call("pick_key", { key: e.key });
     };
@@ -83,6 +93,34 @@
 </script>
 
 <div class="pick" bind:this={root} style:--lines={lines}>
+  {#if model.history}
+  {@const h = model.history}
+  <div class="hd">
+    <span class="htitle">识别历史</span>
+    <span class="hsub">{h.enabled ? `最近 ${h.items.length} 条` : ""}</span>
+    <button class="close" title="返回候选（Tab / Esc）" aria-label="返回候选" onclick={() => call("pick_key", { key: "Escape" })}>
+      <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+    </button>
+  </div>
+  <div class="rows">
+  {#each h.items as e, i (`${e.ts}-${i}`)}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="row" class:active={i === h.sel} onclick={() => call("pick_choose", { index: i })}>
+      <span class="num">{i < 9 ? i + 1 : "•"}</span>
+      <span class="name"><span class="sdot" class:s-final={e.delivered} class:s-error={!e.delivered}></span><ChIcon ch={e.channel} size="xs" />{CH[e.channel]?.short ?? e.channel}</span>
+      <div class="text">{e.text}</div>
+      <span class="meta">{relTime(e.ts)}</span>
+    </div>
+  {:else}
+    <div class="empty">{h.enabled ? "暂无识别历史" : "识别历史未开启，可在「设置 → 历史」中打开"}</div>
+  {/each}
+  </div>
+  <div class="ft">
+    {#if h.items.length}<span><kbd>1-{Math.min(h.items.length, 9)}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span>{/if}
+    <span><kbd>Tab</kbd>返回候选</span>
+  </div>
+  {:else}
   <div class="hd">
     {#if model.recording}<span class="rec"></span>{/if}
     <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
@@ -168,9 +206,10 @@
   {/each}
   </div>
   <div class="ft">
-    <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span>
+    <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span><button class="ft-btn" onclick={() => call("pick_key", { key: "Tab" })}><kbd>Tab</kbd>历史</button>
     {#if model.recording}<span class="tip">可提前预选</span>{/if}
   </div>
+  {/if}
 </div>
 
 <style>
@@ -207,5 +246,10 @@
   .meta { font-size: 11px; color: var(--fg3); white-space: nowrap; margin-top: 3px; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
   .ft { display: flex; gap: 14px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); flex: none; }
   .ft kbd { font: inherit; padding: 0 4px; border-radius: 4px; border: 1px solid var(--line); color: var(--fg2); margin-right: 3px; }
+  .ft-btn { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+  .ft-btn:hover { color: var(--fg); }
+  .htitle { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+  .hsub { flex: 1; font-size: 11.5px; color: var(--fg3); }
+  .empty { padding: 20px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--fg3); text-align: center; }
   .tip { margin-left: auto; }
 </style>

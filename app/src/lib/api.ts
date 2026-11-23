@@ -42,6 +42,7 @@ export interface Settings {
   forcePasteWithoutTarget: boolean;
 }
 export interface HistoryEntry { text: string; ts: number; channel: Channel; delivered: boolean }
+export interface HistoryView { items: HistoryEntry[]; sel: number; enabled: boolean }
 export interface OfflineStatus { state: "missing" | "downloading" | "ready" | "failed"; progress?: number; error?: string }
 export interface Perms { accessibility: boolean; mic: "granted" | "denied" | "undetermined" }
 export interface UpdateStatus { state: "idle" | "checking" | "latest" | "available" | "downloading" | "error"; version?: string; progress?: number; error?: string }
@@ -55,7 +56,7 @@ export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }
 export interface Model {
   recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed";
-  finalized?: FinalizedRow | null; selFinal?: boolean;
+  finalized?: FinalizedRow | null; selFinal?: boolean; history?: HistoryView | null;
 }
 
 export const call = invoke;

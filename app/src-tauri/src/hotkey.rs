@@ -111,7 +111,7 @@ fn handle(sh: &Shared, st: &Arc<Mutex<State>>, tx: &UnboundedSender<HotEvent>, e
         return if sh.record_hold.load(Ordering::Relaxed) { record_hold(sh, &mut s, tx, e) } else { record(sh, &mut s, tx, e) };
     }
     if e.kind == KeyKind::Down && sh.picking.load(Ordering::Relaxed) {
-        if let Some(k) = pf::special(e.code) {
+        if let Some(k) = picking_key(e) {
             let _ = tx.send(HotEvent::Pick(k));
             return true;
         }
@@ -330,6 +330,11 @@ fn track(s: &mut State, e: &KeyEvent) {
     }
 }
 
+/// 候选框打开时要拦下的选择键；Tab 只拦不带修饰键的，Alt/Ctrl/Shift/⌘+Tab 照常交给系统切窗口、切标签
+fn picking_key(e: &KeyEvent) -> Option<Special> {
+    pf::special(e.code).filter(|&k| k != Special::Tab || e.mods & (MOD_MASK | pf::FN) == 0)
+}
+
 /// 录制下一次按键：单独点按一个修饰键，或按下 修饰键+键、F 键、鼠标中键/侧键；Esc 取消
 fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
     let done = |sc: Option<Shortcut>| {
@@ -530,6 +535,26 @@ mod tests {
         step(ev(KeyKind::Up, k, aflag));
         assert!(matches!(rx.try_recv(), Ok(HotEvent::Cancel)));
         std::thread::sleep(THRESHOLD + Duration::from_millis(100));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn picking_intercepts_only_bare_tab() {
+        let tab = (0..256).find(|&c| pf::special(c) == Some(Special::Tab)).unwrap();
+        let sh = Shared::default();
+        sh.picking.store(true, Ordering::Relaxed);
+        sh.paused.store(true, Ordering::Relaxed);
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let step = |e: KeyEvent| handle(&sh, &st, &tx, &e);
+        assert!(step(ev(KeyKind::Down, tab, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Pick(Special::Tab))));
+        for m in [pf::ALT, pf::CTRL, pf::SHIFT, pf::META, pf::FN, pf::ALT | pf::SHIFT] {
+            assert!(!step(ev(KeyKind::Down, tab, m)), "mods {m} 应放行");
+            assert!(rx.try_recv().is_err(), "mods {m} 不应进入历史");
+        }
+        sh.picking.store(false, Ordering::Relaxed);
+        assert!(!step(ev(KeyKind::Down, tab, 0)));
         assert!(rx.try_recv().is_err());
     }
 }

@@ -105,6 +105,73 @@ struct Model<'a> {
     finalized: Option<&'a FinalizedRow>,
     #[serde(rename = "selFinal")]
     sel_final: bool,
+    history: Option<&'a HistoryView>,
+}
+
+/// 候选框上叠加的识别历史视图；打开时本轮候选与识别照常进行，关掉即回到候选
+#[derive(Clone, Serialize)]
+struct HistoryView {
+    items: Vec<crate::history::HistoryEntry>,
+    sel: usize,
+    /// 识别历史是否开启；未开启时视图只提示，不影响本轮
+    enabled: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PickKey {
+    /// 历史未打开：交给候选行处理
+    Rows(Special),
+    Opened,
+    Stay,
+    Closed,
+    Choose(usize),
+}
+
+impl HistoryView {
+    fn key(&mut self, k: Special) -> PickKey {
+        let n = self.items.len();
+        match k {
+            Special::Tab | Special::Escape => PickKey::Closed,
+            _ if n == 0 => PickKey::Stay,
+            Special::Up => {
+                self.sel = (self.sel + n - 1) % n;
+                PickKey::Stay
+            }
+            Special::Down => {
+                self.sel = (self.sel + 1) % n;
+                PickKey::Stay
+            }
+            Special::Digit(d) => {
+                let i = d as usize - 1;
+                if i < n && self.sel == i {
+                    return PickKey::Choose(i);
+                }
+                if i < n {
+                    self.sel = i;
+                }
+                PickKey::Stay
+            }
+            Special::Enter => PickKey::Choose(self.sel),
+        }
+    }
+}
+
+/// 候选框按键分流：Tab 打开/关闭历史视图，打开期间其余按键归历史；本轮候选不经过这里，不会被改动
+fn route_pick_key(history: &mut Option<HistoryView>, k: Special, open: impl FnOnce() -> HistoryView) -> PickKey {
+    match history {
+        Some(h) => {
+            let r = h.key(k);
+            if r == PickKey::Closed {
+                *history = None;
+            }
+            r
+        }
+        None if k == Special::Tab => {
+            *history = Some(open());
+            PickKey::Opened
+        }
+        None => PickKey::Rows(k),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -268,6 +335,7 @@ pub struct Ctl {
     chime_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
+    history: Option<HistoryView>,
 }
 
 /// 预开麦：先环形缓存，确认录音后转成实时帧流
@@ -340,6 +408,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         ducked: false,
         chime_gen: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         primed: None,
+        history: None,
     };
     tauri::async_runtime::spawn(ctl.run(rx));
 }
@@ -367,15 +436,18 @@ fn output_text(strip: bool, text: String) -> String {
 
 /// 能输入（或开启强制上屏）就粘贴；否则只写剪贴板，并用和 insert() 相同的浮层提示。结果同时记入识别历史。
 fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
-    let state = app.state::<AppState>();
-    let (strip, force) = {
-        let s = state.settings.read().unwrap();
-        (s.strip_punctuation, s.force_paste_without_target)
-    };
+    let strip = app.state::<AppState>().settings.read().unwrap().strip_punctuation;
     let text = &output_text(strip, text.to_owned());
     if text.is_empty() {
         return false;
     }
+    let ok = paste_or_copy(app, text, ch);
+    crate::history::record(app, text, ch, ok);
+    ok
+}
+
+fn paste_or_copy(app: &AppHandle, text: &str, ch: Channel) -> bool {
+    let force = app.state::<AppState>().settings.read().unwrap().force_paste_without_target;
     let ok = should_paste(allow_text_input(pf::has_text_target(), pf::secure_input()), force);
     if ok {
         pf::paste(text);
@@ -384,7 +456,6 @@ fn deliver_text(app: &AppHandle, text: &str, ch: Channel) -> bool {
         ui::hud(app, "info", CLIPBOARD_HINT, ch);
         ui::hud_hide(app, 2600);
     }
-    crate::history::record(app, text, ch, ok);
     ok
 }
 
@@ -431,6 +502,10 @@ impl Ctl {
             Msg::Timeout { token } if token == self.timeout_token && self.mode != Mode::Idle => {
                 if self.mode == Mode::Pick && self.rows.iter().any(|r| r.state == RowState::Final) {
                     self.advance_pick();
+                } else if self.history.is_some() {
+                    // 正在看历史：不关面板也不代为上屏，只把超时的行封存，返回候选后仍可见
+                    self.finish_slow_rows();
+                    self.emit_rows();
                 } else {
                     self.abort(Some("识别超时".into()))
                 }
@@ -452,6 +527,7 @@ impl Ctl {
             Msg::JevDone { gen, token, res } => self.jev_done(gen, token, res),
             Msg::LlmDelta { gen, token, text } => self.llm_delta(gen, token, text),
             Msg::LlmDone { gen, token, res } => self.llm_done(gen, token, res),
+            Msg::PickChoose(i) if self.mode == Mode::Pick && self.history.is_some() => self.choose_history(i),
             Msg::PickChoose(i) if self.mode == Mode::Pick => {
                 self.take_manual();
                 self.sel_final = false;
@@ -785,6 +861,7 @@ impl Ctl {
         }
         self.released_at = None;
         self.choose_pending = false;
+        self.history = None;
         self.pick.begin(self.settings().jev);
         self.jev_token += 1;
         self.jev = JevState::Idle;
@@ -1171,6 +1248,7 @@ impl Ctl {
             self.hk.picking.store(false, Ordering::Relaxed);
             ui::pick_hide(&self.app);
         }
+        self.history = None;
         self.mode = Mode::Idle;
     }
 
@@ -1181,6 +1259,18 @@ impl Ctl {
     }
 
     fn pick_key(&mut self, k: Special) {
+        let enabled = self.settings().history_enabled;
+        let k = match route_pick_key(&mut self.history, k, || HistoryView { items: crate::history::list(), sel: 0, enabled }) {
+            PickKey::Rows(k) => k,
+            PickKey::Opened => {
+                // 看历史即用户接管：不再自动评选或代为上屏，免得在看历史时被插入候选
+                self.take_manual();
+                self.choose_pending = false;
+                return self.emit_rows();
+            }
+            PickKey::Stay | PickKey::Closed => return self.emit_rows(),
+            PickKey::Choose(i) => return self.choose_history(i),
+        };
         let n = self.rows.len();
         if n == 0 {
             return;
@@ -1233,6 +1323,7 @@ impl Ctl {
                 }
             }
             Special::Escape => self.abort(None),
+            Special::Tab => {}
         }
     }
 
@@ -1253,6 +1344,21 @@ impl Ctl {
             }
             tokio::time::sleep(Duration::from_millis(80)).await;
             deliver_text(&app, &text, ch);
+        });
+    }
+
+    /// 历史条目上屏：结束本轮并关面板，原文直接粘贴，不再记入历史
+    fn choose_history(&mut self, i: usize) {
+        let Some(entry) = self.history.as_ref().and_then(|h| h.items.get(i)).cloned() else { return };
+        let front = self.front.take();
+        let app = self.app.clone();
+        self.cancel();
+        tauri::async_runtime::spawn(async move {
+            if let Some(f) = front {
+                f.activate();
+            }
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            paste_or_copy(&app, &entry.text, entry.channel);
         });
     }
 
@@ -1597,6 +1703,7 @@ impl Ctl {
             jev: self.jev,
             finalized: self.finalized.as_ref(),
             sel_final: self.sel_final,
+            history: self.history.as_ref(),
         };
         match self.mode {
             Mode::Pick => {
@@ -1875,5 +1982,61 @@ mod tests {
         assert!(super::should_paste(true, true));
         assert!(super::should_paste(super::allow_text_input(false, false), true));
         assert!(!super::should_paste(super::allow_text_input(false, false), false));
+    }
+
+    fn view(n: usize, enabled: bool) -> super::HistoryView {
+        let items = (0..n)
+            .map(|i| crate::history::HistoryEntry { text: format!("h{i}"), ts: 0, channel: Channel::Doubao, delivered: true })
+            .collect();
+        super::HistoryView { items, sel: 0, enabled }
+    }
+
+    #[test]
+    fn tab_opens_history_and_tab_or_escape_returns_to_rows() {
+        use super::{route_pick_key, PickKey};
+        use voicekey_platform::Special;
+        let mut h = None;
+        assert_eq!(route_pick_key(&mut h, Special::Digit(2), || view(3, true)), PickKey::Rows(Special::Digit(2)));
+        assert!(h.is_none());
+        for back in [Special::Tab, Special::Escape] {
+            assert_eq!(route_pick_key(&mut h, Special::Tab, || view(3, true)), PickKey::Opened);
+            assert_eq!(h.as_ref().unwrap().items.len(), 3);
+            // 打开期间候选键全归历史
+            assert_eq!(route_pick_key(&mut h, Special::Enter, || unreachable!()), PickKey::Choose(0));
+            assert_eq!(route_pick_key(&mut h, back, || unreachable!()), PickKey::Closed);
+            assert!(h.is_none());
+        }
+        assert_eq!(route_pick_key(&mut h, Special::Escape, || view(3, true)), PickKey::Rows(Special::Escape));
+    }
+
+    #[test]
+    fn history_keys_move_select_and_choose() {
+        use super::PickKey;
+        use voicekey_platform::Special;
+        let mut h = view(3, true);
+        assert_eq!(h.key(Special::Up), PickKey::Stay);
+        assert_eq!(h.sel, 2);
+        assert_eq!(h.key(Special::Down), PickKey::Stay);
+        assert_eq!(h.sel, 0);
+        assert_eq!(h.key(Special::Digit(2)), PickKey::Stay);
+        assert_eq!(h.sel, 1);
+        assert_eq!(h.key(Special::Digit(2)), PickKey::Choose(1));
+        assert_eq!(h.key(Special::Digit(9)), PickKey::Stay);
+        assert_eq!(h.sel, 1);
+        assert_eq!(h.key(Special::Enter), PickKey::Choose(1));
+    }
+
+    #[test]
+    fn disabled_or_empty_history_only_shows_hint_and_returns() {
+        use super::{route_pick_key, PickKey};
+        use voicekey_platform::Special;
+        let mut h = None;
+        assert_eq!(route_pick_key(&mut h, Special::Tab, || view(0, false)), PickKey::Opened);
+        assert!(!h.as_ref().unwrap().enabled);
+        for k in [Special::Enter, Special::Digit(1), Special::Up, Special::Down] {
+            assert_eq!(route_pick_key(&mut h, k, || unreachable!()), PickKey::Stay);
+        }
+        assert_eq!(route_pick_key(&mut h, Special::Tab, || unreachable!()), PickKey::Closed);
+        assert!(h.is_none());
     }
 }
