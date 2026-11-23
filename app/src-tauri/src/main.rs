@@ -309,6 +309,13 @@ async fn llm_test(config: voicekey_core::llm::Config) -> Result<voicekey_core::l
     voicekey_core::llm::test(&config).await.map_err(|e| format!("{e:#}"))
 }
 
+/// 设置页保存 LLM 地址前校验：远程必须 https，http 只允许本机回环
+#[tauri::command]
+fn llm_check_url(base_url: String) -> Result<String, String> {
+    let config = voicekey_core::llm::Config { base_url, ..Default::default() };
+    config.endpoint().map_err(|e| e.to_string())
+}
+
 /// 设置页 LLM Prompt 实时预览
 #[tauri::command]
 fn llm_preview_prompt(config: voicekey_core::llm::Config) -> voicekey_core::llm::PromptPreview {
@@ -329,7 +336,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
             pick_choose, pick_choose_final, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
-            update_check, update_install, jev_test, llm_test, llm_preview_prompt,
+            update_check, update_install, jev_test, llm_test, llm_check_url, llm_preview_prompt,
             preview_sound, list_sounds,
             account_save, account_login, account_logout, get_recognition_history, clear_recognition_history
         ])

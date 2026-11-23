@@ -69,6 +69,71 @@ impl FinalizedRow {
     }
 }
 
+/// 在途 LLM 请求：token 丢弃晚到消息，task 用来真正中止连接（手选、取消、续录时不再继续计费）
+#[derive(Default)]
+struct LlmJob {
+    token: u64,
+    task: Option<JoinHandle<()>>,
+}
+
+impl LlmJob {
+    fn start(&mut self, spawn: impl FnOnce(u64) -> JoinHandle<()>) {
+        self.stop();
+        self.task = Some(spawn(self.token));
+    }
+
+    fn stop(&mut self) {
+        self.token += 1;
+        if let Some(t) = self.task.take() {
+            t.abort();
+        }
+    }
+
+    fn is_current(&self, token: u64) -> bool {
+        token == self.token
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum LlmNext {
+    InsertFinal,
+    FocusFinal,
+    InsertRow(usize),
+    FocusRow(usize),
+    Nothing,
+}
+
+/// LLM 结束后的定稿行与去向。失败或超时回退到当前选中的原始定稿（不是定稿就取第一条），用户不会什么都拿不到
+fn llm_finish(res: Result<voicekey_core::llm::FuseResult, String>, rows: &[Row], sel: usize, auto_insert: bool) -> (FinalizedRow, LlmNext) {
+    match res {
+        Ok(out) => {
+            let note = match &out.usage {
+                Some(u) => format!("{} · {} tok", out.model, u.total_tokens),
+                None => out.model.clone(),
+            };
+            let row = FinalizedRow { state: LlmState::Ready, text: out.text, ms: Some(out.ms), note: Some(note), source_channel: None };
+            (row, if auto_insert { LlmNext::InsertFinal } else { LlmNext::FocusFinal })
+        }
+        Err(e) => {
+            let is_final = |i: &usize| rows.get(*i).is_some_and(|r| r.state == RowState::Final);
+            let fallback = Some(sel).filter(is_final).or_else(|| (0..rows.len()).find(is_final));
+            let row = FinalizedRow {
+                state: LlmState::Failed,
+                text: e,
+                ms: None,
+                note: fallback.map(|i| format!("已回退到 {}", rows[i].channel.title())),
+                source_channel: None,
+            };
+            let next = match fallback {
+                Some(i) if auto_insert => LlmNext::InsertRow(i),
+                Some(i) => LlmNext::FocusRow(i),
+                None => LlmNext::Nothing,
+            };
+            (row, next)
+        }
+    }
+}
+
 /// 候选框里 Jev 智能选择的进度
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -315,8 +380,7 @@ pub struct Ctl {
     jev_token: u64,
     /// 候选框顶部的「最终定稿」行（启用 LLM 融合定稿时存在）
     finalized: Option<FinalizedRow>,
-    /// 当前有效的 LLM 请求编号；手选或新一段录音时自增，晚到结果据此丢弃
-    llm_token: u64,
+    llm: LlmJob,
     /// 当前焦点是否在顶部的「最终定稿」行上
     sel_final: bool,
     /// 用户做过选择类操作。`user_picked` 会被 `last_pick` 预选置位，不能代替它
@@ -397,7 +461,7 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         jev: JevState::Idle,
         jev_token: 0,
         finalized: None,
-        llm_token: 0,
+        llm: LlmJob::default(),
         sel_final: false,
         manual: false,
         released_at: None,
@@ -865,7 +929,7 @@ impl Ctl {
         self.pick.begin(self.settings().jev);
         self.jev_token += 1;
         self.jev = JevState::Idle;
-        self.llm_token += 1;
+        self.llm.stop();
         self.sel_final = false;
         self.finalized = self.llm_active().then(FinalizedRow::idle);
         self.manual = false;
@@ -901,7 +965,7 @@ impl Ctl {
         self.choose_pending = false;
         self.jev_token += 1;
         self.jev = JevState::Idle;
-        self.llm_token += 1;
+        self.llm.stop();
         self.sel_final = false;
         self.finalized = (mode == Mode::Pick && self.llm_active()).then(FinalizedRow::idle);
         self.manual = false;
@@ -1237,7 +1301,7 @@ impl Ctl {
         }
         // cancel 可能发生在预开麦阶段；丢弃 Primed 会经 Recorder::Drop 同步停麦。
         self.primed = None;
-        self.llm_token += 1;
+        self.llm.stop();
         self.sel_final = false;
         self.finalized = None;
         self.stop_recording();
@@ -1405,12 +1469,11 @@ impl Ctl {
             self.jev_token += 1;
             self.jev = JevState::Idle;
         }
-        if self.finalized.as_ref().is_some_and(|f| f.state == LlmState::Busy) {
-            self.llm_token += 1;
-            if let Some(f) = self.finalized.as_mut() {
-                f.state = LlmState::Idle;
-                f.text.clear();
-            }
+        // 还没出结果的定稿行随手选作废：中止在途请求（不再计费），行也收起，免得一直显示「等待中」
+        if self.finalized.as_ref().is_some_and(|f| matches!(f.state, LlmState::Idle | LlmState::Busy)) {
+            self.llm.stop();
+            self.finalized = None;
+            self.sel_final = false;
         }
     }
 
@@ -1606,7 +1669,6 @@ impl Ctl {
 
         // 调用 OpenAI 兼容 LLM 接口融合定稿
         self.timeout_token += 1;
-        self.llm_token += 1;
         self.finalized = Some(FinalizedRow {
             state: LlmState::Busy,
             text: String::new(),
@@ -1614,24 +1676,26 @@ impl Ctl {
             note: Some(cfg.model.clone()),
             source_channel: None,
         });
-        let (gen, token, tx) = (self.gen, self.llm_token, self.tx.clone());
-        let dtx = tx.clone();
-        let on_delta: Option<Box<dyn Fn(&str) + Send + Sync>> = cfg.stream.then(|| {
-            Box::new(move |text: &str| {
-                let _ = dtx.send(Msg::LlmDelta { gen, token, text: text.to_string() });
-            }) as Box<dyn Fn(&str) + Send + Sync>
-        });
-        tauri::async_runtime::spawn(async move {
-            let res = voicekey_core::llm::fuse(&cfg, &candidates, on_delta)
-                .await
-                .map_err(|e| format!("{e:#}"));
-            let _ = tx.send(Msg::LlmDone { gen, token, res });
+        let (gen, tx) = (self.gen, self.tx.clone());
+        self.llm.start(move |token| {
+            let dtx = tx.clone();
+            let on_delta: Option<voicekey_core::llm::OnDelta> = cfg.stream.then(|| {
+                Box::new(move |text: &str| {
+                    let _ = dtx.send(Msg::LlmDelta { gen, token, text: text.to_string() });
+                }) as voicekey_core::llm::OnDelta
+            });
+            tauri::async_runtime::spawn(async move {
+                let res = voicekey_core::llm::fuse(&cfg, &candidates, on_delta)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
+                let _ = tx.send(Msg::LlmDone { gen, token, res });
+            })
         });
         self.emit_rows();
     }
 
     fn llm_delta(&mut self, gen: u64, token: u64, text: String) {
-        if gen != self.gen || token != self.llm_token || self.mode != Mode::Pick {
+        if gen != self.gen || !self.llm.is_current(token) || self.mode != Mode::Pick {
             return;
         }
         if let Some(f) = self.finalized.as_mut() {
@@ -1643,39 +1707,27 @@ impl Ctl {
     }
 
     fn llm_done(&mut self, gen: u64, token: u64, res: Result<voicekey_core::llm::FuseResult, String>) {
-        if gen != self.gen || token != self.llm_token || self.mode != Mode::Pick {
+        if gen != self.gen || !self.llm.is_current(token) || self.mode != Mode::Pick {
             return;
         }
+        self.llm.task = None;
         let cfg = self.settings().llm;
-        match res {
-            Ok(out) => {
-                let note = match &out.usage {
-                    Some(u) => format!("{} · {} tok", out.model, u.total_tokens),
-                    None => out.model.clone(),
-                };
-                self.finalized = Some(FinalizedRow {
-                    state: LlmState::Ready,
-                    text: out.text,
-                    ms: Some(out.ms),
-                    note: Some(note),
-                    source_channel: None,
-                });
-                if cfg.auto_insert && !self.manual {
-                    self.choose_final();
-                } else {
-                    self.sel_final = true;
-                    self.emit_rows();
-                }
+        let (row, next) = llm_finish(res, &self.rows, self.sel, cfg.auto_insert && !self.manual);
+        self.finalized = Some(row);
+        match next {
+            LlmNext::InsertFinal => self.choose_final(),
+            LlmNext::InsertRow(i) => self.choose(i),
+            LlmNext::FocusFinal => {
+                self.sel_final = true;
+                self.emit_rows();
             }
-            Err(e) => {
+            LlmNext::FocusRow(i) => {
                 self.sel_final = false;
-                self.finalized = Some(FinalizedRow {
-                    state: LlmState::Failed,
-                    text: e,
-                    ms: None,
-                    note: Some(cfg.model),
-                    source_channel: None,
-                });
+                self.sel = i;
+                self.emit_rows();
+            }
+            LlmNext::Nothing => {
+                self.sel_final = false;
                 self.emit_rows();
             }
         }
@@ -2038,5 +2090,48 @@ mod tests {
         }
         assert_eq!(route_pick_key(&mut h, Special::Tab, || unreachable!()), PickKey::Closed);
         assert!(h.is_none());
+    }
+
+    fn fused(text: &str) -> voicekey_core::llm::FuseResult {
+        voicekey_core::llm::FuseResult { text: text.into(), ms: 5, model: "m".into(), usage: None, system_prompt: String::new(), user_prompt: String::new() }
+    }
+
+    #[test]
+    fn llm_success_offers_or_inserts_the_fused_text() {
+        use super::{llm_finish, LlmNext, LlmState};
+        let rows = [row(Channel::Doubao, RowState::Final, "a"), row(Channel::Qwen, RowState::Final, "b")];
+        let (f, next) = llm_finish(Ok(fused("合并")), &rows, 0, false);
+        assert_eq!((f.state, f.text.as_str(), next), (LlmState::Ready, "合并", LlmNext::FocusFinal));
+        assert_eq!(llm_finish(Ok(fused("合并")), &rows, 0, true).1, LlmNext::InsertFinal);
+    }
+
+    #[test]
+    fn llm_failure_falls_back_to_an_original_final() {
+        use super::{llm_finish, LlmNext, LlmState};
+        let rows = [row(Channel::Doubao, RowState::Error, ""), row(Channel::Qwen, RowState::Final, "b"), row(Channel::Baidu, RowState::Final, "c")];
+        // 选中行是定稿就用它，否则取第一条定稿
+        assert_eq!(llm_finish(Err("超时".into()), &rows, 2, false).1, LlmNext::FocusRow(2));
+        let (f, next) = llm_finish(Err("超时".into()), &rows, 0, true);
+        assert_eq!((f.state, next), (LlmState::Failed, LlmNext::InsertRow(1)));
+        assert!(f.note.unwrap().contains(Channel::Qwen.title()));
+        let none = [row(Channel::Doubao, RowState::Error, "")];
+        assert_eq!(llm_finish(Err("x".into()), &none, 0, true).1, LlmNext::Nothing);
+    }
+
+    #[test]
+    fn llm_job_stop_aborts_the_request_and_rejects_stale_results() {
+        use std::sync::mpsc::{channel, RecvTimeoutError};
+        let mut job = super::LlmJob::default();
+        let (tx, rx) = channel::<()>();
+        job.start(|_| tauri::async_runtime::spawn(async move {
+            let _alive = tx;
+            std::future::pending::<()>().await
+        }));
+        let token = job.token;
+        assert!(job.is_current(token));
+        job.stop();
+        assert!(!job.is_current(token));
+        // 任务被中止、持有的发送端随之释放，说明请求 future 已被丢弃（连接随之关闭）
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)), Err(RecvTimeoutError::Disconnected));
     }
 }

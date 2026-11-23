@@ -9,19 +9,30 @@
   let preview = $state<PromptPreview | null>(null);
   let timeoutSec = $state<number>(Math.round(d.timeoutMs / 1000));
   let simPercent = $state<number>(Math.round(d.similarityThreshold * 100));
+  let urlError = $state("");
 
-  const ready = $derived(d.baseUrl.trim() !== "" && d.model.trim() !== "");
+  // 地址、Key、模型三项都填好之前视为未配置，后端同样不会发任何请求
+  const missing = $derived(
+    ([["地址", d.baseUrl], ["API Key", d.apiKey], ["模型", d.model]] as const).filter(([, v]) => !v.trim()).map(([k]) => k),
+  );
+  const ready = $derived(missing.length === 0 && !urlError);
 
-  const commit = () => {
+  const commit = async () => {
     d.timeoutMs = Math.max(2, Math.min(30, Number.isFinite(timeoutSec) ? timeoutSec : 8)) * 1000;
     timeoutSec = Math.round(d.timeoutMs / 1000);
     d.similarityThreshold = Math.max(80, Math.min(100, simPercent)) / 100;
-    const patch: Record<string, unknown> = { llm: { ...d } };
-    // 启用 LLM 融合定稿时自动关闭 Jev，避免双重接管
-    if (d.enabled && app.s!.jev.mode !== "off") {
-      patch.jev = { ...app.s!.jev, mode: "off" };
+    urlError = "";
+    let baseUrl = d.baseUrl;
+    if (baseUrl.trim()) {
+      try {
+        await call<string>("llm_check_url", { baseUrl });
+      } catch (e) {
+        // 不合法的地址（如远程 http）不保存，其余改动照存
+        urlError = String(e);
+        baseUrl = app.s!.llm.baseUrl;
+      }
     }
-    save(patch);
+    save({ llm: { ...d, baseUrl } });
     if (showPreview) refreshPreview();
   };
 
@@ -83,30 +94,36 @@
   <div class="row">
     <div class="lbl">
       多渠道定稿后由 LLM 综合生成最终结果
-      <small>对比各渠道识别文本，纠错并补全标点；在候选框顶部新增「最终定稿」行。启用时将自动关闭 Jev</small>
+      <small>对比各渠道识别文本，纠错并补全标点，在候选框顶部新增「最终定稿」行。识别文本会发送到你填写的地址。配置完成后由 LLM 代替 Jev 评选，Jev 设置保持不变，关闭 LLM 即恢复</small>
     </div>
     <button class="sw" class:on={d.enabled} onclick={toggleEnabled} aria-label="启用 LLM 融合定稿"></button>
   </div>
 
   {#if d.enabled}
+    {#if missing.length}
+      <div class="row"><small class="err">尚未配置，不会发送任何请求：还缺 {missing.join("、")}</small></div>
+    {/if}
     <div class="row">
       <div class="lbl">
         Base URL
-        <small>OpenAI 兼容接口地址，自动补全 /chat/completions（如 https://api.openai.com/v1 或本地 Ollama）</small>
+        <small>OpenAI 兼容接口地址，自动补全 /chat/completions。远程须 https://，本机可用 http://localhost</small>
       </div>
       <input
         class="in"
         type="text"
         spellcheck="false"
-        placeholder="https://api.openai.com/v1"
+        placeholder="https://…/v1"
         bind:value={d.baseUrl}
         onblur={commit}
       />
     </div>
+    {#if urlError}
+      <div class="row"><small class="err">{urlError}（未保存）</small></div>
+    {/if}
     <div class="row">
       <div class="lbl">
         API Key
-        <small>仅存本机；本地 Ollama / vLLM 可留空</small>
+        <small>仅存本机；本地 Ollama / vLLM 不校验时填任意值</small>
       </div>
       <input
         class="in"
@@ -121,13 +138,13 @@
     <div class="row">
       <div class="lbl">
         模型
-        <small>默认 GPT-6.2-SOL，也可填 deepseek-chat、qwen-turbo 等</small>
+        <small>填服务商提供的模型名</small>
       </div>
       <input
         class="in"
         type="text"
         spellcheck="false"
-        placeholder="GPT-6.2-SOL"
+        placeholder="模型名"
         bind:value={d.model}
         onblur={commit}
       />
@@ -273,7 +290,7 @@
         {#if testResult}
           <small class:ok={testResult.ok} class:err={!testResult.ok}>{testResult.text}</small>
         {:else if !ready}
-          <small class="err">请先填写 Base URL 和模型名称</small>
+          <small class="err">请先填好地址、API Key 和模型</small>
         {:else}
           <small>用内置多渠道分歧示例实测一次 LLM 定稿</small>
         {/if}

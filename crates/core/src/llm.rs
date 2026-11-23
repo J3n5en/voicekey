@@ -17,6 +17,11 @@ pub const DEFAULT_SIMILARITY_THRESHOLD: f64 = 0.92;
 pub const MIN_SIMILARITY_THRESHOLD: f64 = 0.80;
 pub const MAX_SIMILARITY_THRESHOLD: f64 = 1.00;
 pub const DEFAULT_MIN_AGREE: usize = 2;
+/// 流式输出回调，参数为目前累计的全文
+pub type OnDelta = Box<dyn Fn(&str) + Send + Sync>;
+/// 输出上限：按最长候选估 token，留余量但不让模型长篇输出
+const MIN_MAX_TOKENS: usize = 64;
+const MAX_MAX_TOKENS: usize = 2048;
 
 pub const DEFAULT_SYSTEM_PROMPT: &str = "\
 你是一个语音识别（ASR）多路结果融合专家。下面是一段同一份口语录音经多个语音识别引擎并行转写的结果。
@@ -54,9 +59,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: false,
-            base_url: "https://api.openai.com/v1".into(),
+            base_url: String::new(),
             api_key: String::new(),
-            model: "GPT-6.2-SOL".into(),
+            model: String::new(),
             auto_insert: false,
             stream: true,
             timeout_ms: DEFAULT_TIMEOUT_MS,
@@ -81,24 +86,43 @@ impl Config {
         self.min_agree_channels = self.min_agree_channels.clamp(2, 6);
     }
 
-    /// 配置是否可用（启用且已填 base_url 与 model；api_key 允许留空以兼容本地 Ollama/vLLM）
+    /// 启用且配置完整、地址合法；否则一律不发请求
     pub fn is_ready(&self) -> bool {
-        self.enabled && !self.base_url.trim().is_empty() && !self.model.trim().is_empty()
+        self.enabled && self.check().is_ok()
     }
 
-    /// 规范化 OpenAI 兼容 `/chat/completions` 完整地址
+    /// 还没填的项（地址、API Key、模型），界面据此提示
+    pub fn missing(&self) -> Vec<&'static str> {
+        [("地址", &self.base_url), ("API Key", &self.api_key), ("模型", &self.model)]
+            .into_iter()
+            .filter(|(_, v)| v.trim().is_empty())
+            .map(|(k, _)| k)
+            .collect()
+    }
+
+    /// 三项都填好且地址合法时返回请求地址
+    pub fn check(&self) -> Result<String> {
+        let missing = self.missing();
+        if !missing.is_empty() {
+            bail!("LLM 未配置：缺少{}", missing.join("、"));
+        }
+        self.endpoint()
+    }
+
+    /// 规范化 OpenAI 兼容 `/chat/completions` 完整地址。远程必须 https，http 只允许本机回环
     pub fn endpoint(&self) -> Result<String> {
         let raw = self.base_url.trim();
         if raw.is_empty() {
             bail!("请先填写 LLM API 地址（Base URL）");
         }
-        let lower = raw.to_ascii_lowercase();
-        let full = if lower.starts_with("http://") || lower.starts_with("https://") {
-            raw.to_string()
-        } else {
-            format!("https://{raw}")
-        };
+        let full = if raw.contains("://") { raw.to_string() } else { format!("https://{raw}") };
         let mut u = reqwest::Url::parse(&full).map_err(|e| anyhow!("LLM API 地址格式无效：{e}"))?;
+        match u.scheme() {
+            "https" => {}
+            "http" if matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")) => {}
+            "http" => bail!("远程 LLM 地址必须使用 https://，http:// 只允许 localhost、127.0.0.1、::1"),
+            s => bail!("不支持的 LLM 地址协议：{s}"),
+        }
         let p = u.path().trim_end_matches('/').to_string();
         let path = if p.ends_with("/chat/completions") {
             p
@@ -392,23 +416,22 @@ fn clean_llm_output(raw: &str) -> String {
 pub async fn fuse(
     cfg: &Config,
     candidates: &[CandidateInput],
-    on_delta: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    on_delta: Option<OnDelta>,
 ) -> Result<FuseResult> {
     if candidates.is_empty() {
         bail!("没有可用于融合的识别结果");
     }
-    let url = cfg.endpoint()?;
+    let url = cfg.check()?;
     let model = cfg.model.trim().to_string();
-    if model.is_empty() {
-        bail!("请先填写 LLM 模型名称");
-    }
     let (system_prompt, user_prompt) = build_prompt(cfg, candidates);
     let use_stream = cfg.stream && on_delta.is_some();
     let timeout = Duration::from_millis(cfg.timeout_ms.clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS));
+    let longest = candidates.iter().map(|c| c.text.trim().chars().count()).max().unwrap_or(0);
 
     let mut body = json!({
         "model": model,
         "temperature": 0.1,
+        "max_tokens": (longest * 2 + MIN_MAX_TOKENS).min(MAX_MAX_TOKENS),
         "stream": use_stream,
         "messages": [
             { "role": "system", "content": system_prompt },
@@ -419,11 +442,15 @@ pub async fn fuse(
         body["stream_options"] = json!({ "include_usage": true });
     }
 
-    let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let mut req = client.post(&url).header("Content-Type", "application/json");
-    if !cfg.api_key.trim().is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", cfg.api_key.trim()));
-    }
+    let builder = reqwest::Client::builder().timeout(timeout);
+    // 单测只打回环假服务，不能被本机代理环境变量带偏
+    #[cfg(test)]
+    let builder = builder.no_proxy();
+    let req = builder
+        .build()?
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", cfg.api_key.trim()));
 
     let started = Instant::now();
     let resp = req.json(&body).send().await.map_err(|e| anyhow!("LLM 请求失败：{e}"))?;
@@ -450,6 +477,10 @@ pub async fn fuse(
     if text.is_empty() {
         bail!("LLM 返回了空内容");
     }
+    // 定稿只做纠错和标点，明显长于所有候选说明模型答非所问（或被识别文本里的指令带偏），不能上屏
+    if text.chars().count() > longest * 2 + 20 {
+        bail!("LLM 输出明显长于各渠道结果，已忽略");
+    }
     Ok(FuseResult {
         text,
         ms: started.elapsed().as_millis() as u64,
@@ -472,16 +503,18 @@ async fn parse_sse_stream(
     on_delta: Option<&(dyn Fn(&str) + Send + Sync)>,
 ) -> Result<(String, Option<Usage>)> {
     let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
+    // 按字节攒到换行再解码：网络块可能切在多字节字符中间，逐块解码会出乱码
+    let mut buf: Vec<u8> = Vec::new();
     let mut acc = String::new();
     let mut usage: Option<Usage> = None;
 
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| anyhow!("LLM 流式读取失败：{e}"))?;
-        buf.push_str(&String::from_utf8_lossy(&bytes));
-        while let Some(pos) = buf.find('\n') {
-            let line = buf[..pos].trim().to_string();
-            buf.drain(..=pos);
+        buf.extend_from_slice(&bytes);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let raw: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&raw);
+            let line = line.trim();
             if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim();
                 if data == "[DONE]" || data.is_empty() {
@@ -587,5 +620,189 @@ mod tests {
         let (sys, user) = build_prompt(&cfg, &sample_candidates());
         assert_eq!(sys, DEFAULT_SYSTEM_PROMPT);
         assert!(user.contains("[doubao]"));
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    fn ready(port: u16) -> Config {
+        Config {
+            enabled: true,
+            base_url: format!("http://127.0.0.1:{port}/v1"),
+            api_key: "test-key".into(),
+            model: "m".into(),
+            timeout_ms: MIN_TIMEOUT_MS,
+            ..Config::default()
+        }
+    }
+
+    /// 读完一个 HTTP 请求（头 + Content-Length 正文），返回正文
+    async fn read_request(s: &mut TcpStream) -> String {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = s.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if let Some(end) = text.find("\r\n\r\n") {
+                let len = text[..end]
+                    .lines()
+                    .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                    .unwrap_or(0);
+                if buf.len() >= end + 4 + len {
+                    return String::from_utf8_lossy(&buf[end + 4..end + 4 + len]).into_owned();
+                }
+            }
+        }
+        String::new()
+    }
+
+    /// 本地假服务：按顺序写出各段（段间停顿，模拟网络分块），返回收到的请求正文
+    async fn serve(parts: Vec<Vec<u8>>) -> (u16, tokio::task::JoinHandle<String>) {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let h = tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let body = read_request(&mut s).await;
+            for p in parts {
+                s.write_all(&p).await.unwrap();
+                s.flush().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            body
+        });
+        (port, h)
+    }
+
+    fn sse_head() -> Vec<u8> {
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n".to_vec()
+    }
+
+    fn json_response(v: &Value) -> Vec<u8> {
+        let body = v.to_string();
+        format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).into_bytes()
+    }
+
+    fn sink() -> Option<OnDelta> {
+        Some(Box::new(|_: &str| {}))
+    }
+
+    #[test]
+    fn remote_http_is_rejected_but_loopback_http_and_https_pass() {
+        let mut c = Config::default();
+        for ok in ["https://api.example.com/v1", "api.example.com/v1", "http://localhost:11434/v1", "http://127.0.0.1:8000", "http://[::1]:8000/v1"] {
+            c.base_url = ok.into();
+            assert!(c.endpoint().is_ok(), "{ok} 应允许");
+        }
+        for bad in ["http://api.example.com/v1", "http://192.168.1.2:11434/v1", "http://127.0.0.2/v1", "ftp://example.com"] {
+            c.base_url = bad.into();
+            assert!(c.endpoint().is_err(), "{bad} 应拒绝");
+        }
+    }
+
+    #[test]
+    fn defaults_point_nowhere_and_need_all_three_fields() {
+        let mut c = Config { enabled: true, ..Config::default() };
+        assert!(c.base_url.is_empty() && c.model.is_empty());
+        assert_eq!(c.missing(), ["地址", "API Key", "模型"]);
+        assert!(!c.is_ready());
+        c.base_url = "https://api.example.com/v1".into();
+        c.model = "m".into();
+        assert_eq!(c.missing(), ["API Key"]);
+        assert!(!c.is_ready());
+        c.api_key = "k".into();
+        assert!(c.is_ready());
+        c.enabled = false;
+        assert!(!c.is_ready());
+    }
+
+    #[tokio::test]
+    async fn unconfigured_fuse_sends_nothing() {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while l.accept().await.is_ok() {
+                h.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let mut cfg = ready(port);
+        cfg.api_key.clear();
+        assert!(fuse(&cfg, &sample_candidates(), None).await.unwrap_err().to_string().contains("API Key"));
+        let mut cfg = ready(port);
+        cfg.model.clear();
+        assert!(test(&cfg).await.is_err());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sse_decodes_char_split_across_chunks_and_reads_usage() {
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n".as_bytes();
+        let cut = line.iter().position(|&b| b >= 0x80).unwrap() + 1;
+        let tail = b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n".to_vec();
+        let (port, req) = serve(vec![sse_head(), line[..cut].to_vec(), line[cut..].to_vec(), tail]).await;
+        let res = fuse(&ready(port), &sample_candidates(), sink()).await.unwrap();
+        assert_eq!(res.text, "你好");
+        assert_eq!(res.usage.unwrap().total_tokens, 5);
+        let body: Value = serde_json::from_str(&req.await.unwrap()).unwrap();
+        assert_eq!(body["stream"], true);
+        let longest = sample_candidates().iter().map(|c| c.text.chars().count()).max().unwrap();
+        assert_eq!(body["max_tokens"], longest * 2 + MIN_MAX_TOKENS);
+    }
+
+    #[tokio::test]
+    async fn non_stream_response_is_parsed() {
+        let v = json!({ "choices": [{ "message": { "content": "「今天下午三点开会。」" } }] });
+        let (port, req) = serve(vec![json_response(&v)]).await;
+        let res = fuse(&ready(port), &sample_candidates(), None).await.unwrap();
+        assert_eq!(res.text, "今天下午三点开会。");
+        assert_eq!(serde_json::from_str::<Value>(&req.await.unwrap()).unwrap()["stream"], false);
+    }
+
+    #[tokio::test]
+    async fn http_error_too_long_output_and_timeout_fail() {
+        let (port, _) = serve(vec![b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\nConnection: close\r\n\r\noops".to_vec()]).await;
+        assert!(fuse(&ready(port), &sample_candidates(), None).await.unwrap_err().to_string().contains("500"));
+
+        let v = json!({ "choices": [{ "message": { "content": "好".repeat(200) } }] });
+        let (port, _) = serve(vec![json_response(&v)]).await;
+        assert!(fuse(&ready(port), &sample_candidates(), None).await.unwrap_err().to_string().contains("明显长于"));
+
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            read_request(&mut s).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        });
+        let started = Instant::now();
+        assert!(fuse(&ready(port), &sample_candidates(), None).await.is_err());
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn dropping_the_request_closes_the_connection() {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (got, got_rx) = tokio::sync::oneshot::channel();
+        let closed = tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            read_request(&mut s).await;
+            let _ = got.send(());
+            let mut b = [0u8; 16];
+            matches!(tokio::time::timeout(Duration::from_secs(1), s.read(&mut b)).await, Ok(Ok(0)) | Ok(Err(_)))
+        });
+        let cfg = ready(port);
+        let task = tokio::spawn(async move { fuse(&cfg, &sample_candidates(), sink()).await });
+        got_rx.await.unwrap();
+        task.abort();
+        assert!(closed.await.unwrap(), "中止后连接应立即断开");
     }
 }

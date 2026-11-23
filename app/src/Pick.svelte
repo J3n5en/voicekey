@@ -127,7 +127,7 @@
     <span class="state">
       {#if model.recording}聆听中 · 松开结束
       {:else if model.finalized?.state === "busy"}<span class="spinner"></span>LLM 融合定稿中 · 可手选
-      {:else if model.finalized?.state === "failed"}<span class="err">LLM 定稿失败，请手动选择</span>
+      {:else if model.finalized?.state === "failed"}<span class="err">LLM 定稿失败{model.finalized.note ? `，${model.finalized.note}` : "，请手动选择"}</span>
       {:else if model.finalized?.state === "skipped"}<span class="ok">● 已省去 LLM · 按回车上屏</span>
       {:else if model.finalized?.state === "ready"}<span class="ok">● LLM 定稿完成 · 按回车上屏</span>
       {:else if model.jev === "busy"}<span class="spinner"></span>Jev 智能选择中 · 可手选
