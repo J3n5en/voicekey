@@ -19,7 +19,6 @@ use voicekey_platform::{self as pf, Special, Typer};
 pub enum Msg {
     Hot(HotEvent),
     Level(f32),
-    FirstFrame { gen: u64, ms: u64 },
     Partial { gen: u64, ch: Channel, seg: usize, text: String },
     Done { gen: u64, ch: Channel, seg: usize, res: Result<String, String> },
     Timeout { token: u64 },
@@ -103,8 +102,6 @@ struct Model<'a> {
     rows: &'a [Row],
     sel: usize,
     jev: JevState,
-    #[serde(rename = "wakeupMs")]
-    wakeup_ms: Option<u64>,
     finalized: Option<&'a FinalizedRow>,
     #[serde(rename = "selFinal")]
     sel_final: bool,
@@ -271,10 +268,6 @@ pub struct Ctl {
     chime_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
-    /// 录音会话代数，用于匹配首帧到达事件
-    mic_gen: u64,
-    /// 从开始唤醒采集管线到真正收到第一帧音频的耗时（ms）
-    first_frame_ms: Option<u64>,
 }
 
 /// 预开麦：先环形缓存，确认录音后转成实时帧流
@@ -347,8 +340,6 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         ducked: false,
         chime_gen: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         primed: None,
-        mic_gen: 0,
-        first_frame_ms: None,
     };
     tauri::async_runtime::spawn(ctl.run(rx));
 }
@@ -434,14 +425,6 @@ impl Ctl {
             Msg::Level(v) => {
                 let _ = self.app.emit("level", v);
                 self.check_silence(v);
-            }
-            Msg::FirstFrame { gen, ms } if gen == self.mic_gen && self.mode != Mode::Idle => {
-                self.first_frame_ms = Some(ms);
-                match self.mode {
-                    Mode::Single(ch) => self.hud_single(ch),
-                    Mode::Pick | Mode::Compare => self.emit_rows(),
-                    Mode::Idle => {}
-                }
             }
             Msg::Partial { gen, ch, seg, text } if gen == self.gen => self.partial(ch, seg, text),
             Msg::Done { gen, ch, seg, res } if gen == self.gen => self.done(ch, seg, res),
@@ -617,15 +600,6 @@ impl Ctl {
             self.last_voice = Instant::now();
             audio
         };
-        self.first_frame_ms = None;
-        self.mic_gen += 1;
-        let mic_gen = self.mic_gen;
-        if let Some(r) = &self.recorder {
-            let tx = self.tx.clone();
-            r.on_first_frame(move |ms| {
-                let _ = tx.send(Msg::FirstFrame { gen: mic_gen, ms });
-            });
-        }
 
         // 成功开麦（含预开麦转正）发开始音。开始音必须在压低音量之前发
         // （cometix-dictation 同序：开麦 → 播开始音 → 压音量），否则音没播完就被压掉。
@@ -792,7 +766,7 @@ impl Ctl {
         self.typer = (s.streaming && allow_text_input(pf::has_text_target(), pf::secure_input())).then(Typer::default);
         self.segs = Segments::default();
         let seg = self.segs.start();
-        self.hud_single(s.channel);
+        ui::hud(&self.app, "listen", "", s.channel);
         self.spawn_engine(s.channel, seg, audio);
     }
 
@@ -833,7 +807,7 @@ impl Ctl {
 
     fn hud_single(&self, ch: Channel) {
         let text = if self.settings.read().unwrap().live_text { self.segs.text() } else { String::new() };
-        ui::hud_with_wakeup(&self.app, if self.recording { "listen" } else { "wait" }, &text, ch, self.first_frame_ms);
+        ui::hud(&self.app, if self.recording { "listen" } else { "wait" }, &text, ch);
     }
 
     fn begin_multi(&mut self, mode: Mode, mut channels: Vec<Channel>, auto_stop: bool) {
@@ -1091,7 +1065,7 @@ impl Ctl {
             self.play_after_restore(SoundEvent::Processing);
         }
         match self.mode {
-            Mode::Single(ch) => ui::hud_with_wakeup(&self.app, "wait", "", ch, self.first_frame_ms),
+            Mode::Single(ch) => ui::hud(&self.app, "wait", "", ch),
             Mode::Pick | Mode::Compare => {
                 self.released_at = Some(Instant::now());
                 for r in &mut self.rows {
@@ -1186,7 +1160,6 @@ impl Ctl {
         }
         // cancel 可能发生在预开麦阶段；丢弃 Primed 会经 Recorder::Drop 同步停麦。
         self.primed = None;
-        self.first_frame_ms = None;
         self.llm_token += 1;
         self.sel_final = false;
         self.finalized = None;
@@ -1622,7 +1595,6 @@ impl Ctl {
             rows: &self.rows,
             sel: self.sel,
             jev: self.jev,
-            wakeup_ms: self.first_frame_ms,
             finalized: self.finalized.as_ref(),
             sel_final: self.sel_final,
         };

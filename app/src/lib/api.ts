@@ -54,7 +54,7 @@ export interface AppInfo {
 export type RowState = "listen" | "wait" | "final" | "error" | "skip";
 export interface Row { channel: Channel; text: string; state: RowState; ms: number | null }
 export interface Model {
-  recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed"; wakeupMs?: number | null;
+  recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed";
   finalized?: FinalizedRow | null; selFinal?: boolean;
 }
 
