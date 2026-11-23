@@ -416,6 +416,7 @@ pub mod keys {
         Some(match code {
             0x1B => Special::Escape,
             0x0D => Special::Enter,
+            0x09 => Special::Tab,
             0x26 => Special::Up,
             0x28 => Special::Down,
             0x31..=0x39 => Special::Digit((code - 0x30) as u8),
