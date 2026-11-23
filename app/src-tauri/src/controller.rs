@@ -25,6 +25,7 @@ pub enum Msg {
     PickGrace { gen: u64, token: u64 },
     Flush,
     PickChoose(usize),
+    PickChooseFinal,
     PickKey(Special),
     CompareToggle,
     CompareStop,
@@ -35,6 +36,102 @@ pub enum Msg {
     MicrophonesChanged(Vec<String>),
     /// Jev 评选结果：res 是 rows 下标；gen 与 token 任一对不上都说明已过期
     JevDone { gen: u64, token: u64, res: Result<usize, String> },
+    /// LLM 流式融合增量文本
+    LlmDelta { gen: u64, token: u64, text: String },
+    /// LLM 融合定稿完成
+    LlmDone { gen: u64, token: u64, res: Result<voicekey_core::llm::FuseResult, String> },
+}
+
+/// 候选框里 LLM 融合定稿行的状态
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmState {
+    Idle,
+    Busy,
+    Ready,
+    Skipped,
+    Failed,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizedRow {
+    state: LlmState,
+    text: String,
+    ms: Option<u64>,
+    note: Option<String>,
+    source_channel: Option<Channel>,
+}
+
+impl FinalizedRow {
+    fn idle() -> Self {
+        Self { state: LlmState::Idle, text: String::new(), ms: None, note: None, source_channel: None }
+    }
+}
+
+/// 在途 LLM 请求：token 丢弃晚到消息，task 用来真正中止连接（手选、取消、续录时不再继续计费）
+#[derive(Default)]
+struct LlmJob {
+    token: u64,
+    task: Option<JoinHandle<()>>,
+}
+
+impl LlmJob {
+    fn start(&mut self, spawn: impl FnOnce(u64) -> JoinHandle<()>) {
+        self.stop();
+        self.task = Some(spawn(self.token));
+    }
+
+    fn stop(&mut self) {
+        self.token += 1;
+        if let Some(t) = self.task.take() {
+            t.abort();
+        }
+    }
+
+    fn is_current(&self, token: u64) -> bool {
+        token == self.token
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum LlmNext {
+    InsertFinal,
+    FocusFinal,
+    InsertRow(usize),
+    FocusRow(usize),
+    Nothing,
+}
+
+/// LLM 结束后的定稿行与去向。失败或超时回退到当前选中的原始定稿（不是定稿就取第一条），用户不会什么都拿不到
+fn llm_finish(res: Result<voicekey_core::llm::FuseResult, String>, rows: &[Row], sel: usize, auto_insert: bool) -> (FinalizedRow, LlmNext) {
+    match res {
+        Ok(out) => {
+            let note = match &out.usage {
+                Some(u) => format!("{} · {} tok", out.model, u.total_tokens),
+                None => out.model.clone(),
+            };
+            let row = FinalizedRow { state: LlmState::Ready, text: out.text, ms: Some(out.ms), note: Some(note), source_channel: None };
+            (row, if auto_insert { LlmNext::InsertFinal } else { LlmNext::FocusFinal })
+        }
+        Err(e) => {
+            let is_final = |i: &usize| rows.get(*i).is_some_and(|r| r.state == RowState::Final);
+            let fallback = Some(sel).filter(is_final).or_else(|| (0..rows.len()).find(is_final));
+            let row = FinalizedRow {
+                state: LlmState::Failed,
+                text: e,
+                ms: None,
+                note: fallback.map(|i| format!("已回退到 {}", rows[i].channel.title())),
+                source_channel: None,
+            };
+            let next = match fallback {
+                Some(i) if auto_insert => LlmNext::InsertRow(i),
+                Some(i) => LlmNext::FocusRow(i),
+                None => LlmNext::Nothing,
+            };
+            (row, next)
+        }
+    }
 }
 
 /// 候选框里 Jev 智能选择的进度
@@ -70,6 +167,9 @@ struct Model<'a> {
     rows: &'a [Row],
     sel: usize,
     jev: JevState,
+    finalized: Option<&'a FinalizedRow>,
+    #[serde(rename = "selFinal")]
+    sel_final: bool,
     history: Option<&'a HistoryView>,
 }
 
@@ -278,6 +378,11 @@ pub struct Ctl {
     jev: JevState,
     /// 当前有效的 Jev 请求编号；手选或新一段录音时自增，晚到结果据此丢弃
     jev_token: u64,
+    /// 候选框顶部的「最终定稿」行（启用 LLM 融合定稿时存在）
+    finalized: Option<FinalizedRow>,
+    llm: LlmJob,
+    /// 当前焦点是否在顶部的「最终定稿」行上
+    sel_final: bool,
     /// 用户做过选择类操作。`user_picked` 会被 `last_pick` 预选置位，不能代替它
     manual: bool,
     released_at: Option<Instant>,
@@ -355,6 +460,9 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         pick: PickProgress::default(),
         jev: JevState::Idle,
         jev_token: 0,
+        finalized: None,
+        llm: LlmJob::default(),
+        sel_final: false,
         manual: false,
         released_at: None,
         front: None,
@@ -468,7 +576,7 @@ impl Ctl {
             }
             Msg::PickGrace { gen, token } if gen == self.gen && self.mode == Mode::Pick && !self.recording && self.pick.expired(token, Instant::now()) => {
                 self.pick.cancel_grace();
-                if self.choose_pending || (!self.manual && self.settings().jev.targets().is_ok()) {
+                if self.choose_pending || (!self.manual && (self.llm_active() || self.settings().jev.targets().is_ok())) {
                     self.finish_slow_rows();
                 }
                 self.advance_pick();
@@ -481,10 +589,16 @@ impl Ctl {
                 self.emit_rows();
             }
             Msg::JevDone { gen, token, res } => self.jev_done(gen, token, res),
+            Msg::LlmDelta { gen, token, text } => self.llm_delta(gen, token, text),
+            Msg::LlmDone { gen, token, res } => self.llm_done(gen, token, res),
             Msg::PickChoose(i) if self.mode == Mode::Pick && self.history.is_some() => self.choose_history(i),
             Msg::PickChoose(i) if self.mode == Mode::Pick => {
                 self.take_manual();
+                self.sel_final = false;
                 self.choose(i)
+            }
+            Msg::PickChooseFinal if self.mode == Mode::Pick => {
+                self.choose_final()
             }
             Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
             Msg::CompareToggle => match self.mode {
@@ -815,6 +929,9 @@ impl Ctl {
         self.pick.begin(self.settings().jev);
         self.jev_token += 1;
         self.jev = JevState::Idle;
+        self.llm.stop();
+        self.sel_final = false;
+        self.finalized = self.llm_active().then(FinalizedRow::idle);
         self.manual = false;
         let mut targets = Vec::new();
         for (r, segs) in self.rows.iter_mut().zip(&mut self.row_segs) {
@@ -848,6 +965,9 @@ impl Ctl {
         self.choose_pending = false;
         self.jev_token += 1;
         self.jev = JevState::Idle;
+        self.llm.stop();
+        self.sel_final = false;
+        self.finalized = (mode == Mode::Pick && self.llm_active()).then(FinalizedRow::idle);
         self.manual = false;
         self.released_at = None;
         self.pick.begin(self.settings().jev);
@@ -1181,6 +1301,9 @@ impl Ctl {
         }
         // cancel 可能发生在预开麦阶段；丢弃 Primed 会经 Recorder::Drop 同步停麦。
         self.primed = None;
+        self.llm.stop();
+        self.sel_final = false;
+        self.finalized = None;
         self.stop_recording();
         if let Some(mut t) = self.typer.take() {
             t.finish();
@@ -1191,6 +1314,12 @@ impl Ctl {
         }
         self.history = None;
         self.mode = Mode::Idle;
+    }
+
+    fn final_selectable(&self) -> bool {
+        self.finalized
+            .as_ref()
+            .is_some_and(|f| matches!(f.state, LlmState::Ready | LlmState::Skipped) && !f.text.is_empty())
     }
 
     fn pick_key(&mut self, k: Special) {
@@ -1210,12 +1339,29 @@ impl Ctl {
         if n == 0 {
             return;
         }
-        if matches!(k, Special::Up | Special::Down | Special::Digit(_) | Special::Enter) {
+        let has_final_row = self.final_selectable();
+        if matches!(k, Special::Up | Special::Down | Special::Digit(_))
+            || (k == Special::Enter && !(self.sel_final && has_final_row))
+        {
             self.take_manual();
         }
         match k {
             Special::Up | Special::Down => {
-                self.sel = if k == Special::Down { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
+                if has_final_row {
+                    if self.sel_final {
+                        self.sel_final = false;
+                        self.sel = if k == Special::Down { 0 } else { n - 1 };
+                    } else if k == Special::Down && self.sel + 1 == n {
+                        self.sel_final = true;
+                    } else if k == Special::Up && self.sel == 0 {
+                        self.sel_final = true;
+                    } else {
+                        self.sel = if k == Special::Down { self.sel + 1 } else { self.sel - 1 };
+                    }
+                } else {
+                    self.sel_final = false;
+                    self.sel = if k == Special::Down { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
+                }
                 self.user_picked = true;
                 self.emit_rows();
             }
@@ -1224,18 +1370,45 @@ impl Ctl {
                 if i >= n {
                     return;
                 }
-                if self.sel == i {
+                if !self.sel_final && self.sel == i {
                     self.choose(i);
                 } else {
+                    self.sel_final = false;
                     self.sel = i;
                     self.user_picked = true;
                     self.emit_rows();
                 }
             }
-            Special::Enter => self.choose(self.sel),
+            Special::Enter => {
+                if self.sel_final && has_final_row {
+                    self.choose_final();
+                } else {
+                    self.choose(self.sel);
+                }
+            }
             Special::Escape => self.abort(None),
             Special::Tab => {}
         }
+    }
+
+    /// 选中顶部的「最终定稿」行上屏
+    fn choose_final(&mut self) {
+        let Some(f) = self.finalized.clone() else { return };
+        if !matches!(f.state, LlmState::Ready | LlmState::Skipped) || f.text.is_empty() {
+            return;
+        }
+        let ch = f.source_channel.unwrap_or(Channel::All);
+        let front = self.front.take();
+        let app = self.app.clone();
+        let text = f.text;
+        self.cancel();
+        tauri::async_runtime::spawn(async move {
+            if let Some(f) = front {
+                f.activate();
+            }
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            deliver_text(&app, &text, ch);
+        });
     }
 
     /// 历史条目上屏：结束本轮并关面板，原文直接粘贴，不再记入历史
@@ -1289,13 +1462,23 @@ impl Ctl {
         });
     }
 
-    /// 用户做了选择类操作：从此不再自动评选，进行中的 Jev 结果作废
+    /// 用户做了选择类操作：从此不再自动评选，进行中的 Jev / LLM 结果作废
     fn take_manual(&mut self) {
         self.manual = true;
         if self.jev == JevState::Busy {
             self.jev_token += 1;
             self.jev = JevState::Idle;
         }
+        // 还没出结果的定稿行随手选作废：中止在途请求（不再计费），行也收起，免得一直显示「等待中」
+        if self.finalized.as_ref().is_some_and(|f| matches!(f.state, LlmState::Idle | LlmState::Busy)) {
+            self.llm.stop();
+            self.finalized = None;
+            self.sel_final = false;
+        }
+    }
+
+    fn llm_active(&self) -> bool {
+        self.settings().llm.is_ready()
     }
 
     /// 仅为有效 Jev 提前评选；停录后达到本次录音快照的门槛立即推进，否则从首条可用定稿起等待快照时长。
@@ -1313,7 +1496,7 @@ impl Ctl {
         if has_final {
             self.timeout_token += 1;
         }
-        let auto = self.settings().jev.targets().is_ok();
+        let auto = self.llm_active() || self.settings().jev.targets().is_ok();
         let mut waiting = self.rows.iter().any(|r| matches!(r.state, RowState::Listen | RowState::Wait));
         if waiting && auto && !self.manual && !self.choose_pending && jev_ready(&self.rows, self.pick.threshold) {
             self.finish_slow_rows();
@@ -1341,7 +1524,11 @@ impl Ctl {
         }
         if !waiting {
             self.choose_pending = false;
-            self.maybe_jev();
+            if self.llm_active() {
+                self.maybe_llm();
+            } else {
+                self.maybe_jev();
+            }
         }
     }
 
@@ -1404,6 +1591,148 @@ impl Ctl {
         }
     }
 
+    /// 启用 LLM 融合定稿时：单条定稿直接采纳；多条定稿先尝试本地高相似度跳过（省 Token），未命中再调 OpenAI 兼容 API
+    fn maybe_llm(&mut self) {
+        if self.mode != Mode::Pick || self.recording || self.choose_pending || self.manual {
+            return;
+        }
+        if self.finalized.as_ref().is_some_and(|f| f.state != LlmState::Idle) {
+            return;
+        }
+        let cfg = self.settings().llm;
+        if !cfg.is_ready() {
+            return;
+        }
+        let finals: Vec<(usize, Channel, String, Option<u64>)> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.state == RowState::Final && !r.text.is_empty())
+            .map(|(i, r)| (i, r.channel, r.text.clone(), r.ms))
+            .collect();
+        if finals.is_empty() {
+            return;
+        }
+        if finals.len() == 1 {
+            let (_, ch, text, _) = finals.into_iter().next().unwrap();
+            self.timeout_token += 1;
+            self.finalized = Some(FinalizedRow {
+                state: LlmState::Skipped,
+                text,
+                ms: Some(0),
+                note: Some("仅 1 路有效定稿 · 已省去 LLM".into()),
+                source_channel: Some(ch),
+            });
+            if cfg.auto_insert {
+                self.choose_final();
+            } else {
+                self.sel_final = true;
+                self.emit_rows();
+            }
+            return;
+        }
+
+        let candidates: Vec<voicekey_core::llm::CandidateInput> = finals
+            .iter()
+            .map(|(_, ch, text, ms)| voicekey_core::llm::CandidateInput {
+                channel: ch.id().to_string(),
+                text: text.clone(),
+                elapsed_ms: *ms,
+                hints: Vec::new(),
+            })
+            .collect();
+        let pref: Vec<usize> = (0..finals.len()).collect();
+
+        // 本地高相似度跳过（省 Token）
+        if let Some(skip) = voicekey_core::llm::try_skip_similar(&cfg, &candidates, &pref) {
+            let (_, ch, text, _) = &finals[skip.picked_index];
+            self.timeout_token += 1;
+            self.finalized = Some(FinalizedRow {
+                state: LlmState::Skipped,
+                text: text.clone(),
+                ms: Some(0),
+                note: Some(format!(
+                    "{} 路一致 · 相似度 {:.0}% · 已省去 LLM",
+                    skip.agree_count,
+                    skip.avg_similarity * 100.0
+                )),
+                source_channel: Some(*ch),
+            });
+            if cfg.auto_insert {
+                self.choose_final();
+            } else {
+                self.sel_final = true;
+                self.emit_rows();
+            }
+            return;
+        }
+
+        // 调用 OpenAI 兼容 LLM 接口融合定稿
+        self.timeout_token += 1;
+        self.finalized = Some(FinalizedRow {
+            state: LlmState::Busy,
+            text: String::new(),
+            ms: None,
+            note: Some(cfg.model.clone()),
+            source_channel: None,
+        });
+        let (gen, tx) = (self.gen, self.tx.clone());
+        self.llm.start(move |token| {
+            let dtx = tx.clone();
+            let on_delta: Option<voicekey_core::llm::OnDelta> = cfg.stream.then(|| {
+                Box::new(move |text: &str| {
+                    let _ = dtx.send(Msg::LlmDelta { gen, token, text: text.to_string() });
+                }) as voicekey_core::llm::OnDelta
+            });
+            tauri::async_runtime::spawn(async move {
+                let res = voicekey_core::llm::fuse(&cfg, &candidates, on_delta)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
+                let _ = tx.send(Msg::LlmDone { gen, token, res });
+            })
+        });
+        self.emit_rows();
+    }
+
+    fn llm_delta(&mut self, gen: u64, token: u64, text: String) {
+        if gen != self.gen || !self.llm.is_current(token) || self.mode != Mode::Pick {
+            return;
+        }
+        if let Some(f) = self.finalized.as_mut() {
+            if f.state == LlmState::Busy {
+                f.text = text;
+                self.emit_rows();
+            }
+        }
+    }
+
+    fn llm_done(&mut self, gen: u64, token: u64, res: Result<voicekey_core::llm::FuseResult, String>) {
+        if gen != self.gen || !self.llm.is_current(token) || self.mode != Mode::Pick {
+            return;
+        }
+        self.llm.task = None;
+        let cfg = self.settings().llm;
+        let (row, next) = llm_finish(res, &self.rows, self.sel, cfg.auto_insert && !self.manual);
+        self.finalized = Some(row);
+        match next {
+            LlmNext::InsertFinal => self.choose_final(),
+            LlmNext::InsertRow(i) => self.choose(i),
+            LlmNext::FocusFinal => {
+                self.sel_final = true;
+                self.emit_rows();
+            }
+            LlmNext::FocusRow(i) => {
+                self.sel_final = false;
+                self.sel = i;
+                self.emit_rows();
+            }
+            LlmNext::Nothing => {
+                self.sel_final = false;
+                self.emit_rows();
+            }
+        }
+    }
+
     /// 最多每 33ms 推送一次，避免文字跳动
     fn emit_rows(&mut self) {
         let wait = Duration::from_millis(33).saturating_sub(self.last_emit.elapsed());
@@ -1419,7 +1748,15 @@ impl Ctl {
             return;
         }
         self.last_emit = Instant::now();
-        let model = Model { recording: self.recording, rows: &self.rows, sel: self.sel, jev: self.jev, history: self.history.as_ref() };
+        let model = Model {
+            recording: self.recording,
+            rows: &self.rows,
+            sel: self.sel,
+            jev: self.jev,
+            finalized: self.finalized.as_ref(),
+            sel_final: self.sel_final,
+            history: self.history.as_ref(),
+        };
         match self.mode {
             Mode::Pick => {
                 let _ = self.app.emit_to("pick", "pick", model);
@@ -1753,5 +2090,48 @@ mod tests {
         }
         assert_eq!(route_pick_key(&mut h, Special::Tab, || unreachable!()), PickKey::Closed);
         assert!(h.is_none());
+    }
+
+    fn fused(text: &str) -> voicekey_core::llm::FuseResult {
+        voicekey_core::llm::FuseResult { text: text.into(), ms: 5, model: "m".into(), usage: None, system_prompt: String::new(), user_prompt: String::new() }
+    }
+
+    #[test]
+    fn llm_success_offers_or_inserts_the_fused_text() {
+        use super::{llm_finish, LlmNext, LlmState};
+        let rows = [row(Channel::Doubao, RowState::Final, "a"), row(Channel::Qwen, RowState::Final, "b")];
+        let (f, next) = llm_finish(Ok(fused("合并")), &rows, 0, false);
+        assert_eq!((f.state, f.text.as_str(), next), (LlmState::Ready, "合并", LlmNext::FocusFinal));
+        assert_eq!(llm_finish(Ok(fused("合并")), &rows, 0, true).1, LlmNext::InsertFinal);
+    }
+
+    #[test]
+    fn llm_failure_falls_back_to_an_original_final() {
+        use super::{llm_finish, LlmNext, LlmState};
+        let rows = [row(Channel::Doubao, RowState::Error, ""), row(Channel::Qwen, RowState::Final, "b"), row(Channel::Baidu, RowState::Final, "c")];
+        // 选中行是定稿就用它，否则取第一条定稿
+        assert_eq!(llm_finish(Err("超时".into()), &rows, 2, false).1, LlmNext::FocusRow(2));
+        let (f, next) = llm_finish(Err("超时".into()), &rows, 0, true);
+        assert_eq!((f.state, next), (LlmState::Failed, LlmNext::InsertRow(1)));
+        assert!(f.note.unwrap().contains(Channel::Qwen.title()));
+        let none = [row(Channel::Doubao, RowState::Error, "")];
+        assert_eq!(llm_finish(Err("x".into()), &none, 0, true).1, LlmNext::Nothing);
+    }
+
+    #[test]
+    fn llm_job_stop_aborts_the_request_and_rejects_stale_results() {
+        use std::sync::mpsc::{channel, RecvTimeoutError};
+        let mut job = super::LlmJob::default();
+        let (tx, rx) = channel::<()>();
+        job.start(|_| tauri::async_runtime::spawn(async move {
+            let _alive = tx;
+            std::future::pending::<()>().await
+        }));
+        let token = job.token;
+        assert!(job.is_current(token));
+        job.stop();
+        assert!(!job.is_current(token));
+        // 任务被中止、持有的发送端随之释放，说明请求 future 已被丢弃（连接随之关闭）
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)), Err(RecvTimeoutError::Disconnected));
     }
 }

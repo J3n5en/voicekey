@@ -97,7 +97,7 @@
 <h3>智能选择（Jev）</h3>
 <div class="group">
   <div class="row">
-    <div class="lbl">说完后由 Jev 自动挑一条上屏<small>仅多渠道且 Jev 启用、配置有效时生效；关闭或配置不可用时由你手选；只发送转写文字，不发渠道名；密钥只存本机</small></div>
+    <div class="lbl">说完后由 Jev 自动挑一条上屏<small>仅多渠道且 Jev 启用、配置有效时生效；关闭或配置不可用时由你手选；LLM 定稿配置完成时由 LLM 接管；只发送转写文字，不发渠道名；密钥只存本机</small></div>
     <div class="segc">
       {#each MODES as [k, v]}<button class:on={d.mode === k} onclick={() => setMode(k)}>{v}</button>{/each}
     </div>

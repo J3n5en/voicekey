@@ -5,6 +5,7 @@
   import Account from "./Account.svelte";
   import Compare from "./Compare.svelte";
   import Jev from "./Jev.svelte";
+  import Llm from "./Llm.svelte";
 
   const s = $derived(app.s!);
   const engines = $derived(app.info!.channels.filter((c) => c !== "all"));
@@ -62,7 +63,7 @@
     </div>
   </button>
 </div>
-{#if s.channel === "all"}<Jev />{/if}
+{#if s.channel === "all"}<Llm /><Jev />{/if}
 {#if LOGIN[s.channel]}{#key s.channel}<Account ch={s.channel} />{/key}{/if}
 {#if !app.info!.offline.supported}
   <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
