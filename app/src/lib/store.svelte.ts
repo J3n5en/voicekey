@@ -1,4 +1,4 @@
-import { call, on, applyLook, type AppInfo, type Settings, type Perms, type Model, type Shortcut, type OfflineStatus, type Channel, type UpdateStatus } from "./api";
+import { call, on, applyLook, type AppInfo, type Settings, type Perms, type Model, type OfflineStatus, type Channel, type UpdateStatus } from "./api";
 
 export const app = $state({
   info: null as AppInfo | null,
@@ -12,6 +12,12 @@ export const app = $state({
   accounts: {} as Partial<Record<Channel, boolean>>,
   update: { state: "idle" } as UpdateStatus,
 });
+
+let activeRecordingId = 0, completedRecordingId = 0;
+export function setRecordingId(id: number) {
+  activeRecordingId = id;
+  if (id && id === completedRecordingId) app.recording = false;
+}
 
 export function save(patch: Partial<Settings>) {
   if (!app.s) return;
@@ -51,7 +57,10 @@ export async function init() {
   on<Partial<Record<Channel, boolean>>>("accounts", (v) => (app.accounts = v));
   on<UpdateStatus>("update", (v) => (app.update = v));
   on<Model>("compare", (m) => (app.compare = m));
-  on<Shortcut | null>("recorded", () => (app.recording = false));
+  on<number>("recorded", (id) => {
+    completedRecordingId = id;
+    if (id === activeRecordingId) app.recording = false;
+  });
   await on<string[]>("microphones", (mics) => {
     ++micRevision;
     app.mics = mics;

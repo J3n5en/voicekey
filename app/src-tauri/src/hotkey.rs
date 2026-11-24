@@ -19,8 +19,8 @@ pub enum HotEvent {
     Cancel,
     Escape,
     Pick(Special),
-    Recorded(Option<Shortcut>),
-    RecordedHold(Option<Combo>),
+    Recorded(u32, Option<Shortcut>),
+    RecordedHold(u32, Option<Combo>),
 }
 
 #[derive(Default)]
@@ -68,10 +68,9 @@ pub struct Shared {
     pub config: RwLock<Config>,
     /// 候选面板打开时吞掉方向键/数字/回车/Esc
     pub picking: AtomicBool,
-    /// 设置里录制快捷键
-    pub recording: AtomicBool,
-    /// 录制目标是长按组合（否则为点按快捷键）
-    pub record_hold: AtomicBool,
+    /// 只有用户主动录制时才进入 recorder；正常输入不经过录制器。
+    recording: AtomicBool,
+    recorder: Mutex<Recorder>,
     /// 托盘「暂停监听」
     pub paused: AtomicBool,
 }
@@ -87,17 +86,51 @@ struct State {
     /// Windows：被吞掉、尚未重放的修饰键按下
     held_swallowed: bool,
     tapped: bool,
-    /// 录制：单独按下的修饰键（多个修饰键同时按下时为 None 且 multi=true）
-    rec_pending: Option<u32>,
-    rec_multi: bool,
-    /// 录制长按组合：当前按住的键、本轮按过的全部键
-    rec_held: Vec<(u32, String)>,
-    rec_peak: Vec<(u32, String)>,
     /// 组合长按：当前按住的修饰键与普通键
     held_mods: Vec<u32>,
     held_key: Option<u32>,
     chord_on: bool,
     chord_active: bool,
+}
+
+#[derive(Default)]
+struct Recorder {
+    id: u32,
+    hold: bool,
+    rec_pending: Option<u32>,
+    rec_multi: bool,
+    rec_held: Vec<(u32, String)>,
+    rec_peak: Vec<(u32, String)>,
+}
+
+impl Shared {
+    pub fn set_recording(&self, on: bool, hold: bool) -> u32 {
+        let mut r = self.recorder.lock().unwrap();
+        let id = r.id.wrapping_add(1);
+        *r = Recorder { id, hold, ..Recorder::default() };
+        self.recording.store(on, Ordering::Release);
+        id
+    }
+
+    pub fn is_current_recording(&self, id: u32) -> bool {
+        self.recorder.lock().unwrap().id == id
+    }
+
+    pub fn window_input(&self, id: u32, code: u32, down: bool, mods: u8, symbol: Option<char>, tx: &UnboundedSender<HotEvent>) -> bool {
+        if !cfg!(windows) || (!(1..=254).contains(&code) && !pf::is_mouse_button(code)) { return false; }
+        let kind = if pf::modifier(code).is_some() { KeyKind::Modifier(down) } else if down { KeyKind::Down } else { KeyKind::Up };
+        let e = KeyEvent { kind, code, mods: mods & MOD_MASK, repeat: false, chars: symbol.filter(|c| !c.is_control()).map(|c| c.to_string()) };
+        self.capture(Some(id), tx, &e)
+    }
+
+    /// 原生钩子和设置窗口只共用一份临时状态；迟到的窗口事件不能绑定到下一轮。
+    pub fn capture(&self, id: Option<u32>, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
+        if !self.recording.load(Ordering::Acquire) { return false; }
+        let mut r = self.recorder.lock().unwrap();
+        if !self.recording.load(Ordering::Relaxed) || id.is_some_and(|id| id != r.id) { return false; }
+        if e.repeat { return true; }
+        if r.hold { record_hold(self, &mut r, tx, e) } else { record(self, &mut r, tx, e) }
+    }
 }
 
 pub fn start(shared: Arc<Shared>, tx: UnboundedSender<HotEvent>) {
@@ -106,10 +139,7 @@ pub fn start(shared: Arc<Shared>, tx: UnboundedSender<HotEvent>) {
 }
 
 fn handle(sh: &Shared, st: &Arc<Mutex<State>>, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
-    if sh.recording.load(Ordering::Relaxed) {
-        let mut s = st.lock().unwrap();
-        return if sh.record_hold.load(Ordering::Relaxed) { record_hold(sh, &mut s, tx, e) } else { record(sh, &mut s, tx, e) };
-    }
+    if sh.capture(None, tx, e) { return true; }
     if e.kind == KeyKind::Down && sh.picking.load(Ordering::Relaxed) {
         if let Some(k) = picking_key(e) {
             let _ = tx.send(HotEvent::Pick(k));
@@ -336,10 +366,11 @@ fn picking_key(e: &KeyEvent) -> Option<Special> {
 }
 
 /// 录制下一次按键：单独点按一个修饰键，或按下 修饰键+键、F 键、鼠标中键/侧键；Esc 取消
-fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
+fn record(sh: &Shared, s: &mut Recorder, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
+    let id = s.id;
     let done = |sc: Option<Shortcut>| {
         sh.recording.store(false, Ordering::Relaxed);
-        let _ = tx.send(HotEvent::Recorded(sc));
+        let _ = tx.send(HotEvent::Recorded(id, sc));
     };
     match e.kind {
         KeyKind::Down => {
@@ -350,6 +381,7 @@ fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEve
                 done(Some(Shortcut { code: e.code, mods, name: pf::key_name(e) }));
             }
         }
+        KeyKind::Modifier(true) if s.rec_pending == Some(e.code) => {}
         KeyKind::Modifier(true) => {
             if s.rec_pending.is_none() && !s.rec_multi {
                 s.rec_pending = Some(e.code);
@@ -377,13 +409,13 @@ fn record(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEve
 }
 
 /// 录制长按组合：按住一组键，松开任意一个时记录本轮按过的全部键；不合法则继续等待。Esc 取消
-fn record_hold(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
+fn record_hold(sh: &Shared, s: &mut Recorder, tx: &UnboundedSender<HotEvent>, e: &KeyEvent) -> bool {
     let is_mod = pf::modifier(e.code).is_some();
     match e.kind {
         KeyKind::Down if e.repeat => {}
         KeyKind::Down if s.rec_held.is_empty() && pf::special(e.code) == Some(Special::Escape) => {
             sh.recording.store(false, Ordering::Relaxed);
-            let _ = tx.send(HotEvent::RecordedHold(None));
+            let _ = tx.send(HotEvent::RecordedHold(s.id, None));
         }
         KeyKind::Down | KeyKind::Modifier(true) if is_mod == (e.kind != KeyKind::Down) => {
             if !s.rec_held.iter().any(|(c, _)| *c == e.code) {
@@ -395,6 +427,7 @@ fn record_hold(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &K
             }
         }
         KeyKind::Up | KeyKind::Modifier(false) => {
+            if !s.rec_held.iter().any(|(c, _)| *c == e.code) { return true; }
             s.rec_held.retain(|(c, _)| *c != e.code);
             let mut peak = std::mem::take(&mut s.rec_peak);
             peak.sort_by_key(|(c, _)| pf::modifier(*c).is_none());
@@ -402,7 +435,7 @@ fn record_hold(sh: &Shared, s: &mut State, tx: &UnboundedSender<HotEvent>, e: &K
             if valid_hold(&codes) {
                 let name = peak.into_iter().map(|(_, n)| n).collect::<Vec<_>>().join(" + ");
                 sh.recording.store(false, Ordering::Relaxed);
-                let _ = tx.send(HotEvent::RecordedHold(Some(Combo { codes, name })));
+                let _ = tx.send(HotEvent::RecordedHold(s.id, Some(Combo { codes, name })));
             } else {
                 s.rec_peak = s.rec_held.clone();
             }
@@ -488,15 +521,116 @@ mod tests {
     #[test]
     fn records_mouse_button_as_tap_shortcut() {
         let sh = Shared::default();
-        sh.recording.store(true, Ordering::Relaxed);
-        let mut s = State::default();
+        sh.set_recording(true, false);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        assert!(record(&sh, &mut s, &tx, &ev(KeyKind::Down, pf::MOUSE_BASE + 3, 0)));
+        assert!(sh.capture(None, &tx, &ev(KeyKind::Down, pf::MOUSE_BASE + 3, 0)));
         match rx.try_recv() {
-            Ok(HotEvent::Recorded(Some(sc))) => assert_eq!(sc.code, pf::MOUSE_BASE + 3),
+            Ok(HotEvent::Recorded(_, Some(sc))) => assert_eq!(sc.code, pf::MOUSE_BASE + 3),
             other => panic!("unexpected: {other:?}"),
         }
         assert!(!sh.recording.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn recording_a_modifier_ignores_duplicate_down_and_autorepeat() {
+        let sh = Shared::default();
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let ctrl = if cfg!(windows) { 0xa3 } else { 62 };
+        sh.set_recording(true, false);
+        let down = ev(KeyKind::Modifier(true), ctrl, pf::CTRL);
+        for e in [down.clone(), KeyEvent { repeat: true, ..down.clone() }, down] {
+            assert!(handle(&sh, &st, &tx, &e));
+            assert!(rx.try_recv().is_err());
+        }
+        assert!(handle(&sh, &st, &tx, &ev(KeyKind::Modifier(false), ctrl, 0)));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Recorded(_, Some(s))) if s.code == ctrl && s.mods == 0));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn window_and_hook_share_one_recorder_and_only_complete_once() {
+        let sh = Shared::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let id = sh.set_recording(true, false);
+        assert!(sh.capture(None, &tx, &ev(KeyKind::Modifier(true), 0xa3, pf::CTRL)));
+        assert!(sh.window_input(id, 0xa3, true, pf::CTRL, None, &tx));
+        assert!(sh.window_input(id, 0xa3, false, 0, None, &tx));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Recorded(_, Some(s))) if s.code == 0xa3 && s.name == "右 Ctrl"));
+        assert!(!sh.window_input(id, 0x77, true, 0, None, &tx));
+        assert!(rx.try_recv().is_err());
+        let id = sh.set_recording(true, false);
+        assert!(sh.window_input(id, 0x77, true, 0, None, &tx));
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Recorded(_, Some(s))) if s.name == "F8"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn switching_or_cancelling_discards_keys_from_the_previous_recording() {
+        let sh = Shared::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let old = sh.set_recording(true, true);
+        sh.window_input(old, 0xa2, true, pf::CTRL, None, &tx);
+        sh.set_recording(false, false);
+        let tap = sh.set_recording(true, false);
+        sh.window_input(tap, 0xa1, true, pf::SHIFT, None, &tx);
+        let hold = sh.set_recording(true, true);
+        assert!(!sh.window_input(tap, 0xa1, false, 0, None, &tx));
+        assert!(!sh.window_input(old, 0xa2, false, 0, None, &tx));
+        sh.window_input(hold, 0xa3, true, pf::CTRL, None, &tx);
+        sh.window_input(hold, 0xa4, true, pf::CTRL | pf::ALT, None, &tx);
+        sh.window_input(hold, 0x41, false, pf::CTRL | pf::ALT, None, &tx);
+        assert!(rx.try_recv().is_err());
+        sh.window_input(hold, 0xa4, false, pf::CTRL, None, &tx);
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::RecordedHold(id, Some(c))) if id == hold && c.codes == [0xa3, 0xa4]));
+        let next = sh.set_recording(true, false);
+        sh.window_input(next, 0x1b, true, 0, None, &tx);
+        assert!(matches!(rx.try_recv(), Ok(HotEvent::Recorded(id, None)) if id == next));
+        assert!(!sh.is_current_recording(hold));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn tap_shortcut_emits_one_tap_per_press_including_manual_stop() {
+        let k = (0..256).find(|&c| pf::is_function_key(c)).unwrap();
+        let sh = Shared::default();
+        sh.config.write().unwrap().tap = Some(Shortcut { code: k, mods: 0, name: "F".into() });
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for _ in 0..2 {
+            let down = ev(KeyKind::Down, k, 0);
+            assert!(handle(&sh, &st, &tx, &down));
+            assert!(matches!(rx.try_recv(), Ok(HotEvent::Tap)));
+            assert!(handle(&sh, &st, &tx, &KeyEvent { repeat: true, ..down }));
+            assert!(handle(&sh, &st, &tx, &ev(KeyKind::Up, k, 0)));
+            assert!(rx.try_recv().is_err(), "重复键和松开不能额外触发停录");
+        }
+    }
+
+    #[test]
+    fn same_modifier_toggles_and_unbound_mouse_or_typing_do_not() {
+        // Windows 的右 Ctrl / A，macOS 的右 Control / A。
+        let (ctrl, a) = if cfg!(windows) { (0xa3, 0x41) } else { (62, 0) };
+        let sh = Shared::default();
+        sh.config.write().unwrap().tap = Some(Shortcut { code: ctrl, mods: 0, name: "Ctrl".into() });
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let step = |kind, code, mods| handle(&sh, &st, &tx, &ev(kind, code, mods));
+        for n in 0..2 {
+            step(KeyKind::Modifier(true), ctrl, pf::CTRL);
+            assert!(matches!(rx.try_recv(), Ok(HotEvent::Press)));
+            step(KeyKind::Modifier(false), ctrl, 0);
+            assert!(matches!(rx.try_recv(), Ok(HotEvent::Tap)));
+            if n == 0 {
+                // 鼠标移动和左右点击根本不进钩子；即使收到未绑定的侧键和普通键，也必须原样放行。
+                for key in [pf::MOUSE_BASE + 4, a] {
+                    assert!(!step(KeyKind::Down, key, 0));
+                    assert!(!step(KeyKind::Up, key, 0));
+                }
+                assert!(rx.try_recv().is_err());
+            }
+        }
     }
 
     #[test]
