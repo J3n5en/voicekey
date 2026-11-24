@@ -118,6 +118,19 @@ const HISTORY_LIMIT_DEFAULT: u32 = 20;
 /// 「无」保留字：音效逐事件的显式停用取值
 pub const NONE: &str = "none";
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PickPanelStart {
+    Collapsed,
+    Expanded,
+    #[default]
+    #[serde(other)]
+    Remember,
+}
+
+// 老配置没有此字段：升级后沿用官方版每次展开的行为。新安装由 Settings::default 决定。
+fn legacy_pick_panel_start() -> PickPanelStart { PickPanelStart::Expanded }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -134,6 +147,11 @@ pub struct Settings {
     pub mic: String,
     /// 多渠道模式下同时识别的渠道（至少 2 个）
     pub multi: Vec<Channel>,
+    /// 仅在新多渠道会话开始时读取，不强制改变本轮的布局。
+    #[serde(default = "legacy_pick_panel_start")]
+    pub pick_panel_start: PickPanelStart,
+    /// 最近一次手动收展；自动上屏或取消后隐藏窗口不修改它。
+    pick_panel_last_expanded: bool,
     /// 候选框上次选中的渠道，下次默认聚焦
     pub last_pick: Option<Channel>,
     /// 候选框各渠道上屏次数，次数多的排前
@@ -181,6 +199,8 @@ impl Default for Settings {
             live_text: true,
             mic: String::new(),
             multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline && c.login().is_none()).collect(),
+            pick_panel_start: PickPanelStart::default(),
+            pick_panel_last_expanded: false,
             last_pick: None,
             pick_counts: HashMap::new(),
             sound_enabled: false,
@@ -203,6 +223,25 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn pick_starts_expanded(&self) -> bool {
+        match self.pick_panel_start {
+            PickPanelStart::Remember => self.pick_panel_last_expanded,
+            PickPanelStart::Collapsed => false,
+            PickPanelStart::Expanded => true,
+        }
+    }
+
+    /// 返回是否发生变化，供调用方跳过重复的写盘。
+    pub fn note_pick_toggle(&mut self, expanded: bool) -> bool {
+        std::mem::replace(&mut self.pick_panel_last_expanded, expanded) != expanded
+    }
+
+    pub fn apply_settings_form(&mut self, mut form: Self) {
+        // 录音时设置页可能正开着：整份旧表单不能覆盖候选窗刚记住的状态。
+        form.pick_panel_last_expanded = self.pick_panel_last_expanded;
+        *self = form;
+    }
+
     pub fn load() -> Self {
         let mut s: Settings = std::fs::read(data_file("settings.json"))
             .ok()
@@ -279,6 +318,47 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_install_keeps_expanded_start_while_a_new_install_remembers() {
+        let old: Settings = serde_json::from_str(r#"{"channel":"all","silenceStop":false}"#).unwrap();
+        assert_eq!(old.pick_panel_start, PickPanelStart::Expanded);
+        assert!(old.pick_starts_expanded());
+        assert_eq!(old.channel, Channel::All);
+        assert!(!old.silence_stop);
+        for s in [Settings::default(), serde_json::from_str(r#"{"pickPanelStart":"future"}"#).unwrap()] {
+            assert_eq!(s.pick_panel_start, PickPanelStart::Remember);
+            assert!(!s.pick_starts_expanded());
+        }
+    }
+
+    #[test]
+    fn fixed_layouts_override_but_do_not_erase_manual_choices() {
+        let mut s = Settings::default();
+        assert!(s.note_pick_toggle(true));
+        assert!(!s.note_pick_toggle(true));
+        s.pick_panel_start = PickPanelStart::Collapsed;
+        assert!(!s.pick_starts_expanded());
+        s.pick_panel_start = PickPanelStart::Expanded;
+        assert!(s.note_pick_toggle(false));
+        assert!(s.pick_starts_expanded());
+        s.pick_panel_start = PickPanelStart::Remember;
+        assert!(!s.pick_starts_expanded());
+        s.note_pick_toggle(true);
+        let restored: Settings = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        assert!(restored.pick_starts_expanded());
+    }
+
+    #[test]
+    fn an_open_settings_form_cannot_overwrite_a_newer_manual_choice() {
+        let mut s = Settings::default();
+        let mut old_form = s.clone();
+        s.note_pick_toggle(true);
+        old_form.streaming = false;
+        s.apply_settings_form(old_form);
+        assert!(!s.streaming);
+        assert!(s.pick_starts_expanded());
+    }
 
     #[test]
     fn legacy_jev_selection_defaults_and_new_values_are_sanitized() {

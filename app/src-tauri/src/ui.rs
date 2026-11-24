@@ -14,6 +14,8 @@ const TRAY: &[u8] = include_bytes!("../icons/tray.png");
 const HUD_W: f64 = 680.0;
 const HUD_H: f64 = 120.0;
 const PICK_W: f64 = 520.0;
+const CHIP_W: f64 = 152.0;
+const CHIP_H: f64 = 34.0;
 
 static HUD_TOKEN: AtomicU64 = AtomicU64::new(0);
 /// 候选面板锚点（统一坐标空间：macOS 逻辑点 / Windows 物理像素）
@@ -32,7 +34,24 @@ struct Area {
 struct Anchor {
     caret: Option<(f64, f64, f64, f64)>,
     area: Area,
-    height: f64,
+    secure: bool,
+    layout: PickLayout,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PickLayout {
+    Chip,
+    List(f64),
+}
+
+impl PickLayout {
+    fn for_rows(expanded: bool, rows: usize) -> Self {
+        if expanded { Self::List(92.0 + rows as f64 * 48.0) } else { Self::Chip }
+    }
+
+    fn size(self) -> (f64, f64) {
+        match self { Self::Chip => (CHIP_W, CHIP_H), Self::List(h) => (PICK_W, h) }
+    }
 }
 
 fn work_area(m: &Monitor) -> Area {
@@ -114,7 +133,7 @@ pub fn sync_pick<R: Runtime>(app: &AppHandle<R>, need: bool) {
             // 异步创建：同步命令里建窗口在 Windows 上会死锁
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
-                let Ok(pick) = overlay(&app, "pick", PICK_W, 300.0) else { return };
+                let Ok(pick) = overlay(&app, "pick", CHIP_W, CHIP_H) else { return };
                 #[cfg(target_os = "macos")]
                 panel::convert(&pick);
                 #[cfg(not(target_os = "macos"))]
@@ -207,14 +226,12 @@ fn caret_in_space<R: Runtime>(app: &AppHandle<R>, r: voicekey_platform::Rect) ->
     })
 }
 
-fn place_pick<R: Runtime>(w: &WebviewWindow<R>, a: &Anchor) {
+fn pick_rect(a: &Anchor) -> (f64, f64, f64, f64) {
     let ar = &a.area;
     let gap = units(ar, 6.0);
-    let pw = units(ar, PICK_W);
-    // 高度先限制在工作区内。否则 ph 过大时 clamp 上界小于下界，Rust 直接 panic 闪退。
-    let requested = if a.height.is_finite() { units(ar, a.height) } else { units(ar, 160.0) };
-    let ph = cap_len(requested, ar.h, gap);
-    let logical_h = if cfg!(target_os = "macos") { ph } else { ph / ar.scale };
+    let (width, height) = a.layout.size();
+    let pw = cap_len(units(ar, width), ar.w, gap);
+    let ph = cap_len(units(ar, height), ar.h, gap);
     let (x, y) = match a.caret {
         Some((cx, cy, _, chh)) => {
             let above = cy - ph - gap;
@@ -224,7 +241,13 @@ fn place_pick<R: Runtime>(w: &WebviewWindow<R>, a: &Anchor) {
     };
     let x = clamp_axis(x, ar.x + gap, ar.x + ar.w - pw - gap);
     let y = clamp_axis(y, ar.y + gap, ar.y + ar.h - ph - gap);
-    set_client(w, ar, PICK_W, logical_h);
+    let scale = units(ar, 1.0);
+    (x, y, pw / scale, ph / scale)
+}
+
+fn place_pick<R: Runtime>(w: &WebviewWindow<R>, a: &Anchor) {
+    let (x, y, width, height) = pick_rect(a);
+    set_client(w, &a.area, width, height);
     set_pos(w, x, y);
 }
 
@@ -237,8 +260,7 @@ fn cap_len(requested: f64, area: f64, gap: f64) -> f64 {
     requested.min((area - gap * 2.0).max(1.0)).max(1.0)
 }
 
-pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform::Rect>, rows: usize, focus: bool) {
-    let Some(w) = app.get_webview_window("pick") else { return };
+pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform::Rect>, secure: bool, expanded: bool, rows: usize) {
     let (caret, area) = match caret.and_then(|r| caret_in_space(app, r)) {
         Some((c, a)) => (Some(c), a),
         None => match cursor_area(app) {
@@ -246,33 +268,53 @@ pub fn pick_show<R: Runtime>(app: &AppHandle<R>, caret: Option<voicekey_platform
             None => return,
         },
     };
-    let a = Anchor { caret, area, height: 92.0 + rows as f64 * 48.0 };
-    *PICK_ANCHOR.lock().unwrap() = Some(a);
-    place_pick(&w, &a);
-    #[cfg(target_os = "macos")]
-    panel::KEYABLE.store(focus, std::sync::atomic::Ordering::Relaxed);
-    let _ = w.show();
-    #[cfg(not(target_os = "macos"))]
-    if focus {
-        let _ = w.set_focus();
-    }
+    *PICK_ANCHOR.lock().unwrap() = Some(Anchor { caret, area, secure, layout: PickLayout::for_rows(expanded, rows) });
+    present_pick(app);
 }
 
-/// 前端按内容高度回报，保持底边贴着光标
-pub fn pick_resize<R: Runtime>(app: &AppHandle<R>, height: f64) {
-    if !height.is_finite() || height < 1.0 {
-        return;
-    }
+/// 窗口是异步预建的；页面加载较晚时也能拿到这一轮的锚点。
+pub fn present_pick<R: Runtime>(app: &AppHandle<R>) { apply_pick_layout(app, true); }
+
+fn apply_pick_layout<R: Runtime>(app: &AppHandle<R>, show: bool) {
+    let Some(a) = *PICK_ANCHOR.lock().unwrap() else { return };
     let Some(w) = app.get_webview_window("pick") else { return };
-    let mut g = PICK_ANCHOR.lock().unwrap();
-    if let Some(a) = g.as_mut() {
-        a.height = height;
-        place_pick(&w, a);
+    let focus = a.secure && matches!(a.layout, PickLayout::List(_));
+    // 无边框窗口也受 Windows 默认最小跟踪高度限制；显式放开才能缩到胶囊的真实尺寸。
+    #[cfg(windows)]
+    if matches!(a.layout, PickLayout::Chip) { let _ = w.set_min_size(Some(LogicalSize::new(1.0, 1.0))); }
+    place_pick(&w, &a);
+    #[cfg(target_os = "macos")]
+    panel::set_keyable(&w, focus);
+    if show && !w.is_visible().unwrap_or(false) { let _ = w.show(); }
+    #[cfg(not(target_os = "macos"))]
+    if focus { let _ = w.set_focus(); }
+}
+
+pub fn pick_expand<R: Runtime>(app: &AppHandle<R>, expanded: bool, rows: usize) {
+    if let Some(a) = PICK_ANCHOR.lock().unwrap().as_mut() {
+        a.layout = PickLayout::for_rows(expanded, rows);
     }
+    apply_pick_layout(app, false);
+}
+
+/// 只有展开列表才接受内容高度；不让迟到的回报或重复的 resize 放大胶囊。
+pub fn pick_resize<R: Runtime>(app: &AppHandle<R>, height: f64) {
+    if !height.is_finite() || height < 1.0 { return; }
+    let a = {
+        let mut g = PICK_ANCHOR.lock().unwrap();
+        let Some(a) = g.as_mut() else { return };
+        if !matches!(a.layout, PickLayout::List(h) if h != height) { return; }
+        a.layout = PickLayout::List(height);
+        *a
+    };
+    if let Some(w) = app.get_webview_window("pick") { place_pick(&w, &a); }
 }
 
 pub fn pick_hide<R: Runtime>(app: &AppHandle<R>) {
+    *PICK_ANCHOR.lock().unwrap() = None;
     let Some(w) = app.get_webview_window("pick") else { return };
+    #[cfg(target_os = "macos")]
+    panel::set_keyable(&w, false);
     // 挑选途中切走了多渠道：收起即销毁
     if current_channel(app) == Channel::All {
         let _ = w.hide();
@@ -347,7 +389,22 @@ mod panel {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tauri::{Runtime, WebviewWindow};
 
-    pub static KEYABLE: AtomicBool = AtomicBool::new(false);
+    static KEYABLE: AtomicBool = AtomicBool::new(false);
+
+    pub fn set_keyable<R: Runtime>(w: &WebviewWindow<R>, allow: bool) {
+        if KEYABLE.swap(allow, Ordering::Relaxed) && !allow {
+            let panel = w.clone();
+            let _ = w.run_on_main_thread(move || {
+                if let Ok(ptr) = panel.ns_window() {
+                    unsafe {
+                        let obj = &*(ptr as *mut AnyObject);
+                        let key: Bool = msg_send![obj, isKeyWindow];
+                        if key.as_bool() { let _: () = msg_send![obj, resignKeyWindow]; }
+                    }
+                }
+            });
+        }
+    }
     /// 换类前的原始 isa（WebKit 已在其上注册 KVO），销毁前必须换回，否则移除观察者抛 NSException 闪退
     static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
     const NONACTIVATING: usize = 1 << 7;
@@ -405,7 +462,30 @@ mod panel {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap_len, clamp_axis};
+    use super::{cap_len, clamp_axis, pick_rect, units, Anchor, Area, PickLayout};
+
+    #[test]
+    fn first_native_size_matches_the_start_preference() {
+        assert_eq!(PickLayout::for_rows(false, 8).size(), (152.0, 34.0));
+        assert_eq!(PickLayout::for_rows(true, 8).size(), (520.0, 476.0));
+    }
+
+    #[test]
+    fn chip_and_list_use_different_native_bounds_at_any_scale() {
+        for scale in [1.0, 1.25, 2.0] {
+            let area = Area { x: -1920.0, y: 25.0, w: 1920.0, h: 1000.0, scale };
+            for caret in [None, Some((-1920.0, 25.0, 2.0, 20.0)), Some((-10.0, 990.0, 2.0, 22.0))] {
+                let mut a = Anchor { caret, area, secure: false, layout: PickLayout::Chip };
+                for (layout, expected) in [(PickLayout::Chip, (152.0, 34.0)), (PickLayout::List(280.0), (520.0, 280.0)), (PickLayout::Chip, (152.0, 34.0))] {
+                    a.layout = layout;
+                    let (x, y, w, h) = pick_rect(&a);
+                    assert_eq!((w, h), expected);
+                    assert!(x >= area.x && x + units(&area, w) <= area.x + area.w);
+                    assert!(y >= area.y && y + units(&area, h) <= area.y + area.h);
+                }
+            }
+        }
+    }
 
     #[test]
     fn clamp_axis_when_panel_exceeds_work_area() {

@@ -36,6 +36,7 @@ export interface FinalizedRow {
 export interface Settings {
   channel: Channel; holdKey: string; holdCombo: Combo | null; tapShortcut: Shortcut | null; silence: number; silenceStop: boolean; streaming: boolean;
   liveText: boolean; mic: string; multi: Channel[]; lastPick: Channel | null; pickCounts: Partial<Record<Channel, number>>;
+  pickPanelStart: "remember" | "collapsed" | "expanded";
   soundEnabled: boolean; soundStart: string; soundProcessing: string; soundError: string;
   autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
   jev: JevConfig; llm: LlmConfig; historyEnabled: boolean; historyLimit: number; stripPunctuation: boolean;
@@ -58,6 +59,8 @@ export interface Model {
   recording: boolean; rows: Row[]; sel: number; jev?: "idle" | "busy" | "failed";
   finalized?: FinalizedRow | null; selFinal?: boolean; history?: HistoryView | null;
 }
+
+export interface PickModel extends Model { session: number; expanded: boolean }
 
 export const call = invoke;
 export const previewSound = (id: string) => call("preview_sound", { id });
