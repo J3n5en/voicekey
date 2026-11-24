@@ -24,9 +24,8 @@ pub enum Msg {
     Timeout { token: u64 },
     PickGrace { gen: u64, token: u64 },
     Flush,
-    PickChoose(usize),
-    PickChooseFinal,
-    PickKey(Special),
+    PickViewReady,
+    PickUi { session: u64, action: PickAction },
     CompareToggle,
     CompareStop,
     Meter(bool),
@@ -161,8 +160,24 @@ pub struct Row {
     ms: Option<u64>,
 }
 
+/// 来自候选浮窗的动作必须属于当前会话；折叠时只有展开按钮可用。
+#[derive(Clone, Copy)]
+pub enum PickAction {
+    Expand(bool),
+    Measure(f64),
+    Choose(usize),
+    ChooseFinal,
+    Key(Special),
+}
+
+impl PickAction {
+    fn allowed(self, expanded: bool) -> bool { expanded || matches!(self, Self::Expand(_)) }
+}
+
 #[derive(Clone, Serialize)]
 struct Model<'a> {
+    session: u64,
+    expanded: bool,
     recording: bool,
     rows: &'a [Row],
     sel: usize,
@@ -591,16 +606,11 @@ impl Ctl {
             Msg::JevDone { gen, token, res } => self.jev_done(gen, token, res),
             Msg::LlmDelta { gen, token, text } => self.llm_delta(gen, token, text),
             Msg::LlmDone { gen, token, res } => self.llm_done(gen, token, res),
-            Msg::PickChoose(i) if self.mode == Mode::Pick && self.history.is_some() => self.choose_history(i),
-            Msg::PickChoose(i) if self.mode == Mode::Pick => {
-                self.take_manual();
-                self.sel_final = false;
-                self.choose(i)
+            Msg::PickViewReady if self.mode == Mode::Pick => {
+                ui::present_pick(&self.app);
+                self.emit_rows_now();
             }
-            Msg::PickChooseFinal if self.mode == Mode::Pick => {
-                self.choose_final()
-            }
-            Msg::PickKey(k) if self.mode == Mode::Pick => self.pick_key(k),
+            Msg::PickUi { session, action } if self.mode == Mode::Pick && session == self.gen => self.pick_ui(action),
             Msg::CompareToggle => match self.mode {
                 Mode::Compare if self.recording => self.end(),
                 Mode::Idle => self.begin_multi(Mode::Compare, Channel::engines(), false),
@@ -687,7 +697,7 @@ impl Ctl {
                     self.abort(None)
                 }
             }
-            HotEvent::Pick(k) if self.mode == Mode::Pick => self.pick_key(k),
+            HotEvent::Pick(k) if self.mode == Mode::Pick && self.hk.picking.load(Ordering::Relaxed) => self.pick_key(k),
             HotEvent::Pick(_) => {}
             HotEvent::Recorded(sc) => {
                 let _ = self.app.emit_to("main", "recorded", sc.clone());
@@ -993,15 +1003,18 @@ impl Ctl {
             .collect();
         self.fan_out(audio, targets);
         if mode == Mode::Pick {
-            let last = self.settings().last_pick;
+            let (last, expanded) = {
+                let s = self.settings.read().unwrap();
+                (s.last_pick, s.pick_starts_expanded())
+            };
             if let Some(i) = self.rows.iter().position(|r| Some(r.channel) == last && r.state == RowState::Listen) {
                 self.sel = i;
                 self.user_picked = true;
             }
             self.front = pf::front_app();
-            self.hk.picking.store(true, Ordering::Relaxed);
-            // 安全输入下钩子收不到方向键/数字：改为让面板取得焦点自己接收按键
-            ui::pick_show(&self.app, pf::caret(), self.rows.len(), pf::secure_input());
+            // 原生窗口首帧与选键拦截使用同一次快照；同一会话续录时保留当前状态。
+            self.hk.picking.store(expanded, Ordering::Relaxed);
+            ui::pick_show(&self.app, pf::caret(), pf::secure_input(), expanded, self.rows.len());
         }
         self.emit_rows();
     }
@@ -1311,6 +1324,7 @@ impl Ctl {
         if self.mode == Mode::Pick {
             self.hk.picking.store(false, Ordering::Relaxed);
             ui::pick_hide(&self.app);
+            let _ = self.app.emit_to("pick", "pick-hidden", self.gen);
         }
         self.history = None;
         self.mode = Mode::Idle;
@@ -1320,6 +1334,31 @@ impl Ctl {
         self.finalized
             .as_ref()
             .is_some_and(|f| matches!(f.state, LlmState::Ready | LlmState::Skipped) && !f.text.is_empty())
+    }
+
+    fn pick_ui(&mut self, action: PickAction) {
+        let expanded = self.hk.picking.load(Ordering::Relaxed);
+        if !action.allowed(expanded) { return; }
+        match action {
+            PickAction::Expand(on) if on != expanded => {
+                // 看一眼列表不是手选：不调用 take_manual、end 或 advance_pick。
+                self.hk.picking.store(on, Ordering::Relaxed);
+                ui::pick_expand(&self.app, on, self.rows.len());
+                self.emit_rows_now();
+                let mut s = self.settings.write().unwrap();
+                if s.note_pick_toggle(on) { s.save(); }
+            }
+            PickAction::Expand(_) => {}
+            PickAction::Measure(height) => ui::pick_resize(&self.app, height),
+            PickAction::Choose(i) if self.history.is_some() => self.choose_history(i),
+            PickAction::Choose(i) => {
+                self.take_manual();
+                self.sel_final = false;
+                self.choose(i);
+            }
+            PickAction::ChooseFinal => self.choose_final(),
+            PickAction::Key(k) => self.pick_key(k),
+        }
     }
 
     fn pick_key(&mut self, k: Special) {
@@ -1747,8 +1786,15 @@ impl Ctl {
             }
             return;
         }
+        self.emit_rows_now();
+    }
+
+    /// 布局切换立即同步，不必等下一帧转写才显示按钮或列表。
+    fn emit_rows_now(&mut self) {
         self.last_emit = Instant::now();
         let model = Model {
+            session: self.gen,
+            expanded: self.hk.picking.load(Ordering::Relaxed),
             recording: self.recording,
             rows: &self.rows,
             sel: self.sel,
@@ -1800,6 +1846,16 @@ mod tests {
     use super::{jev_finals, seal_slow_rows, JevConfig, PickProgress, Row, RowState, Segments, SelectionThreshold};
     use std::time::{Duration, Instant};
     use crate::settings::Channel;
+
+    #[test]
+    fn only_layout_controls_are_active_while_folded() {
+        use super::{PickAction, Special};
+        assert!(PickAction::Expand(true).allowed(false));
+        for a in [PickAction::Choose(0), PickAction::ChooseFinal, PickAction::Key(Special::Enter), PickAction::Measure(900.0)] {
+            assert!(!a.allowed(false));
+            assert!(a.allowed(true));
+        }
+    }
 
     fn row(channel: Channel, state: RowState, text: &str) -> Row {
         Row { channel, text: text.into(), state, ms: None }

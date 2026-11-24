@@ -1,32 +1,46 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { call, on, applyLook, diffMark, esc, CH, type AppInfo, type Model, type Settings } from "./lib/api";
+  import { call, on, applyLook, diffMark, esc, CH, type AppInfo, type PickModel, type Settings } from "./lib/api";
   import ChIcon from "./lib/ChIcon.svelte";
   import Wave from "./lib/Wave.svelte";
 
-  let model = $state<Model>({ recording: false, rows: [], sel: 0 });
+  const empty = (session = 0): PickModel => ({ session, expanded: false, recording: false, rows: [], sel: 0 });
+  let model = $state<PickModel>(empty());
+  const action = (name: string, args: Record<string, unknown> = {}) => call(name, { session: model.session, ...args });
+  const expand = (expanded: boolean) => action("pick_expand", { expanded });
   let level = $state(0);
   let shake = $state(-1);
   let platform = $state("mac");
-  let root: HTMLDivElement;
+  let root = $state<HTMLDivElement>();
   const drafts = new Map<string, string>();
   const finals = new Map<string, string>();
 
   const waiting = $derived(model.rows.filter((r) => r.state === "wait" || r.state === "listen").length);
   const done = $derived(model.rows.filter((r) => r.state === "final").length);
+  const participating = $derived(model.rows.filter((r) => r.state !== "skip").length);
+  const phase = $derived(!model.rows.length ? "准备中" : model.recording ? "录音中" :
+    model.jev === "busy" ? "评选中" : model.finalized?.state === "busy" ? "定稿中" :
+    model.jev === "failed" || model.finalized?.state === "failed" ? (done ? "待选择" : "无结果") :
+    waiting ? "识别中" : done ? "待选择" : "无结果");
+  const detail = $derived(phase === "待选择" ? "点开选择" : phase === "无结果" ? "点开查看" : `${participating} 路`);
   // 路数越多单条越矮，长文本在条目内滚动，避免把后面的候选顶出屏幕
   const count = $derived(model.history ? model.history.items.length : model.rows.length);
   const lines = $derived(count <= 2 ? 8 : count === 3 ? 5 : 4);
   const streaming = new Set<string>();
 
-  function receive(m: Model) {
-    if (m.recording && m.rows.every((r) => !r.text || r.state === "skip")) {
+  let reportedHeight = 0;
+  function receive(m: PickModel) {
+    if (m.session < model.session) return;
+    if (m.session !== model.session || m.expanded !== model.expanded) reportedHeight = 0;
+    if (m.session !== model.session || (m.recording && m.rows.every((r) => !r.text || r.state === "skip"))) {
       drafts.clear();
       finals.clear();
+      streaming.clear();
+      shake = -1;
     }
     for (const r of m.rows) {
       if (r.state === "final") {
-        if (!finals.has(r.channel)) finals.set(r.channel, diffMark(drafts.get(r.channel) ?? "", r.text));
+        if (m.expanded && !finals.has(r.channel)) finals.set(r.channel, diffMark(drafts.get(r.channel) ?? "", r.text));
       } else {
         drafts.set(r.channel, r.text);
         finals.delete(r.channel);
@@ -44,8 +58,10 @@
   }
 
   async function report() {
+    if (!model.expanded) return;
+    const session = model.session;
     await tick();
-    if (!root) return;
+    if (!root || !model.expanded || session !== model.session) return;
     if (model.history) root.querySelector(".row.active")?.scrollIntoView({ block: "nearest" });
     for (const node of root.querySelectorAll(".text")) {
       if (!(node instanceof HTMLElement)) continue;
@@ -61,7 +77,10 @@
     const natural = list instanceof HTMLElement ? box - list.getBoundingClientRect().height + list.scrollHeight : box;
     // 10px 上下边距，再留 8px 给缩放取整；历史列表限高，超出在列表内滚动
     const h = Math.ceil(natural) + 28;
-    call("pick_resize", { height: model.history ? Math.min(h, 520) : h });
+    const height = model.history ? Math.min(h, 520) : h;
+    if (height === reportedHeight) return;
+    reportedHeight = height;
+    void action("pick_resize", { height });
   }
 
   onMount(() => {
@@ -71,13 +90,17 @@
     });
     // 面板仅在安全输入开启时取得焦点，此时由这里接收选择按键
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || (e.key === "Tab" && e.shiftKey)) return;
+      if (!model.expanded || e.repeat || e.metaKey || e.ctrlKey || e.altKey || (e.key === "Tab" && e.shiftKey)) return;
+      if ((e.key === "Enter" || e.key === " ") && e.target instanceof Element && e.target.closest("[data-fold]")) return;
       e.preventDefault();
-      call("pick_key", { key: e.key });
+      void action("pick_key", { key: e.key });
     };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", report);
+    let mounted = true;
     const un = [
-      on<Model>("pick", receive),
+      on<PickModel>("pick", receive),
+      on<number>("pick-hidden", (session) => receive(empty(session))),
       on<number>("level", (v) => (level = v)),
       on<Settings>("settings", (s) => applyLook(platform, s.theme)),
       on<number>("pick-shake", (i) => {
@@ -85,20 +108,37 @@
         tick().then(() => (shake = i));
       }),
     ];
+    void Promise.all(un).then(() => { if (mounted) return call("pick_ready"); });
     return () => {
+      mounted = false;
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", report);
       un.forEach((p) => p.then((f) => f()));
     };
   });
 </script>
 
+{#snippet foldButton()}
+  <button type="button" class="fold" data-fold aria-label="收起候选" aria-expanded="true" onclick={() => expand(false)}>
+    收起<svg aria-hidden="true" width="10" height="10" viewBox="0 0 12 12"><path d="m3 7.5 3-3 3 3" /></svg>
+  </button>
+{/snippet}
+
+{#if !model.expanded}
+  <button type="button" class="chip" class:listening={model.recording} class:attention={phase === "待选择" || phase === "无结果"}
+    aria-label={`展开候选：${phase}，${participating} 路`} aria-expanded="false" title="展开候选，不停止录音"
+    disabled={!model.rows.length} onclick={() => expand(true)}>
+    <span class="signal" aria-hidden="true"></span><b>{phase}</b><span class="detail">{detail}</span>
+    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="m4.5 2.5 3.5 3.5-3.5 3.5" /></svg>
+  </button>
+{:else}
 <div class="pick" bind:this={root} style:--lines={lines}>
   {#if model.history}
   {@const h = model.history}
   <div class="hd">
     <span class="htitle">识别历史</span>
     <span class="hsub">{h.enabled ? `最近 ${h.items.length} 条` : ""}</span>
-    <button class="close" title="返回候选（Tab / Esc）" aria-label="返回候选" onclick={() => call("pick_key", { key: "Escape" })}>
+    <button class="close" title="返回候选（Tab / Esc）" aria-label="返回候选" onclick={() => action("pick_key", { key: "Escape" })}>
       <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
     </button>
   </div>
@@ -106,7 +146,7 @@
   {#each h.items as e, i (`${e.ts}-${i}`)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="row" class:active={i === h.sel} onclick={() => call("pick_choose", { index: i })}>
+    <div class="row" class:active={i === h.sel} onclick={() => action("pick_choose", { index: i })}>
       <span class="num">{i < 9 ? i + 1 : "•"}</span>
       <span class="name"><span class="sdot" class:s-final={e.delivered} class:s-error={!e.delivered}></span><ChIcon ch={e.channel} size="xs" />{CH[e.channel]?.short ?? e.channel}</span>
       <div class="text">{e.text}</div>
@@ -119,13 +159,14 @@
   <div class="ft">
     {#if h.items.length}<span><kbd>1-{Math.min(h.items.length, 9)}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span>{/if}
     <span><kbd>Tab</kbd>返回候选</span>
+    {@render foldButton()}
   </div>
   {:else}
   <div class="hd">
     {#if model.recording}<span class="rec"></span>{/if}
     <div class="wave"><Wave level={model.recording ? level : 0} idle={!model.recording} height={26} /></div>
     <span class="state">
-      {#if model.recording}聆听中 · 松开结束
+      {#if model.recording}录音中
       {:else if model.finalized?.state === "busy"}<span class="spinner"></span>LLM 融合定稿中 · 可手选
       {:else if model.finalized?.state === "failed"}<span class="err">LLM 定稿失败{model.finalized.note ? `，${model.finalized.note}` : "，请手动选择"}</span>
       {:else if model.finalized?.state === "skipped"}<span class="ok">● 已省去 LLM · 按回车上屏</span>
@@ -135,7 +176,7 @@
       {:else if waiting}<span class="spinner"></span>定稿中 {done}/{model.rows.length}
       {:else}<span class="ok">● 全部完成</span>{/if}
     </span>
-    <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => call("pick_key", { key: "Escape" })}>
+    <button class="close" title="关闭（Esc）" aria-label="关闭" onclick={() => action("pick_key", { key: "Escape" })}>
       <svg viewBox="0 0 12 12" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
     </button>
   </div>
@@ -149,7 +190,7 @@
       class:active={!!model.selFinal}
       class:disabled={f.state === "idle" || f.state === "busy" || f.state === "failed"}
       onclick={() => {
-        if (f.state === "ready" || f.state === "skipped") call("pick_choose_final");
+        if (f.state === "ready" || f.state === "skipped") action("pick_choose_final");
       }}
     >
       <span class="num star">✦</span>
@@ -183,7 +224,7 @@
   {#each model.rows as r, i (r.channel)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="row" class:active={!model.selFinal && i === model.sel} class:shake={i === shake} onclick={() => call("pick_choose", { index: i })}>
+    <div class="row" class:active={!model.selFinal && i === model.sel} class:shake={i === shake} onclick={() => action("pick_choose", { index: i })}>
       <span class="num">{i + 1}</span>
       <span class="name"><span class="sdot s-{r.state}"></span><ChIcon ch={r.channel} size="xs" />{CH[r.channel].short}</span>
       <div
@@ -206,13 +247,26 @@
   {/each}
   </div>
   <div class="ft">
-    <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span><button class="ft-btn" onclick={() => call("pick_key", { key: "Tab" })}><kbd>Tab</kbd>历史</button>
+    <span><kbd>1-{model.rows.length}</kbd>选择</span><span><kbd>↑↓</kbd>切换</span><span><kbd>↵</kbd>上屏</span><span><kbd>Esc</kbd>取消</span><button class="ft-btn" onclick={() => action("pick_key", { key: "Tab" })}><kbd>Tab</kbd>历史</button>
     {#if model.recording}<span class="tip">可提前预选</span>{/if}
+    {@render foldButton()}
   </div>
   {/if}
 </div>
+{/if}
 
 <style>
+  .chip { width: min(100vw, 152px); height: min(100vh, 34px); display: flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--fg); cursor: pointer; white-space: nowrap; }
+  .chip b { font-size: 12.5px; font-weight: 600; }
+  .chip .detail { flex: 1; color: var(--fg2); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
+  .signal { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--accent); }
+  .chip.listening .signal { background: var(--err); }
+  .chip.attention .signal { background: var(--warn); }
+  .chip svg, .fold svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .chip svg { color: var(--fg2); }
+  .fold { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 52px; min-height: 26px; margin-left: auto; padding: 2px 7px; border: 1px solid var(--line); border-radius: 4px; background: transparent; font-size: 12px; color: var(--fg); cursor: pointer; }
+  .chip:hover, .fold:hover { background: var(--card2); }
+  .chip:focus-visible, .fold:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .pick {
     margin: 10px; width: calc(100% - 20px); max-height: calc(100vh - 20px); display: flex; flex-direction: column;
     border-radius: 14px; background: var(--pop); backdrop-filter: blur(36px) saturate(1.8);
@@ -244,12 +298,12 @@
   .text.muted { color: var(--fg3); font-size: 13px; }
   .text.bad { color: var(--err); }
   .meta { font-size: 11px; color: var(--fg3); white-space: nowrap; margin-top: 3px; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
-  .ft { display: flex; gap: 14px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); flex: none; }
+  .ft { display: flex; align-items: center; gap: 10px; padding: 3px 10px 3px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); flex: none; }
   .ft kbd { font: inherit; padding: 0 4px; border-radius: 4px; border: 1px solid var(--line); color: var(--fg2); margin-right: 3px; }
   .ft-btn { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
   .ft-btn:hover { color: var(--fg); }
   .htitle { font-size: 12.5px; font-weight: 600; color: var(--fg); }
   .hsub { flex: 1; font-size: 11.5px; color: var(--fg3); }
   .empty { padding: 20px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--fg3); text-align: center; }
-  .tip { margin-left: auto; }
+  .tip { flex: 1; text-align: right; }
 </style>

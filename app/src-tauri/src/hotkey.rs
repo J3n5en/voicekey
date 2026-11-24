@@ -539,6 +539,22 @@ mod tests {
     }
 
     #[test]
+    fn folded_picker_leaves_selection_keys_to_the_foreground_app() {
+        let sh = Shared::default();
+        let st = Arc::new(Mutex::new(State::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for expanded in [false, true, false] {
+            sh.picking.store(expanded, Ordering::Relaxed);
+            for key in [Special::Up, Special::Down, Special::Enter, Special::Tab, Special::Digit(8)] {
+                let code = (0..256).find(|&c| pf::special(c) == Some(key)).unwrap();
+                assert_eq!(handle(&sh, &st, &tx, &ev(KeyKind::Down, code, 0)), expanded);
+                if expanded { assert!(matches!(rx.try_recv(), Ok(HotEvent::Pick(k)) if k == key)); }
+                assert!(rx.try_recv().is_err());
+            }
+        }
+    }
+
+    #[test]
     fn picking_intercepts_only_bare_tab() {
         let tab = (0..256).find(|&c| pf::special(c) == Some(Special::Tab)).unwrap();
         let sh = Shared::default();

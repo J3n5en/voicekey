@@ -11,7 +11,7 @@ mod ui;
 mod update;
 mod wtoffline;
 
-use controller::Msg;
+use controller::{Msg, PickAction};
 use hotkey::Shared;
 use serde_json::json;
 use settings::{Channel, Settings};
@@ -155,7 +155,7 @@ fn set_settings(app: AppHandle, mut settings: Settings) {
                 || current.lower_system_volume_percent != new_ducking_percent,
         )
     };
-    update_settings(&app, |s| *s = settings);
+    update_settings(&app, |s| s.apply_settings_form(settings));
     if mic_changed {
         send(&app, Msg::RefreshMeter);
     }
@@ -229,17 +229,27 @@ fn record_shortcut(app: AppHandle, on: bool, hold: Option<bool>) {
 }
 
 #[tauri::command]
-fn pick_choose(app: AppHandle, index: usize) {
-    send(&app, Msg::PickChoose(index));
+fn pick_ready(app: AppHandle) {
+    send(&app, Msg::PickViewReady);
 }
 
 #[tauri::command]
-fn pick_choose_final(app: AppHandle) {
-    send(&app, Msg::PickChooseFinal);
+fn pick_expand(app: AppHandle, session: u64, expanded: bool) {
+    send(&app, Msg::PickUi { session, action: PickAction::Expand(expanded) });
 }
 
 #[tauri::command]
-fn pick_key(app: AppHandle, key: String) {
+fn pick_choose(app: AppHandle, session: u64, index: usize) {
+    send(&app, Msg::PickUi { session, action: PickAction::Choose(index) });
+}
+
+#[tauri::command]
+fn pick_choose_final(app: AppHandle, session: u64) {
+    send(&app, Msg::PickUi { session, action: PickAction::ChooseFinal });
+}
+
+#[tauri::command]
+fn pick_key(app: AppHandle, session: u64, key: String) {
     use voicekey_platform::Special;
     let k = match key.as_str() {
         "ArrowUp" => Special::Up,
@@ -252,12 +262,12 @@ fn pick_key(app: AppHandle, key: String) {
             _ => return,
         },
     };
-    send(&app, Msg::PickKey(k));
+    send(&app, Msg::PickUi { session, action: PickAction::Key(k) });
 }
 
 #[tauri::command]
-fn pick_resize(app: AppHandle, height: f64) {
-    ui::pick_resize(&app, height);
+fn pick_resize(app: AppHandle, session: u64, height: f64) {
+    send(&app, Msg::PickUi { session, action: PickAction::Measure(height) });
 }
 
 #[tauri::command]
@@ -335,7 +345,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
-            pick_choose, pick_choose_final, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
+            pick_ready, pick_expand, pick_choose, pick_choose_final, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
             update_check, update_install, jev_test, llm_test, llm_check_url, llm_preview_prompt,
             preview_sound, list_sounds,
             account_save, account_login, account_logout, get_recognition_history, clear_recognition_history
