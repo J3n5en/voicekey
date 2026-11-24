@@ -94,10 +94,10 @@
   }
 </script>
 
-<h3>智能选择（Jev）</h3>
+<h3>智能选择（Jev / OpenAI Decisions）</h3>
 <div class="group">
   <div class="row">
-    <div class="lbl">说完后由 Jev 自动挑一条上屏<small>仅多渠道且 Jev 启用、配置有效时生效；关闭或配置不可用时由你手选；LLM 定稿配置完成时由 LLM 接管；只发送转写文字，不发渠道名；密钥只存本机</small></div>
+    <div class="lbl">从多渠道原始转写中挑一条上屏，不改写<small>使用 OpenAI Decisions 时选「官方格式」，并关闭上方的 LLM 融合定稿。只发送候选文字，不发送音频或渠道名；选择失败时由你手选。</small></div>
     <div class="segc">
       {#each MODES as [k, v]}<button class:on={d.mode === k} onclick={() => setMode(k)}>{v}</button>{/each}
     </div>
@@ -108,11 +108,11 @@
       <input class="in" type="password" autocomplete="off" spellcheck="false" aria-label="API Key" placeholder="apikey_xxx" bind:value={d.key} onblur={commit} />
     </div>
     <div class="row">
-      <div class="lbl">端点<small>留空使用官方端点；可只填域名，自动补全为 …/v1/systemone</small></div>
+      <div class="lbl">端点<small>Jev 留空使用默认端点；使用 OpenAI Key 时请填写 https://api.openai.com/v1/decisions</small></div>
       <input class="in" type="text" spellcheck="false" aria-label="端点" placeholder="https://api.typesafe.ai" bind:value={d.endpoint} onblur={commit} />
     </div>
     <div class="row">
-      <div class="lbl">模型<small>留空使用默认模型</small></div>
+      <div class="lbl">模型<small>留空时，OpenAI Decisions 使用 gpt-6-luna，Jev 使用 jev-latest</small></div>
       <input class="in" type="text" spellcheck="false" aria-label="模型" placeholder="jev-latest" bind:value={d.model} onblur={commit} />
     </div>
   {:else if d.mode === "yce"}
@@ -125,7 +125,7 @@
         </div>
       {/each}
       <button class="btn" onclick={() => rows.push(blank())}>添加一组</button>
-      <small>从上到下依次尝试，一组用不了自动换下一组；地址可留空（用官方端点），只填域名会自动补全为 …/v1/systemone，以 /decisions 结尾按 decisions 协议发送</small>
+      <small>从上到下依次尝试，一组用不了自动换下一组；地址可留空（用官方端点），只填域名会自动补全为 …/v1/systemone，OpenAI 官方 /v1/decisions 使用 OpenAI 协议，其他 /decisions 保留 Jev 协议</small>
       {#if !hasPool}<small class="err">至少填一组密钥，否则不会触发</small>{/if}
     </div>
   {/if}
