@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { app, save } from "../lib/store.svelte";
+  import { onDestroy } from "svelte";
+  import { app, save, setRecordingId } from "../lib/store.svelte";
   import { call, holdName } from "../lib/api";
 
   const s = $derived(app.s!);
@@ -13,19 +14,79 @@
   let target = $state<"tap" | "hold">("tap");
   const rec = (t: "tap" | "hold") => app.recording && target === t;
 
-  function record(t: "tap" | "hold") {
-    const on = !rec(t);
+  let recordingId = 0;
+  let revision = 0;
+  let pending = Promise.resolve();
+  let error = $state("");
+
+  // WebView 的按下/松开不能越过开始或取消命令，尤其是只轻点一下的单修饰键。
+  function enqueue(job: () => Promise<void>) {
+    const current = revision;
+    pending = pending.then(async () => { if (revision === current) await job(); }).catch(async () => {
+      if (revision !== current) return;
+      ++revision;
+      app.recording = false;
+      error = "未能连接快捷键录制器，请重试";
+      await call("record_shortcut", { on: false }).catch(() => {});
+    });
+  }
+
+  function setRecording(t: "tap" | "hold", on: boolean) {
+    const current = ++revision;
     target = t;
+    setRecordingId(0);
     app.recording = on;
-    call("record_shortcut", { on, hold: t === "hold" });
+    error = "";
+    enqueue(async () => {
+      const id = await call<number>("record_shortcut", { on, hold: t === "hold" });
+      if (revision === current) { recordingId = id; setRecordingId(id); }
+    });
+  }
+  const record = (t: "tap" | "hold") => setRecording(t, !rec(t));
+  const cancel = () => { if (app.recording) setRecording(target, false); };
+  onDestroy(cancel);
+
+  async function useRightCtrl() {
+    if (app.recording) {
+      cancel();
+      const current = revision;
+      await pending;
+      if (revision !== current) return;
+    }
+    save({ tapShortcut: { code: 0xa3, mods: 0, name: "右 Ctrl" } });
+  }
+
+  const winModifiers: Record<string, number> = { ShiftLeft: 0xa0, ShiftRight: 0xa1, ControlLeft: 0xa2, ControlRight: 0xa3,
+    AltLeft: 0xa4, AltRight: 0xa5, MetaLeft: 0x5b, MetaRight: 0x5c };
+  function forward(e: KeyboardEvent | MouseEvent, down: boolean) {
+    if (mac || !app.recording) return;
+    let code: number;
+    let symbol: string | null = null;
+    if (e instanceof KeyboardEvent) {
+      if (e.isComposing || e.keyCode === 229) return;
+      code = winModifiers[e.code] ?? e.keyCode;
+      if (code < 1 || code > 254) return;
+      if (e.key.length === 1) symbol = e.key;
+    } else {
+      if (![1, 3, 4].includes(e.button)) return;
+      code = 0x10000 + (e.button === 1 ? 2 : e.button);
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    if (e instanceof KeyboardEvent && e.repeat) return;
+    const mods = +e.ctrlKey | (+e.altKey << 1) | (+e.shiftKey << 2) | (+e.metaKey << 3);
+    enqueue(async () => { if (app.recording) await call("record_shortcut_input", { id: recordingId, code, down, mods, symbol }); });
   }
 </script>
+
+<svelte:window onkeydowncapture={(e) => forward(e, true)} onkeyupcapture={(e) => forward(e, false)}
+  onmousedowncapture={(e) => forward(e, true)} onmouseupcapture={(e) => forward(e, false)} onblur={cancel} />
 
 <h2>快捷键</h2>
 <div class="sub">两种方式可同时使用；同一个修饰键也可以既长按又点按。也支持鼠标中键和侧键，录制时按一下即可。</div>
 <div class="keys">
   <div class="kcard">
-    <div class="art"><span class="kbd press">{hold}</span><span class="hint">按住说话 · 松开结束</span></div>
+    <button type="button" class="art" aria-label="录制长按快捷键" aria-pressed={rec("hold")} onclick={() => record("hold")}><span class="kbd press">{rec("hold") ? "录制中" : hold}</span><span class="hint">{rec("hold") ? "按住组合，再松开" : "按住说话 · 松开结束"}</span></button>
     <h4>长按说话</h4>
     <small>适合短句，松手即识别完成</small>
     <select class="sel" value={s.holdKey} onchange={(e) => save({ holdKey: e.currentTarget.value })}>
@@ -37,35 +98,52 @@
     </button>
   </div>
   <div class="kcard">
-    <div class="art"><span class="kbd tap">{tap}</span><span class="hint">点一下开始 · {s.silenceStop ? "停顿自动结束" : "再点一下结束"}</span></div>
+    <button type="button" class="art" aria-label="录制点按快捷键" aria-pressed={rec("tap")} onclick={() => record("tap")}>
+      <span class="kbd tap">{rec("tap") ? "录制中" : tap}</span>
+      <span class="hint">{rec("tap") ? "按下并松开你的快捷键" : `点一下开始 · ${s.silenceStop ? "停顿自动结束" : "再点一下结束"}`}</span>
+    </button>
     <h4>点按说话</h4>
-    <small>适合长段口述，再点一次可提前结束</small>
+    <small>{!s.tapShortcut ? `点下方录制框，再单独按下并松开${mac ? "右 ⌘" : "右 Ctrl"}或你想用的键` : s.silenceStop ? "停顿自动结束，也可再点一次提前结束" : `点一下 ${tap} 开始，再点一下结束`}</small>
     <div class="recrow">
       <button class="rec" class:active={rec("tap")} onclick={() => record("tap")}>
         {#if rec("tap")}请按下快捷键或鼠标键…（Esc 取消）{:else}<span class="kbd mini">{tap}</span>点击后按下新的快捷键{/if}
       </button>
       {#if s.tapShortcut && !rec("tap")}<button class="clear" title="关闭点按快捷键" onclick={() => save({ tapShortcut: null })}>✕</button>{/if}
     </div>
+    {#if !mac && (s.tapShortcut?.code !== 0xa3 || s.tapShortcut.mods !== 0)}
+      <button type="button" class="btn preset" onclick={useRightCtrl}>直接用右 Ctrl</button>
+    {/if}
   </div>
 </div>
-{#if s.tapShortcut}
-  <h3>点按模式</h3>
-  <div class="group">
-    <div class="row">
-      <div class="lbl">静音自动结束<small>{s.silenceStop ? "停顿超过该时长视为说完" : "已关闭，需再点一次快捷键结束"}</small></div>
-      {#if s.silenceStop}
-        <input type="range" min="1" max="5" step="0.5" value={s.silence} oninput={(e) => save({ silence: +e.currentTarget.value })} />
-        <b class="val">{s.silence} 秒</b>
-      {/if}
-      <button class="sw" class:on={s.silenceStop} onclick={() => save({ silenceStop: !s.silenceStop })} aria-label="静音自动结束"></button>
+{#if error}<p role="alert">{error}</p>{/if}
+<h3>点按模式</h3>
+<div class="group">
+  <div class="row">
+    <div class="lbl">如何结束录音<small>{!s.tapShortcut ? "可以先选结束方式；绑定上方的点按快捷键后生效。" : s.silenceStop ? "停顿超过设定时长即结束，也可手动提前结束" : "免按口述：停顿、移动鼠标或滚动不会结束录音。再按启动录音的快捷键即可结束。"}</small></div>
+    <div class="segc" role="group" aria-label="点按结束方式">
+      <button class:on={s.silenceStop} aria-pressed={s.silenceStop} onclick={() => save({ silenceStop: true })}>静音自动结束</button>
+      <button class:on={!s.silenceStop} aria-pressed={!s.silenceStop} onclick={() => save({ silenceStop: false })}>再按同一快捷键结束</button>
     </div>
   </div>
-{/if}
+  {#if !s.silenceStop && s.channel !== "all" && s.streaming}
+    <div class="row"><div class="lbl"><small>如需再按结束后才一次性输入，在「输出」中关闭「边说边上屏」。</small></div></div>
+  {/if}
+  {#if s.silenceStop}
+    <div class="row">
+      <label class="lbl" for="tap-silence">停顿时长</label>
+      <input id="tap-silence" type="range" min="1" max="5" step="0.5" value={s.silence} oninput={(e) => save({ silence: +e.currentTarget.value })} />
+      <b class="val">{s.silence} 秒</b>
+    </div>
+  {/if}
+</div>
 
 <style>
   .keys { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .kcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
-  .art { height: 86px; border-radius: var(--rs); background: var(--card2); display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px; }
+  .art { width: 100%; height: 86px; border: 0; border-radius: var(--rs); background: var(--card2); display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
+  .art[aria-pressed="true"] { outline: 2px solid var(--accent); color: var(--accent); }
+  .preset { margin-top: 8px; }
+  [role="alert"] { color: var(--err); }
   .hint { color: var(--fg3); }
   .kbd { min-width: 44px; height: 36px; padding: 0 10px; border-radius: 7px; background: var(--card); border: 1px solid var(--line); border-bottom-width: 3px; display: grid; place-items: center; font-weight: 600; font-size: 13px; white-space: nowrap; }
   .kbd.mini { height: 24px; min-width: 0; font-size: 12px; border-bottom-width: 2px; }

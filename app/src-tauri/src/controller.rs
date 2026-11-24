@@ -689,20 +689,22 @@ impl Ctl {
             }
             HotEvent::Pick(k) if self.mode == Mode::Pick => self.pick_key(k),
             HotEvent::Pick(_) => {}
-            HotEvent::Recorded(sc) => {
-                let _ = self.app.emit_to("main", "recorded", sc.clone());
+            HotEvent::Recorded(id, sc) => {
+                if !self.hk.is_current_recording(id) { return; }
                 if let Some(sc) = sc {
                     crate::update_settings(&self.app, |s| s.tap_shortcut = Some(sc));
                 }
+                let _ = self.app.emit_to("main", "recorded", id);
             }
-            HotEvent::RecordedHold(c) => {
-                let _ = self.app.emit_to("main", "recorded", c.is_some());
+            HotEvent::RecordedHold(id, c) => {
+                if !self.hk.is_current_recording(id) { return; }
                 if let Some(c) = c {
                     crate::update_settings(&self.app, |s| {
                         s.hold_key = crate::settings::CUSTOM_HOLD.into();
                         s.hold_combo = Some(c);
                     });
                 }
+                let _ = self.app.emit_to("main", "recorded", id);
             }
         }
     }

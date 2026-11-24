@@ -26,6 +26,7 @@ use voicekey_platform::{self as pf, perm, MicStatus};
 pub struct AppState {
     pub settings: Arc<RwLock<Settings>>,
     pub hk: Arc<Shared>,
+    pub hot_tx: UnboundedSender<hotkey::HotEvent>,
     pub tx: UnboundedSender<Msg>,
     pub qwen: Arc<QwenEngine>,
 }
@@ -222,10 +223,17 @@ fn microphones() -> Vec<String> {
 }
 
 #[tauri::command]
-fn record_shortcut(app: AppHandle, on: bool, hold: Option<bool>) {
-    let hk = &app.state::<AppState>().hk;
-    hk.record_hold.store(hold.unwrap_or(false), Ordering::Relaxed);
-    hk.recording.store(on, Ordering::Relaxed);
+fn record_shortcut(window: tauri::WebviewWindow, on: bool, hold: Option<bool>) -> Result<u32, String> {
+    if window.label() != "main" { return Err("只能在设置窗口录制快捷键".into()); }
+    Ok(window.state::<AppState>().hk.set_recording(on, hold.unwrap_or(false)))
+}
+
+/// 仅补收 Windows 设置页在显式录制时收到的事件，不注入系统，也不触发录音。
+#[tauri::command]
+fn record_shortcut_input(window: tauri::WebviewWindow, id: u32, code: u32, down: bool, mods: u8, symbol: Option<char>) {
+    if window.label() != "main" { return; }
+    let st = window.state::<AppState>();
+    st.hk.window_input(id, code, down, mods, symbol, &st.hot_tx);
 }
 
 #[tauri::command]
@@ -334,6 +342,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            record_shortcut_input,
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
             pick_choose, pick_choose_final, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
             update_check, update_install, jev_test, llm_test, llm_check_url, llm_preview_prompt,
@@ -346,9 +355,9 @@ fn main() {
             let (tx, rx) = mpsc::unbounded_channel();
             let qwen = Arc::new(QwenEngine::default());
             let hk = Arc::new(Shared::default());
-            app.manage(AppState { settings: Arc::new(RwLock::new(settings.clone())), hk: hk.clone(), tx: tx.clone(), qwen: qwen.clone() });
-
             let (htx, mut hrx) = mpsc::unbounded_channel();
+            app.manage(AppState { settings: Arc::new(RwLock::new(settings.clone())), hk: hk.clone(), hot_tx: htx.clone(), tx: tx.clone(), qwen: qwen.clone() });
+
             hotkey::start(hk, htx);
             tauri::async_runtime::spawn(async move {
                 while let Some(e) = hrx.recv().await {
@@ -376,7 +385,7 @@ fn main() {
                 let st = w.state::<AppState>();
                 let _ = st.tx.send(Msg::Meter(false));
                 let _ = st.tx.send(Msg::CompareStop);
-                st.hk.recording.store(false, Ordering::Relaxed);
+                st.hk.set_recording(false, false);
             }
         })
         .build(tauri::generate_context!())
