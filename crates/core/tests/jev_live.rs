@@ -1,4 +1,4 @@
-//! Jev 真网验收（默认忽略）：用真实 key 走 yce 中继打 systemone 上游，整套只发 4 次请求。
+//! 智能选择真网验收（默认忽略）：旧 Jev 用例共 4 次请求；OpenAI 用例单独向官方发送 1 次示例请求。
 //! key 只从环境变量读，绝不落盘、不打日志：
 //! ```sh
 //! JEV_LIVE_KEY=<key> JEV_LIVE_ENDPOINT=https://yce.aigy.de/systemone/v1/systemone \
@@ -52,6 +52,18 @@ async fn official_format_test_call() {
         "官方格式 ok：index={} text={:?} alias={} ms={} key={}",
         t.index, t.text, t.alias, t.ms, t.key
     );
+}
+
+/// 只向固定的 OpenAI 官方端点发送内置示例，不读取池、不打印密钥或响应正文。
+#[tokio::test]
+#[ignore = "真实 OpenAI 调用：显式提供 OPENAI_API_KEY 后单独运行"]
+async fn openai_decisions_official_sample() {
+    let key = std::env::var("OPENAI_API_KEY").expect("未设置 OPENAI_API_KEY，未发起验收请求");
+    let mut cfg = official(&key, "https://api.openai.com/v1/decisions");
+    cfg.model = "gpt-6-luna".into();
+    let tested = jev::test(&cfg).await.expect("OpenAI Decisions 示例测试失败");
+    assert!(jev::SAMPLES.get(tested.index).is_some_and(|s| *s == tested.text));
+    println!("OpenAI Decisions 示例选择成功：候选 {}，耗时 {}ms", tested.index + 1, tested.ms);
 }
 
 /// yce 格式两行池：第一把坏 key 被上游拒后应换到第二把真 key（alias=live）
