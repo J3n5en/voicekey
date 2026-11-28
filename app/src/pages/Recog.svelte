@@ -9,6 +9,11 @@
 
   const s = $derived(app.s!);
   const engines = $derived(app.info!.channels.filter((c) => c !== "all"));
+  const loginChannels = $derived(
+    s.channel === "all"
+      ? engines.filter((c) => s.multi.includes(c) && LOGIN[c])
+      : LOGIN[s.channel] ? [s.channel] : [],
+  );
   const pick = (c: Channel) => save({ channel: c });
   const st = (c: Channel) => app.models[c] ?? { state: "missing" };
   const dl = (e: Event, c: Channel) => { e.stopPropagation(); call("model_download", { ch: c }); };
@@ -63,8 +68,8 @@
     </div>
   </button>
 </div>
+{#each loginChannels as ch (ch)}<Account {ch} />{/each}
 {#if s.channel === "all"}<Llm /><Jev />{/if}
-{#if LOGIN[s.channel]}{#key s.channel}<Account ch={s.channel} />{/key}{/if}
 {#if !app.info!.offline.supported}
   <div class="note">ⓘ 豆包离线仅支持 Apple 芯片的 Mac，其他设备可使用微信离线。</div>
 {/if}
